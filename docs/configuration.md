@@ -18,6 +18,21 @@ fail-soft; MySQL remains the durable source of truth.
 Every network node needs a unique `server-id` containing only letters, digits,
 dot, underscore, or hyphen.
 
+## Winner celebration
+
+Winner particles, sounds, and titles are always shown. Real firework rockets
+are optional and enabled by default:
+
+```yaml
+celebration:
+  fireworks:
+    enabled: true
+    count: 3
+```
+
+`count` is bounded to `1..5`. RusDuels tags its rockets and cancels their entity
+damage, so the visual celebration cannot hurt the winner or nearby players.
+
 ## MySQL TLS
 
 `mysql.ssl-mode` maps directly to current Connector/J security modes:
@@ -64,6 +79,9 @@ Own-inventory mode snapshots both players and restores their original location,
 inventory, armor, off-hand, health, hunger, experience, game mode, flight state,
 cursor item, selected slot, movement state, and potion effects after completion,
 disconnect, cancellation, or shutdown.
+
+The target browser shows 45 players per page, the kit picker shows 28 kits per
+page, and the leaderboard exposes the global top 100 in pages of 45 entries.
 
 Kit buttons use left click for BO1 and right click for BO3. Holding Shift makes
 the selected kit duel ranked, so it updates ELO. Own-inventory matches are

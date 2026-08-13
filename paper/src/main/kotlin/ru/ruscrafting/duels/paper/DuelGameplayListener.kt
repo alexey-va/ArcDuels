@@ -33,6 +33,11 @@ internal class DuelGameplayListener(
 ) : Listener {
     private val miniMessage = MiniMessage.miniMessage()
 
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onDecorativeFireworkDamage(event: EntityDamageByEntityEvent) {
+        if (CelebrationEffects.isDecorativeFirework(event.damager)) event.isCancelled = true
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     fun onPlayerDamage(event: EntityDamageByEntityEvent) {
         val victim = event.entity as? Player ?: return
@@ -52,6 +57,10 @@ internal class DuelGameplayListener(
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onLethalDamage(event: EntityDamageEvent) {
+        if (event is EntityDamageByEntityEvent && CelebrationEffects.isDecorativeFirework(event.damager)) {
+            event.isCancelled = true
+            return
+        }
         val player = event.entity as? Player ?: return
         val match = sessions.matchFor(player) ?: return
         if (match.state != MatchState.ACTIVE) {

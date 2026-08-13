@@ -29,4 +29,15 @@ class DuelInteractionPolicyTest : StringSpec({
         rulesForSelection(own, shiftClick = true, rightClick = true) shouldBe
             own.copy(bestOf = 3)
     }
+
+    "pagination clamps stale pages and never drops the final partial page" {
+        val items = (1..101).toList()
+
+        pageWindow(items, requestedPage = 0, pageSize = 45).items shouldBe (1..45).toList()
+        pageWindow(items, requestedPage = 2, pageSize = 45) shouldBe
+            PageWindow(index = 2, totalPages = 3, items = (91..101).toList())
+        pageWindow(items, requestedPage = 99, pageSize = 45).index shouldBe 2
+        pageWindow(emptyList<Int>(), requestedPage = 4, pageSize = 45) shouldBe
+            PageWindow(index = 0, totalPages = 1, items = emptyList())
+    }
 })

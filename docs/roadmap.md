@@ -8,10 +8,11 @@
 - countdown, combat, completion and recovery states;
 - local statistics plus optional MySQL persistence;
 - optional Redis result broadcasts and leaderboard invalidation;
-- duel browser, kit picker and leaderboard inventories;
+- paginated duel browser, kit picker and global top-100 leaderboard inventories;
 - casual/ranked BO1 and BO3 selection;
-- titles, action bars, sounds, particles and winner effects;
+- titles, action bars, sounds, particles and damage-free winner fireworks;
 - bounded arenas, command isolation and exact player-state restoration.
+- objective frames wired through the match state machine for future KOTH.
 
 ## 0.2 — competitive operations
 

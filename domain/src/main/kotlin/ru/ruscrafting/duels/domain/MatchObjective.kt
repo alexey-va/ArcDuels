@@ -1,14 +1,22 @@
 package ru.ruscrafting.duels.domain
 
-/** Extension boundary used later by objectives such as KOTH. */
+/** Platform-neutral observation supplied by a gameplay adapter on every objective tick. */
+data class ObjectiveFrame(
+    val elapsedTicks: Long,
+    val contenders: Set<PlayerId>,
+) {
+    init {
+        require(elapsedTicks >= 0) { "Elapsed ticks cannot be negative" }
+    }
+}
+
+/** Extension boundary for alternate win conditions such as king of the hill. */
 interface MatchObjective {
     val type: String
 
-    fun onActivated(match: DuelMatch): ObjectiveDecision = ObjectiveDecision.Continue
-
-    fun onTick(
+    fun evaluate(
         match: DuelMatch,
-        elapsedTicks: Long,
+        frame: ObjectiveFrame,
     ): ObjectiveDecision = ObjectiveDecision.Continue
 }
 

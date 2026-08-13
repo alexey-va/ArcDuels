@@ -2,6 +2,12 @@
 server-id: duels-1
 challenge-timeout-seconds: 45
 
+celebration:
+  fireworks:
+    enabled: true
+    # Bounded to 1..5 at runtime.
+    count: 3
+
 mysql:
   enabled: false
   host: 127.0.0.1

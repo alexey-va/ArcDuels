@@ -13,6 +13,7 @@ enum class MatchState {
 
 enum class MatchEndReason {
     ELIMINATION,
+    OBJECTIVE,
     FORFEIT,
     DISCONNECT,
     ADMIN_CANCEL,
@@ -75,7 +76,9 @@ data class DuelMatch(
         reason: MatchEndReason = MatchEndReason.ELIMINATION,
     ): DuelMatch {
         require(state == MatchState.ACTIVE) { "Only an active match can record a round" }
-        require(reason == MatchEndReason.ELIMINATION) { "Round completion requires an elimination" }
+        require(reason == MatchEndReason.ELIMINATION || reason == MatchEndReason.OBJECTIVE) {
+            "Round completion requires a gameplay win condition"
+        }
         val nextScore = score.winFor(player, firstPlayer, secondPlayer)
         val wonMatch =
             when (player) {

@@ -25,9 +25,10 @@ This repository is under active development. The first vertical slice targets:
 - local and MySQL-backed statistics;
 - global leaderboard invalidation and cross-server announcements over Redis;
 - casual/ranked BO1 and BO3 selection in the inventory GUI;
-- countdown titles, action bars, sounds and winner particle effects;
+- paginated player, kit and global top-100 leaderboard inventories;
+- countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
 - bounded arenas, scoped internal teleports and protected player inventories;
-- extension points for future KOTH objectives.
+- a state-machine-wired objective boundary for future KOTH modes.
 
 ## Build
 

@@ -36,6 +36,9 @@ prevents another pair from entering an arena during end-of-match cleanup.
 ## Match modes
 
 `KIT` and `OWN_INVENTORY` are launch modes. KOTH is modeled as a future match
-objective rather than another storage or transport concern. An objective may
-observe ticks and eliminations and request completion through the same state
-machine; it cannot mutate player statistics directly.
+objective rather than another storage or transport concern. A Paper adapter can
+submit an `ObjectiveFrame` containing elapsed ticks and the match participants
+currently contesting a zone. `MatchCoordinator.evaluateObjective` validates the
+frame and applies an objective winner atomically through the normal round,
+persistence, rating, and event path. Objectives cannot mutate statistics
+directly.

@@ -133,4 +133,51 @@ class MatchCoordinatorTest : StringSpec({
         failSoftPublisher.releaseCompleted(match.id) shouldBe true
         releasesOnPublicationFailure.get() shouldBe 1
     }
+
+    "a future hill objective can continue and then complete through the coordinator" {
+        val objectiveCoordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator {
+                    CompletableFuture.completedFuture(ArenaReservation(ArenaId("hill-1")) {})
+                },
+                InMemoryStatisticsRepository(),
+                clock = Clock.fixed(Instant.parse("2026-08-13T10:00:00Z"), ZoneOffset.UTC),
+            )
+        val match = objectiveCoordinator.reserve(first, second, DuelRules(DuelMode.KIT, KitId("classic"))).get()
+        objectiveCoordinator.beginCountdown(match.id)
+        objectiveCoordinator.activate(match.id)
+        val hillObjective =
+            object : MatchObjective {
+                override val type = "king_of_the_hill"
+
+                override fun evaluate(
+                    match: DuelMatch,
+                    frame: ObjectiveFrame,
+                ): ObjectiveDecision =
+                    if (frame.elapsedTicks >= 200 && frame.contenders.size == 1) {
+                        ObjectiveDecision.Complete(frame.contenders.single())
+                    } else {
+                        ObjectiveDecision.Continue
+                    }
+            }
+
+        val active =
+            objectiveCoordinator.evaluateObjective(
+                match.id,
+                hillObjective,
+                ObjectiveFrame(elapsedTicks = 199, contenders = setOf(first)),
+            ).get()
+        active.state shouldBe MatchState.ACTIVE
+
+        val completed =
+            objectiveCoordinator.evaluateObjective(
+                match.id,
+                hillObjective,
+                ObjectiveFrame(elapsedTicks = 200, contenders = setOf(first)),
+            ).get()
+        completed.state shouldBe MatchState.COMPLETED
+        completed.winner shouldBe first
+        completed.endReason shouldBe MatchEndReason.OBJECTIVE
+    }
 })

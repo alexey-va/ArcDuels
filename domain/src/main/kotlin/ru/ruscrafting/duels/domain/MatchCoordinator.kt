@@ -69,6 +69,30 @@ class MatchCoordinator(
         return if (updated.state == MatchState.COMPLETING) persistCompletion(updated) else CompletableFuture.completedFuture(updated)
     }
 
+    /** Evaluates a platform-provided objective frame and applies its result atomically. */
+    fun evaluateObjective(
+        matchId: MatchId,
+        objective: MatchObjective,
+        frame: ObjectiveFrame,
+    ): CompletableFuture<DuelMatch> {
+        val updated =
+            synchronized(lock) {
+                val current = getRequired(matchId)
+                check(current.state == MatchState.ACTIVE) { "Objectives can only be evaluated for an active match" }
+                require(frame.contenders.all { it == current.firstPlayer || it == current.secondPlayer }) {
+                    "Objective frame contains a player who is not in the match"
+                }
+                when (val decision = objective.evaluate(current, frame)) {
+                    ObjectiveDecision.Continue -> current
+                    is ObjectiveDecision.Complete ->
+                        current.recordRoundWinner(decision.winner, clock.instant(), MatchEndReason.OBJECTIVE).also {
+                            matches[matchId] = it
+                        }
+                }
+            }
+        return if (updated.state == MatchState.COMPLETING) persistCompletion(updated) else CompletableFuture.completedFuture(updated)
+    }
+
     /** Retries an unknown-commit-result failure without duplicating statistics. */
     fun retryCompletion(matchId: MatchId): CompletableFuture<DuelMatch> {
         val match = getRequired(matchId)

@@ -4,7 +4,6 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.title.Title
 import org.bukkit.GameMode
-import org.bukkit.Particle
 import org.bukkit.Sound
 import org.bukkit.attribute.Attribute
 import org.bukkit.entity.Player
@@ -39,6 +38,7 @@ class DuelSessionManager(
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
     private val countdownTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val internalTeleports = InternalTeleportAuthorizer()
+    private val celebrationEffects = CelebrationEffects(plugin)
 
     fun start(challenge: DuelChallenge): CompletableFuture<DuelMatch> {
         check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
@@ -354,12 +354,7 @@ class DuelSessionManager(
     }
 
     private fun celebrate(player: Player) {
-        val center = player.location.add(0.0, 1.0, 0.0)
-        player.world.spawnParticle(Particle.FIREWORK, center, 120, 1.2, 1.5, 1.2, 0.2)
-        player.world.spawnParticle(Particle.FLASH, center, 8, 0.7, 0.8, 0.7, 0.0)
-        player.world.spawnParticle(Particle.TOTEM_OF_UNDYING, center, 80, 0.8, 1.0, 0.8, 0.15)
-        player.world.playSound(center, Sound.ENTITY_FIREWORK_ROCKET_LARGE_BLAST, 0.8f, 1.0f)
-        player.world.playSound(center, Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 0.6f, 1.2f)
+        celebrationEffects.play(player)
     }
 
     private fun restore(session: PaperSession) {
