@@ -17,9 +17,13 @@ import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.domain.validatePlayerName
 import java.sql.Connection
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 
 class MySqlStatisticsRepository(
     private val runtime: SqlRuntime,
@@ -37,7 +41,7 @@ class MySqlStatisticsRepository(
         return runtime.executor.write { connection ->
             connection.prepareStatement(
                 """
-                INSERT INTO `rusduels_player_names` (`player_id`, `last_known_name`, `updated_at`)
+                INSERT INTO `arcduels_player_names` (`player_id`, `last_known_name`, `updated_at`)
                 VALUES (?, ?, ?)
                 ON DUPLICATE KEY UPDATE `last_known_name` = ?, `updated_at` = ?
                 """.trimIndent(),
@@ -56,7 +60,7 @@ class MySqlStatisticsRepository(
 
     override fun find(playerId: PlayerId): CompletableFuture<PlayerStatistics> =
         runtime.executor.read { connection ->
-            connection.prepareStatement("SELECT $STAT_COLUMNS FROM `rusduels_player_stats` WHERE `player_id` = ?").use { statement ->
+            connection.prepareStatement("SELECT $STAT_COLUMNS FROM `arcduels_player_stats` WHERE `player_id` = ?").use { statement ->
                 statement.setBytes(1, UuidBytes.encode(playerId.value))
                 statement.executeQuery().use { result ->
                     if (result.next()) result.toStatistics(playerId) else PlayerStatistics(playerId)
@@ -67,7 +71,7 @@ class MySqlStatisticsRepository(
     override fun findPlayerName(playerId: PlayerId): CompletableFuture<String?> =
         runtime.executor.read { connection ->
             connection.prepareStatement(
-                "SELECT `last_known_name` FROM `rusduels_player_names` WHERE `player_id` = ?",
+                "SELECT `last_known_name` FROM `arcduels_player_names` WHERE `player_id` = ?",
             ).use { statement ->
                 statement.setBytes(1, UuidBytes.encode(playerId.value))
                 statement.executeQuery().use { result -> if (result.next()) result.getString(1) else null }
@@ -75,7 +79,7 @@ class MySqlStatisticsRepository(
         }
 
     override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> =
-        runtime.executor.transaction { connection -> recordTransaction(connection, outcome) }
+        recordWithRetry(outcome.canonicalized(), attempt = 0)
 
     override fun leaderboard(limit: Int): CompletableFuture<List<LeaderboardEntry>> {
         require(limit in 1..100) { "Leaderboard limit must be between 1 and 100" }
@@ -83,8 +87,8 @@ class MySqlStatisticsRepository(
             connection.prepareStatement(
                 """
                 SELECT s.`player_id`, n.`last_known_name`, s.`rating`, s.`wins`, s.`losses`
-                FROM `rusduels_player_stats` s
-                LEFT JOIN `rusduels_player_names` n ON n.`player_id` = s.`player_id`
+                FROM `arcduels_player_stats` s
+                LEFT JOIN `arcduels_player_names` n ON n.`player_id` = s.`player_id`
                 ORDER BY s.`rating` DESC, s.`wins` DESC, s.`player_id` ASC
                 LIMIT ?
                 """.trimIndent(),
@@ -113,13 +117,32 @@ class MySqlStatisticsRepository(
 
     override fun close() = runtime.close()
 
+    private fun recordWithRetry(
+        outcome: MatchOutcome,
+        attempt: Int,
+    ): CompletableFuture<PersistedMatchResult> =
+        runtime.executor.transaction { connection -> recordTransaction(connection, outcome) }
+            .handle { result, failure ->
+                if (failure == null) {
+                    CompletableFuture.completedFuture(result)
+                } else {
+                    val cause = failure.unwrapCompletion()
+                    if (attempt < MAX_TRANSACTION_RETRIES && cause.isRetryableMySqlTransactionFailure()) {
+                        CompletableFuture.runAsync(
+                            {},
+                            CompletableFuture.delayedExecutor(RETRY_BASE_DELAY_MS shl attempt, TimeUnit.MILLISECONDS),
+                        ).thenCompose { recordWithRetry(outcome, attempt + 1) }
+                    } else {
+                        CompletableFuture.failedFuture(cause)
+                    }
+                }
+            }.thenCompose { it }
+
     private fun recordTransaction(
         connection: Connection,
         outcome: MatchOutcome,
     ): PersistedMatchResult {
-        listOf(outcome.winner, outcome.loser)
-            .sortedBy { it.value }
-            .forEach { ensurePlayer(connection, it, outcome.completedAt) }
+        ensurePlayers(connection, outcome.winner, outcome.loser, outcome.completedAt)
         val locked = lockPlayers(connection, outcome.winner, outcome.loser)
         findReceipt(connection, outcome)?.let { return it }
 
@@ -154,16 +177,20 @@ class MySqlStatisticsRepository(
         return PersistedMatchResult(outcome, winnerRating, loserRating, leaderboardRevision, newlyRecorded = true)
     }
 
-    private fun ensurePlayer(
+    private fun ensurePlayers(
         connection: Connection,
-        playerId: PlayerId,
+        first: PlayerId,
+        second: PlayerId,
         now: Instant,
     ) {
+        val players = listOf(first, second).sortedBy { it.value }
         connection.prepareStatement(
-            "INSERT IGNORE INTO `rusduels_player_stats` (`player_id`, `updated_at`) VALUES (?, ?)",
+            "INSERT IGNORE INTO `arcduels_player_stats` (`player_id`, `updated_at`) VALUES (?, ?), (?, ?)",
         ).use { statement ->
-            statement.setBytes(1, UuidBytes.encode(playerId.value))
+            statement.setBytes(1, UuidBytes.encode(players[0].value))
             statement.setTimestamp(2, Timestamp.from(now))
+            statement.setBytes(3, UuidBytes.encode(players[1].value))
+            statement.setTimestamp(4, Timestamp.from(now))
             statement.executeUpdate()
         }
     }
@@ -176,7 +203,7 @@ class MySqlStatisticsRepository(
         connection.prepareStatement(
             """
             SELECT `player_id`, $STAT_COLUMNS
-            FROM `rusduels_player_stats`
+            FROM `arcduels_player_stats`
             WHERE `player_id` IN (?, ?)
             ORDER BY `player_id`
             FOR UPDATE
@@ -201,7 +228,7 @@ class MySqlStatisticsRepository(
     ) {
         connection.prepareStatement(
             """
-            UPDATE `rusduels_player_stats`
+            UPDATE `arcduels_player_stats`
             SET `wins` = ?, `losses` = ?, `current_win_streak` = ?, `best_win_streak` = ?,
                 `rating` = ?, `revision` = ?, `updated_at` = ?
             WHERE `player_id` = ?
@@ -222,7 +249,7 @@ class MySqlStatisticsRepository(
     private fun incrementLeaderboardRevision(connection: Connection): Long {
         val current =
             connection.prepareStatement(
-                "SELECT `value` FROM `rusduels_meta` WHERE `name` = 'leaderboard_revision' FOR UPDATE",
+                "SELECT `value` FROM `arcduels_meta` WHERE `name` = 'leaderboard_revision' FOR UPDATE",
             ).use { statement ->
                 statement.executeQuery().use { result ->
                     check(result.next()) { "Missing leaderboard revision metadata" }
@@ -231,7 +258,7 @@ class MySqlStatisticsRepository(
             }
         val next = current + 1
         connection.prepareStatement(
-            "UPDATE `rusduels_meta` SET `value` = ? WHERE `name` = 'leaderboard_revision'",
+            "UPDATE `arcduels_meta` SET `value` = ? WHERE `name` = 'leaderboard_revision'",
         ).use { statement ->
             statement.setLong(1, next)
             check(statement.executeUpdate() == 1) { "Could not increment leaderboard revision" }
@@ -248,7 +275,7 @@ class MySqlStatisticsRepository(
     ) {
         connection.prepareStatement(
             """
-            INSERT INTO `rusduels_matches`
+            INSERT INTO `arcduels_matches`
                 (`match_id`, `winner_id`, `loser_id`, `mode`, `kit_id`, `ranked`, `server_id`, `completed_at`,
                  `winner_rating_after`, `loser_rating_after`, `leaderboard_revision`)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -277,7 +304,7 @@ class MySqlStatisticsRepository(
             """
             SELECT `winner_id`, `loser_id`, `mode`, `kit_id`, `ranked`, `server_id`, `completed_at`,
                    `winner_rating_after`, `loser_rating_after`, `leaderboard_revision`
-            FROM `rusduels_matches`
+            FROM `arcduels_matches`
             WHERE `match_id` = ?
             """.trimIndent(),
         ).use { statement ->
@@ -318,8 +345,23 @@ class MySqlStatisticsRepository(
         )
 
     private companion object {
-        const val MIGRATION_NAMESPACE = "rusduels"
+        const val MAX_TRANSACTION_RETRIES = 4
+        const val RETRY_BASE_DELAY_MS = 10L
+        const val MIGRATION_NAMESPACE = "arcduels"
         const val STAT_COLUMNS =
             "`wins`, `losses`, `current_win_streak`, `best_win_streak`, `rating`, `revision`"
     }
+}
+
+internal fun Throwable.isRetryableMySqlTransactionFailure(): Boolean =
+    generateSequence(this) { it.cause }
+        .filterIsInstance<SQLException>()
+        .any { failure -> failure.sqlState == "40001" || failure.errorCode == 1_213 || failure.errorCode == 1_205 }
+
+private fun Throwable.unwrapCompletion(): Throwable {
+    var current = this
+    while ((current is CompletionException || current is ExecutionException) && current.cause != null) {
+        current = requireNotNull(current.cause)
+    }
+    return current
 }

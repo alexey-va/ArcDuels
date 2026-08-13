@@ -11,7 +11,7 @@ object MySqlDuelMigrations {
                 statements =
                     listOf(
                         """
-                        CREATE TABLE IF NOT EXISTS `rusduels_player_stats` (
+                        CREATE TABLE IF NOT EXISTS `arcduels_player_stats` (
                             `player_id` BINARY(16) NOT NULL,
                             `wins` BIGINT UNSIGNED NOT NULL DEFAULT 0,
                             `losses` BIGINT UNSIGNED NOT NULL DEFAULT 0,
@@ -21,22 +21,22 @@ object MySqlDuelMigrations {
                             `revision` BIGINT UNSIGNED NOT NULL DEFAULT 0,
                             `updated_at` DATETIME(3) NOT NULL,
                             PRIMARY KEY (`player_id`),
-                            KEY `idx_rusduels_leaderboard` (`rating` DESC, `wins` DESC)
+                            KEY `idx_arcduels_leaderboard` (`rating` DESC, `wins` DESC)
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                         """.trimIndent(),
                         """
-                        CREATE TABLE IF NOT EXISTS `rusduels_meta` (
+                        CREATE TABLE IF NOT EXISTS `arcduels_meta` (
                             `name` VARCHAR(64) NOT NULL,
                             `value` BIGINT UNSIGNED NOT NULL,
                             PRIMARY KEY (`name`)
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                         """.trimIndent(),
                         """
-                        INSERT IGNORE INTO `rusduels_meta` (`name`, `value`)
+                        INSERT IGNORE INTO `arcduels_meta` (`name`, `value`)
                         VALUES ('leaderboard_revision', 0)
                         """.trimIndent(),
                         """
-                        CREATE TABLE IF NOT EXISTS `rusduels_matches` (
+                        CREATE TABLE IF NOT EXISTS `arcduels_matches` (
                             `match_id` BINARY(16) NOT NULL,
                             `winner_id` BINARY(16) NOT NULL,
                             `loser_id` BINARY(16) NOT NULL,
@@ -49,8 +49,8 @@ object MySqlDuelMigrations {
                             `loser_rating_after` INT UNSIGNED NOT NULL,
                             `leaderboard_revision` BIGINT UNSIGNED NOT NULL,
                             PRIMARY KEY (`match_id`),
-                            KEY `idx_rusduels_winner_history` (`winner_id`, `completed_at` DESC),
-                            KEY `idx_rusduels_loser_history` (`loser_id`, `completed_at` DESC)
+                            KEY `idx_arcduels_winner_history` (`winner_id`, `completed_at` DESC),
+                            KEY `idx_arcduels_loser_history` (`loser_id`, `completed_at` DESC)
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                         """.trimIndent(),
                     ),
@@ -61,7 +61,7 @@ object MySqlDuelMigrations {
                 statements =
                     listOf(
                         """
-                        CREATE TABLE IF NOT EXISTS `rusduels_player_names` (
+                        CREATE TABLE IF NOT EXISTS `arcduels_player_names` (
                             `player_id` BINARY(16) NOT NULL,
                             `last_known_name` VARCHAR(32) NOT NULL,
                             `updated_at` DATETIME(3) NOT NULL,

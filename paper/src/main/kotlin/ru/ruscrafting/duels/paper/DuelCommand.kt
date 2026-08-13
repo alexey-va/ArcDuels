@@ -23,7 +23,7 @@ class DuelCommand(
     ): Boolean {
         val player = sender as? Player
         if (player == null) {
-            sender.sendMessage("RusDuels player command")
+            sender.sendMessage("ArcDuels player command")
             return true
         }
         if (args.isEmpty()) {

@@ -20,14 +20,29 @@ data class MatchCompletedEvent(
     val kitId: KitId?,
     val ranked: Boolean,
     val winnerRating: Int,
-) : DuelEvent
+) : DuelEvent {
+    init {
+        require(eventId.matches(EVENT_ID_PATTERN)) { "Unsafe event id" }
+        require(winner != loser) { "Winner and loser must be different players" }
+        require((mode == DuelMode.KIT) == (kitId != null)) { "Event mode and kit do not agree" }
+        require(!ranked || mode == DuelMode.KIT) { "Ranked event must use a kit" }
+        require(winnerRating in 0..RatingCalculator.MAX_RATING) { "Winner rating is outside the supported range" }
+    }
+}
 
 data class LeaderboardInvalidatedEvent(
     override val eventId: String,
     override val occurredAt: Instant,
     override val sourceServer: ServerId,
     val revision: Long,
-) : DuelEvent
+) : DuelEvent {
+    init {
+        require(eventId.matches(EVENT_ID_PATTERN)) { "Unsafe event id" }
+        require(revision >= 0) { "Leaderboard revision cannot be negative" }
+    }
+}
+
+private val EVENT_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
 
 fun interface DuelEventPublisher {
     fun publish(event: DuelEvent): CompletableFuture<Unit>

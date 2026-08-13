@@ -6,14 +6,16 @@ The plugin boots in local mode by default. This is useful for development and
 single-server installations, but statistics disappear after a restart.
 
 Enable `mysql.enabled` for durable statistics and global leaderboards. Startup
-is fail-closed in this profile: RusDuels disables itself if it cannot validate
+is fail-closed in this profile: ArcDuels disables itself if it cannot validate
 the pool or apply checksum-protected schema migrations. Match result writes are
 also fail-closed and retry by match id, so an unknown network outcome cannot
 double-count a win.
 
 Enable `redis.enabled` independently for cross-server win announcements and
 leaderboard invalidation events. Redis transport is presentation-only and
-fail-soft; MySQL remains the durable source of truth.
+fail-soft; MySQL remains the durable source of truth. If Redis is unavailable
+at startup, ArcDuels closes the partial network resources, logs a bounded
+warning, and continues locally without cross-server announcements.
 
 Every network node needs a unique `server-id` containing only letters, digits,
 dot, underscore, or hyphen.
@@ -30,7 +32,7 @@ celebration:
     count: 3
 ```
 
-`count` is bounded to `1..5`. RusDuels tags its rockets and cancels their entity
+`count` is bounded to `1..5`. ArcDuels tags its rockets and cancels their entity
 damage, so the visual celebration cannot hurt the winner or nearby players.
 
 ## MySQL TLS
@@ -44,6 +46,10 @@ damage, so the visual celebration cannot hurt the winner or nearby players.
 
 Credentials are passed as Hikari properties, never embedded in the JDBC URL or
 the redacted connection diagnostics.
+
+ArcDuels retries only transactions that MySQL explicitly rolled back as a
+deadlock victim or lock-wait timeout. Retries are bounded and use backoff;
+connection loss and unknown commit outcomes are not retried at this layer.
 
 ## Arenas
 
@@ -65,7 +71,7 @@ arenas:
 Arena reservations are exclusive. If all arenas are occupied, challenge
 acceptance fails without touching either player's inventory. Both spawns must
 be inside the bounds and use the same loaded world. Leaving the bounds loses
-the round; only scoped RusDuels teleports and in-bounds combat teleports are
+the round; only scoped ArcDuels teleports and in-bounds combat teleports are
 accepted while a player owns an arena.
 
 ## Kits
@@ -97,7 +103,7 @@ always unranked.
 - `/duel stats [online-player]`;
 - `/duel top` — open the global leaderboard.
 
-All commands require `rusduels.use`, granted by default.
+All commands require `arcduels.use`, granted by default.
 
 During a match, chat/reply commands plus `/duel leave` and `/duel stats`
 remain available. Other commands are blocked to prevent external

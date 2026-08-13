@@ -64,7 +64,7 @@ internal class CelebrationEffects(
     }
 
     companion object {
-        const val ENTITY_TAG = "rusduels_celebration"
+        const val ENTITY_TAG = "arcduels_celebration"
         private const val MAX_FIREWORKS = 5
         private const val FIREWORK_SPACING_TICKS = 6L
         private const val FIREWORK_FUSE_TICKS = 12

@@ -180,4 +180,88 @@ class MatchCoordinatorTest : StringSpec({
         completed.winner shouldBe first
         completed.endReason shouldBe MatchEndReason.OBJECTIVE
     }
+
+    "racing reservations leave one match and release the losing arena" {
+        val pendingReservations = CopyOnWriteArrayList<CompletableFuture<ArenaReservation>>()
+        val losingReleases = AtomicInteger()
+        val racingCoordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator {
+                    CompletableFuture<ArenaReservation>().also(pendingReservations::add)
+                },
+                InMemoryStatisticsRepository(),
+            )
+
+        val firstAttempt = racingCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+        val secondAttempt = racingCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+        pendingReservations shouldHaveSize 2
+
+        pendingReservations[0].complete(ArenaReservation(ArenaId("race-1")) {})
+        val winner = firstAttempt.get()
+        pendingReservations[1].complete(ArenaReservation(ArenaId("race-2"), losingReleases::incrementAndGet))
+
+        shouldThrow<ExecutionException> { secondAttempt.get() }
+        racingCoordinator.findByPlayer(first)?.id shouldBe winner.id
+        racingCoordinator.activeMatches() shouldHaveSize 1
+        losingReleases.get() shouldBe 1
+    }
+
+    "overlapping successful persistence retries publish completion events once" {
+        val writes = CopyOnWriteArrayList<CompletableFuture<PersistedMatchResult>>()
+        val retryEvents = CopyOnWriteArrayList<DuelEvent>()
+        val delayedRepository =
+            object : StatisticsRepository {
+                override fun rememberPlayerName(playerId: PlayerId, playerName: String) =
+                    CompletableFuture.completedFuture(Unit)
+
+                override fun findPlayerName(playerId: PlayerId) = CompletableFuture.completedFuture<String?>(null)
+                override fun find(playerId: PlayerId) = CompletableFuture.completedFuture(PlayerStatistics(playerId))
+                override fun leaderboard(limit: Int) = CompletableFuture.completedFuture(emptyList<LeaderboardEntry>())
+
+                override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> =
+                    CompletableFuture<PersistedMatchResult>().also(writes::add)
+            }
+        val retryCoordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator { CompletableFuture.completedFuture(ArenaReservation(ArenaId("retry-1")) {}) },
+                delayedRepository,
+                DuelEventPublisher { event ->
+                    retryEvents += event
+                    CompletableFuture.completedFuture(Unit)
+                },
+                Clock.fixed(Instant.parse("2026-08-13T10:00:00Z"), ZoneOffset.UTC),
+            )
+        val match = retryCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY)).get()
+        retryCoordinator.beginCountdown(match.id)
+        retryCoordinator.activate(match.id)
+        val initial = retryCoordinator.recordRoundWinner(match.id, first)
+        val retry = retryCoordinator.retryCompletion(match.id)
+        writes shouldHaveSize 2
+        val persisted =
+            PersistedMatchResult(
+                MatchOutcome(
+                    match.id,
+                    first,
+                    second,
+                    DuelMode.OWN_INVENTORY,
+                    null,
+                    ranked = false,
+                    ServerId("duels-1"),
+                    Instant.parse("2026-08-13T10:00:00Z"),
+                ),
+                winnerRatingAfter = 1_000,
+                loserRatingAfter = 1_000,
+                leaderboardRevision = 1,
+                newlyRecorded = true,
+            )
+
+        writes[0].complete(persisted)
+        writes[1].complete(persisted.copy(newlyRecorded = false))
+
+        initial.get().state shouldBe MatchState.COMPLETED
+        retry.get().state shouldBe MatchState.COMPLETED
+        retryEvents shouldHaveSize 2
+    }
 })

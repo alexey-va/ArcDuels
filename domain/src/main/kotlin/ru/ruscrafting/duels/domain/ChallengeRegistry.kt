@@ -45,6 +45,7 @@ class ChallengeRegistry(
             val resolved = challenge.resolve(status, clock.instant())
             challenges[id] = resolved
             pendingByPair.remove(setOf(challenge.challenger, challenge.target), id)
+            pruneTerminalChallenges()
             resolved
         }
 
@@ -58,6 +59,8 @@ class ChallengeRegistry(
                 .sortedBy(DuelChallenge::createdAt)
         }
 
+    internal fun retainedChallengeCount(): Int = synchronized(lock) { challenges.size }
+
     private fun expirePending() {
         val now = clock.instant()
         challenges.replaceAll { _, challenge ->
@@ -68,11 +71,25 @@ class ChallengeRegistry(
                 challenge
             }
         }
+        pruneTerminalChallenges()
+    }
+
+    private fun pruneTerminalChallenges() {
+        val terminal = challenges.values.filter { it.status != ChallengeStatus.PENDING }
+        if (terminal.size <= MAX_RETAINED_TERMINAL) return
+        terminal.sortedBy(DuelChallenge::createdAt)
+            .take(terminal.size - MAX_RETAINED_TERMINAL)
+            .forEach { challenges.remove(it.id, it) }
     }
 
     private fun DuelChallenge.refreshExpiry(): DuelChallenge {
         if (status != ChallengeStatus.PENDING || clock.instant().isBefore(expiresAt)) return this
+        val expired = resolve(ChallengeStatus.EXPIRED, clock.instant())
         expirePending()
-        return challenges.getValue(id)
+        return challenges[id] ?: expired
+    }
+
+    private companion object {
+        const val MAX_RETAINED_TERMINAL = 1_024
     }
 }

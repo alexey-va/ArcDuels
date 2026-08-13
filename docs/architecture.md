@@ -28,6 +28,15 @@ The MySQL adapter uses the shared `arc-core-sql` runtime for Hikari pooling,
 TLS policy, bounded asynchronous execution, transactions, and checksum-locked
 migrations. Last-known player names are stored separately from statistics so a
 leaderboard rendered on another Paper node does not fall back to UUIDs.
+Concurrent result writes lock both player rows in deterministic order. InnoDB
+deadlock victims and lock-wait rollbacks receive a bounded asynchronous retry
+with backoff; connection failures and other SQL errors remain visible and are
+never retried blindly. Match timestamps are canonicalized to MySQL's declared
+millisecond precision before idempotency comparison.
+
+Redis is presentation-only. Startup failure closes both bus and client and
+falls back to local operation. Event deduplication is scoped by source server,
+bounded in size, and expires after one hour.
 
 Completed matches retain player and arena ownership until Paper has restored
 both snapshots. Only then does the coordinator release the reservation. This

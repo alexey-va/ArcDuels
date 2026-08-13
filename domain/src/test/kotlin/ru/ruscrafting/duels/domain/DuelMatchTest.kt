@@ -53,4 +53,23 @@ class DuelMatchTest : StringSpec({
         match.winner shouldBe first
         match.score shouldBe MatchScore(first = 3, second = 0)
     }
+
+    "every invalid state transition and non-participant winner is rejected" {
+        val reserved =
+            DuelMatch.reserve(
+                first,
+                second,
+                ArenaId("arena-1"),
+                ServerId("duels-1"),
+                DuelRules(DuelMode.OWN_INVENTORY),
+                now,
+            )
+        shouldThrow<IllegalArgumentException> { reserved.activate(now) }
+        val active = reserved.beginCountdown().activate(now)
+        shouldThrow<IllegalStateException> { active.recordRoundWinner(PlayerId(UUID.randomUUID()), now) }
+        shouldThrow<IllegalArgumentException> { active.recordRoundWinner(first, now, MatchEndReason.FORFEIT) }
+        val completing = active.recordRoundWinner(first, now)
+        shouldThrow<IllegalArgumentException> { completing.cancel(now, MatchEndReason.ADMIN_CANCEL) }
+        shouldThrow<IllegalArgumentException> { completing.forfeit(second, now, MatchEndReason.FORFEIT) }
+    }
 })

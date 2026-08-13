@@ -1,4 +1,4 @@
-# RusDuels
+# ArcDuels
 
 Modern Kotlin duel engine for RusCrafting and other Paper networks.
 
@@ -42,4 +42,4 @@ Requires Java 25.
 The plugin JAR is produced under `paper/build/libs/`.
 
 See [configuration](docs/configuration.md), [architecture](docs/architecture.md),
-and the [roadmap](docs/roadmap.md).
+[testing](docs/testing.md), and the [roadmap](docs/roadmap.md).

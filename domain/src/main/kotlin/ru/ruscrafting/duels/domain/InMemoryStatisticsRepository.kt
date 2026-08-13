@@ -27,16 +27,17 @@ class InMemoryStatisticsRepository : StatisticsRepository {
         CompletableFuture.completedFuture(playerNames[playerId])
 
     override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> {
+        val canonicalOutcome = outcome.canonicalized()
         val result =
             synchronized(writeLock) {
-                recordedMatches[outcome.matchId]?.let { recorded ->
-                    check(recorded.outcome == outcome) { "Match id collision with a different duel outcome" }
+                recordedMatches[canonicalOutcome.matchId]?.let { recorded ->
+                    check(recorded.outcome == canonicalOutcome) { "Match id collision with a different duel outcome" }
                     return@synchronized recorded.copy(newlyRecorded = false)
                 }
-                val winnerBefore = statistics[outcome.winner] ?: PlayerStatistics(outcome.winner)
-                val loserBefore = statistics[outcome.loser] ?: PlayerStatistics(outcome.loser)
+                val winnerBefore = statistics[canonicalOutcome.winner] ?: PlayerStatistics(canonicalOutcome.winner)
+                val loserBefore = statistics[canonicalOutcome.loser] ?: PlayerStatistics(canonicalOutcome.loser)
                 val (winnerRating, loserRating) =
-                    if (outcome.ranked) {
+                    if (canonicalOutcome.ranked) {
                         RatingCalculator.afterWin(winnerBefore.rating, loserBefore.rating)
                     } else {
                         winnerBefore.rating to loserBefore.rating
@@ -57,17 +58,17 @@ class InMemoryStatisticsRepository : StatisticsRepository {
                         rating = loserRating,
                         revision = loserBefore.revision + 1,
                     )
-                statistics[outcome.winner] = winnerAfter
-                statistics[outcome.loser] = loserAfter
+                statistics[canonicalOutcome.winner] = winnerAfter
+                statistics[canonicalOutcome.loser] = loserAfter
                 val nextLeaderboardRevision = ++leaderboardRevision
                 PersistedMatchResult(
-                    outcome = outcome,
+                    outcome = canonicalOutcome,
                     winnerRatingAfter = winnerAfter.rating,
                     loserRatingAfter = loserAfter.rating,
                     leaderboardRevision = nextLeaderboardRevision,
                     newlyRecorded = true,
                 )
-                    .also { recordedMatches[outcome.matchId] = it }
+                    .also { recordedMatches[canonicalOutcome.matchId] = it }
             }
         return CompletableFuture.completedFuture(result)
     }

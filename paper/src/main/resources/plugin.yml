@@ -1,6 +1,6 @@
-name: RusDuels
+name: ArcDuels
 version: '${version}'
-main: ru.ruscrafting.duels.paper.RusDuelsPlugin
+main: ru.ruscrafting.duels.paper.ArcDuelsPlugin
 api-version: '1.21'
 description: Modern Kotlin duels for RusCrafting
 author: RusCrafting
@@ -9,8 +9,8 @@ commands:
     description: Open duels or manage a challenge
     usage: /duel [player|accept|deny|cancel|leave|stats|top]
     aliases: [duels, дуэль]
-    permission: rusduels.use
+    permission: arcduels.use
 permissions:
-  rusduels.use:
+  arcduels.use:
     description: Use duel commands and menus
     default: true

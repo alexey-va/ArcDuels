@@ -24,7 +24,7 @@ import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
-open class RusDuelsPlugin : JavaPlugin() {
+open class ArcDuelsPlugin : JavaPlugin() {
     private val closeables = mutableListOf<AutoCloseable>()
     private var sessions: DuelSessionManager? = null
 
@@ -32,7 +32,7 @@ open class RusDuelsPlugin : JavaPlugin() {
         saveDefaultConfig()
         runCatching { bootstrap() }
             .onFailure { failure ->
-                logger.severe("RusDuels could not start: ${failure.javaClass.simpleName}: ${failure.message}")
+                logger.severe("ArcDuels could not start: ${failure.javaClass.simpleName}: ${failure.message}")
                 closeResources()
                 server.pluginManager.disablePlugin(this)
             }
@@ -69,7 +69,7 @@ open class RusDuelsPlugin : JavaPlugin() {
         val identities = PlayerIdentityListener(this, statistics)
         server.pluginManager.registerEvents(identities, this)
         server.onlinePlayers.forEach(identities::remember)
-        logger.info("RusDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
+        logger.info("ArcDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
         if (arenas.size() == 0) logger.warning("No enabled duel arenas are configured; challenges cannot start yet")
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
     }
@@ -83,8 +83,8 @@ open class RusDuelsPlugin : JavaPlugin() {
             SqlConnectionConfig(
                 host = config.getString("mysql.host", "127.0.0.1")!!,
                 port = config.getInt("mysql.port", 3306),
-                database = config.getString("mysql.database", "rusduels")!!,
-                username = config.getString("mysql.username", "rusduels")!!,
+                database = config.getString("mysql.database", "arcduels")!!,
+                username = config.getString("mysql.username", "arcduels")!!,
                 password = config.getString("mysql.password", "")!!,
                 sslMode = sslMode,
                 minimumIdle = config.getInt("mysql.pool.minimum-idle", 1),
@@ -95,7 +95,7 @@ open class RusDuelsPlugin : JavaPlugin() {
                 maxLifetimeMs = config.getLong("mysql.pool.max-lifetime-ms", 1_700_000L),
                 failFast = true,
             )
-        val repository = MySqlStatisticsRepository(SqlRuntime.create(connection, "rusduels"))
+        val repository = MySqlStatisticsRepository(SqlRuntime.create(connection, "arcduels"))
         try {
             val report = repository.migrate().get(connection.connectionTimeoutMs + 30_000L, TimeUnit.MILLISECONDS)
             logger.info("MySQL schema ready; newly applied migrations: ${report.appliedVersions}")
@@ -151,23 +151,21 @@ open class RusDuelsPlugin : JavaPlugin() {
                 }
             }
         }
-        try {
-            manager.init()
-        } catch (failure: Throwable) {
-            bus.close()
-            manager.close()
-            throw failure
+        if (!NetworkLifecycle.initialize(manager, bus) { failure ->
+                logger.warning("Redis is unavailable; ArcDuels will continue without cross-server events: ${failure.javaClass.simpleName}")
+            }
+        ) {
+            return NoOpDuelEventPublisher
         }
         closeables += AutoCloseable {
-            bus.close()
-            manager.close()
+            NetworkLifecycle.close(bus, manager).getOrThrow()
         }
         return bus
     }
 
     private fun closeResources() {
         closeables.asReversed().forEach { resource ->
-            runCatching(resource::close).onFailure { logger.warning("Could not close RusDuels resource: ${it.message}") }
+            runCatching(resource::close).onFailure { logger.warning("Could not close ArcDuels resource: ${it.message}") }
         }
         closeables.clear()
     }

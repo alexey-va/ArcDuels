@@ -9,6 +9,7 @@ import ru.ruscrafting.duels.domain.LeaderboardInvalidatedEvent
 import ru.ruscrafting.duels.domain.MatchCompletedEvent
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.RatingCalculator
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Instant
 import java.util.UUID
@@ -45,14 +46,14 @@ internal class DuelEventCodec(
         )
 
     fun decode(json: String): DuelEvent {
-        require(json.length <= MAX_EVENT_CHARACTERS) { "RusDuels event exceeds $MAX_EVENT_CHARACTERS characters" }
+        require(json.length <= MAX_EVENT_CHARACTERS) { "ArcDuels event exceeds $MAX_EVENT_CHARACTERS characters" }
         val wire =
             try {
                 gson.fromJson(json, WireEvent::class.java)
             } catch (failure: RuntimeException) {
-                throw JsonParseException("Invalid RusDuels event JSON", failure)
-            } ?: throw JsonParseException("RusDuels event cannot be null")
-        require(wire.version == WIRE_VERSION) { "Unsupported RusDuels event version ${wire.version}" }
+                throw JsonParseException("Invalid ArcDuels event JSON", failure)
+            } ?: throw JsonParseException("ArcDuels event cannot be null")
+        require(wire.version == WIRE_VERSION) { "Unsupported ArcDuels event version ${wire.version}" }
         require(wire.eventId.matches(Regex("[A-Za-z0-9:._-]{1,160}"))) { "Unsafe event id" }
         val occurredAt = Instant.parse(wire.occurredAt)
         val sourceServer = ServerId(wire.sourceServer)
@@ -66,7 +67,7 @@ internal class DuelEventCodec(
                 require(winner != loser) { "Winner and loser must be different players" }
                 require((mode == DuelMode.KIT) == (kitId != null)) { "Event mode and kit do not agree" }
                 require(!requireNotNull(wire.ranked) || mode == DuelMode.KIT) { "Ranked event must use a kit" }
-                require(winnerRating in 0..MAX_RATING) { "Winner rating is outside the accepted range" }
+                require(winnerRating in 0..RatingCalculator.MAX_RATING) { "Winner rating is outside the accepted range" }
                 MatchCompletedEvent(
                     eventId = wire.eventId,
                     occurredAt = occurredAt,
@@ -90,7 +91,7 @@ internal class DuelEventCodec(
                     revision = revision,
                 )
             }
-            else -> error("Unknown RusDuels event type ${wire.type}")
+            else -> error("Unknown ArcDuels event type ${wire.type}")
         }
     }
 
@@ -113,7 +114,6 @@ internal class DuelEventCodec(
     private companion object {
         const val WIRE_VERSION = 1
         const val MAX_EVENT_CHARACTERS = 8_192
-        const val MAX_RATING = 10_000_000
         const val MATCH_COMPLETED = "match_completed"
         const val LEADERBOARD_INVALIDATED = "leaderboard_invalidated"
     }

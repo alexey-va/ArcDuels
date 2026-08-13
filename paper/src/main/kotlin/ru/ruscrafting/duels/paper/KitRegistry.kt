@@ -31,12 +31,16 @@ class KitRegistry private constructor(
 
         fun load(plugin: JavaPlugin): KitRegistry {
             val root = plugin.config.getConfigurationSection("kits") ?: return KitRegistry(emptyMap())
-            val loaded =
-                root.getKeys(false).associate { rawId ->
+            val entries =
+                root.getKeys(false).map { rawId ->
                     val section = root.getConfigurationSection(rawId) ?: error("Invalid kit section $rawId")
                     val id = KitId(rawId.lowercase())
                     id to section.readKit(id)
                 }
+            require(entries.map(Pair<KitId, DuelKit>::first).distinct().size == entries.size) {
+                "Kit ids must be unique after lowercase normalization"
+            }
+            val loaded = entries.toMap()
             return KitRegistry(loaded)
         }
 

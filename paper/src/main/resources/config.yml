@@ -12,8 +12,8 @@ mysql:
   enabled: false
   host: 127.0.0.1
   port: 3306
-  database: rusduels
-  username: rusduels
+  database: arcduels
+  username: arcduels
   password: ''
   # DISABLED, REQUIRED, VERIFY_CA, or VERIFY_IDENTITY
   ssl-mode: VERIFY_IDENTITY

@@ -139,12 +139,16 @@ class MatchCoordinator(
                 completedAt = requireNotNull(match.completedAt).truncatedTo(ChronoUnit.MILLIS),
             )
         return statistics.record(outcome).thenApply { persisted ->
-            val completed =
+            val (completed, firstCompletion) =
                 synchronized(lock) {
                     val current = getRequired(match.id)
-                    if (current.state == MatchState.COMPLETED) current else current.markPersisted().also { matches[it.id] = it }
+                    if (current.state == MatchState.COMPLETED) {
+                        current to false
+                    } else {
+                        current.markPersisted().also { matches[it.id] = it } to true
+                    }
                 }
-            publishCompletion(completed, persisted)
+            if (firstCompletion) publishCompletion(completed, persisted)
             completed
         }
     }

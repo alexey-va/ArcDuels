@@ -10,7 +10,6 @@ import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 class CrossServerDuelBus(
@@ -21,7 +20,8 @@ class CrossServerDuelBus(
 ) : DuelEventPublisher, AutoCloseable {
     private val codec = DuelEventCodec()
     private val listeners = CopyOnWriteArrayList<(DuelEvent) -> Unit>()
-    private val seenEvents = ConcurrentHashMap<String, Long>()
+    private val seenEvents = HashMap<String, Long>()
+    private val seenEventsLock = Any()
     private val redisListener = ChannelListener(::consume)
 
     init {
@@ -30,7 +30,7 @@ class CrossServerDuelBus(
 
     override fun publish(event: DuelEvent): CompletableFuture<Unit> {
         require(event.sourceServer == localServer) { "Cannot publish an event owned by another server" }
-        if (markFirstDelivery(event.eventId)) deliver(event)
+        if (markFirstDelivery(event.sourceServer, event.eventId)) deliver(event)
         redis.publish(CHANNEL, codec.encode(event))
         return CompletableFuture.completedFuture(Unit)
     }
@@ -43,7 +43,7 @@ class CrossServerDuelBus(
     override fun close() {
         redis.unregisterChannel(CHANNEL, redisListener)
         listeners.clear()
-        seenEvents.clear()
+        synchronized(seenEventsLock) { seenEvents.clear() }
     }
 
     private fun consume(
@@ -55,34 +55,45 @@ class CrossServerDuelBus(
         runCatching {
             val event = codec.decode(message)
             require(event.sourceServer.value == originServer) { "Redis origin does not match event source" }
-            if (!markFirstDelivery(event.eventId)) return
+            if (!markFirstDelivery(event.sourceServer, event.eventId)) return
             deliver(event)
         }.onFailure { failure ->
-            logger.warn("Rejected RusDuels event from {}", originServer, failure)
+            logger.warn("Rejected ArcDuels event from {}", originServer, failure)
         }
     }
 
     private fun deliver(event: DuelEvent) {
         for (listener in listeners) {
             runCatching { listener(event) }
-                .onFailure { failure -> logger.warn("RusDuels event listener rejected {}", event.eventId, failure) }
+                .onFailure { failure -> logger.warn("ArcDuels event listener rejected {}", event.eventId, failure) }
         }
     }
 
-    private fun markFirstDelivery(eventId: String): Boolean {
+    private fun markFirstDelivery(
+        sourceServer: ServerId,
+        eventId: String,
+    ): Boolean = synchronized(seenEventsLock) {
         val now = clock.millis()
+        val key = "${sourceServer.value}:$eventId"
+        val previous = seenEvents[key]
+        if (previous != null) {
+            if (now - previous < SEEN_TTL.toMillis()) return@synchronized false
+            seenEvents[key] = now
+            return@synchronized true
+        }
         if (seenEvents.size >= MAX_SEEN_EVENTS) {
             val cutoff = now - SEEN_TTL.toMillis()
             seenEvents.entries.removeIf { it.value < cutoff }
             if (seenEvents.size >= MAX_SEEN_EVENTS) {
-                seenEvents.entries.minByOrNull { it.value }?.let(seenEvents.entries::remove)
+                seenEvents.entries.minByOrNull { it.value }?.key?.let(seenEvents::remove)
             }
         }
-        return seenEvents.putIfAbsent(eventId, now) == null
+        seenEvents[key] = now
+        true
     }
 
     companion object {
-        const val CHANNEL = "rusduels:v1:events"
+        const val CHANNEL = "arcduels:v1:events"
         private const val MAX_SEEN_EVENTS = 10_000
         private val SEEN_TTL = Duration.ofHours(1)
     }

@@ -3,6 +3,8 @@ package ru.ruscrafting.duels.paper
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.mockk.mockk
+import io.mockk.verify
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
@@ -10,10 +12,12 @@ import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
+import ru.ruscrafting.duels.domain.ChallengeId
+import java.util.UUID
 
-class RusDuelsPluginTest : StringSpec({
+class ArcDuelsPluginTest : StringSpec({
     lateinit var server: ServerMock
-    lateinit var plugin: RusDuelsPlugin
+    lateinit var plugin: ArcDuelsPlugin
 
     beforeSpec {
         server = MockBukkit.mock()
@@ -24,9 +28,10 @@ class RusDuelsPluginTest : StringSpec({
     }
 
     "default plugin configuration enables without MySQL or Redis" {
-        plugin = MockBukkit.load(RusDuelsPlugin::class.java)
+        plugin = MockBukkit.load(ArcDuelsPlugin::class.java)
 
         plugin.isEnabled shouldBe true
+        plugin.pluginMeta.name shouldBe "ArcDuels"
         plugin.getCommand("duel")?.executor?.javaClass shouldBe DuelCommand::class.java
     }
 
@@ -83,6 +88,36 @@ class RusDuelsPluginTest : StringSpec({
         PaperArenaCatalog.load(plugin).size() shouldBe 1
 
         plugin.config.set("arenas.example.bounds.min.x", 20.0)
+        shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+    }
+
+    "invalid explicit challenge ids never fall back to another pending challenge" {
+        val controller = mockk<DuelController>(relaxed = true)
+        val gui = mockk<DuelGuiService>(relaxed = true)
+        val executor = DuelCommand(controller, gui)
+        val player = server.addPlayer()
+        val command = requireNotNull(plugin.getCommand("duel"))
+
+        executor.onCommand(player, command, "duel", arrayOf("accept", "not-a-uuid"))
+
+        verify(exactly = 0) { controller.accept(player, any()) }
+
+        val id = ChallengeId(UUID.randomUUID())
+        executor.onCommand(player, command, "duel", arrayOf("accept", id.toString()))
+        verify(exactly = 1) { controller.accept(player, id) }
+    }
+
+    "case-normalized kit and arena ids cannot silently overwrite each other" {
+        plugin.config.set("kits.Classic.icon", "STONE")
+        shouldThrow<IllegalArgumentException> { KitRegistry.load(plugin) }
+        plugin.config.set("kits.Classic", null)
+
+        plugin.config.set("arenas.example.bounds.min.x", -15.0)
+        val originalArena = requireNotNull(plugin.config.getConfigurationSection("arenas.example"))
+        originalArena.getValues(true).forEach { (key, value) -> plugin.config.set("arenas.Example.$key", value) }
+        plugin.config.set("arenas.example.enabled", true)
+        plugin.config.set("arenas.Example.enabled", true)
+
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
     }
 })

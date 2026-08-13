@@ -24,7 +24,7 @@ tasks.processResources {
 }
 
 tasks.shadowJar {
-    archiveBaseName.set("RusDuels")
+    archiveBaseName.set("ArcDuels")
     archiveClassifier.set("")
     mergeServiceFiles()
 }

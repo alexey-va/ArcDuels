@@ -72,7 +72,7 @@ class PaperArenaCatalog private constructor(
         fun load(plugin: JavaPlugin): PaperArenaCatalog {
             val root = plugin.config.getConfigurationSection("arenas")
                 ?: return PaperArenaCatalog(emptyMap())
-            val loaded =
+            val entries =
                 root.getKeys(false).mapNotNull { rawId ->
                     val section = root.getConfigurationSection(rawId) ?: return@mapNotNull null
                     if (!section.getBoolean("enabled", false)) return@mapNotNull null
@@ -84,7 +84,11 @@ class PaperArenaCatalog private constructor(
                     val bounds = section.readBounds(firstWorld.uid)
                     require(bounds.contains(first) && bounds.contains(second)) { "Arena $id spawns must be inside its bounds" }
                     id to PaperArena(id, first, second, bounds)
-                }.toMap()
+                }
+            require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
+                "Arena ids must be unique after lowercase normalization"
+            }
+            val loaded = entries.toMap()
             return PaperArenaCatalog(loaded)
         }
 

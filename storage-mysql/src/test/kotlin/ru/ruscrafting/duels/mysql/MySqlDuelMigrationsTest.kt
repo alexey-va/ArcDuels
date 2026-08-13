@@ -15,6 +15,6 @@ class MySqlDuelMigrationsTest : StringSpec({
         initial.statements shouldHaveSize 4
         initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
         initial.statements[2] shouldContain "INSERT IGNORE"
-        names.statements.single() shouldContain "CREATE TABLE IF NOT EXISTS `rusduels_player_names`"
+        names.statements.single() shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_player_names`"
     }
 })

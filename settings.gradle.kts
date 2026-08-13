@@ -12,7 +12,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RusDuels"
+rootProject.name = "ArcDuels"
 
 include("domain")
 include("storage-mysql")
