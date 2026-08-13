@@ -43,12 +43,19 @@ players while their request is queued, so racing challenges cannot allocate the
 same participant twice. Once an arena is available, Paper freezes inventory and
 movement mutations, captures both states on the primary thread, and commits the
 pair to MySQL atomically. No gameplay mutation happens before that future
-completes successfully.
+completes successfully. If the client loses the COMMIT response, ArcDuels keeps
+both players frozen and reconciles the exact rows through fresh connections. It
+requires an immediate read plus six delayed empty confirmations over 30 seconds
+before treating the pair as absent; lookup failure or a partial pair stays
+fail-closed.
 
 Completed matches retain player and arena ownership until Paper has applied and
 verified and saved both online snapshots. Only then does the coordinator release
-the reservation. MySQL acknowledgement is an exact match-id/checksum delete and is
-idempotent: an unknown acknowledgement outcome leaves a safe repeatable restore.
+the reservation. MySQL atomically moves the exact match-id/checksum snapshot from
+active escrow into retained history. The archive is never auto-applied and is
+purged only after its configured deadline. An unknown archival outcome is
+idempotent: retry observes either the still-active snapshot or the exact retained
+copy.
 
 ## Match objectives and loadouts
 

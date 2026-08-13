@@ -169,7 +169,7 @@ session:
   match-loss: '<gradient:#ff5555:#aa0000><bold>DEFEAT</bold></gradient>'
   persistence-retry: '<red>Could not save the result. Retrying in 3 seconds…</red>'
   restored: '<green>Your inventory and state were safely restored.</green>'
-  ack-retry: '<yellow>Your state is restored, but MySQL acknowledgement will retry. Do not leave the server.</yellow>'
+  ack-retry: '<yellow>Your state is restored, but its safe archival in MySQL will retry. Do not leave the server.</yellow>'
   score: '<gray>Score:</gray> <aqua><first></aqua> <dark_gray>—</dark_gray> <red><second></red>'
   command-blocked: '<red>This command is unavailable during a duel.</red> <gray>Forfeit with <white>/duel leave</white></gray>'
 

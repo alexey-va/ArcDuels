@@ -34,14 +34,16 @@ The suite starts the pinned `mysql:8.4.10` image and exercises real migrations,
 ranked and unranked persistence, name lookup, leaderboards, match-id collision
 protection, timestamp precision, 32 concurrent copies of one result, and 24
 concurrent unique matches sharing the same player rows, atomic two-player
-escrow, idempotent acknowledgement, checksum matching, and rollback on a
-participant conflict. It also deletes a committed migration-history row and
-proves that replay converges when MySQL DDL committed before its journal write.
-It is intentionally not part of a fake JDBC test double.
+escrow, exact active-to-archive transfer, idempotent replay after an unknown
+archival outcome, retention deadlines, bounded expiry cleanup, checksum
+matching, and rollback on a participant conflict. It also deletes a committed
+migration-history row and proves that replay converges when MySQL DDL committed
+before its journal write. It is intentionally not part of a fake JDBC test
+double.
 
 ## Artifact gate
 
-The deployable artifact is `paper/build/libs/ArcDuels-0.2.0.jar`.
+The deployable artifact is `paper/build/libs/ArcDuels-0.2.1.jar`.
 Before distribution, verify it is a valid shadow JAR containing ArcDuels,
 Kotlin, `arc-core-sql`, `arc-core-redis`, HikariCP, Connector/J, and Jedis while
 excluding Paper and MockBukkit classes.

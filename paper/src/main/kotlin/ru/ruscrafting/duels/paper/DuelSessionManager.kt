@@ -98,9 +98,11 @@ class DuelSessionManager internal constructor(
                     durableWrite.whenComplete { stored, storageFailure ->
                         runSync {
                             if (storageFailure != null) {
-                                preparingPlayers -= currentFirst.uniqueId
-                                preparingPlayers -= currentSecond.uniqueId
                                 runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
+                                // Do not unlock either participant until a fresh read proves that
+                                // an unknown COMMIT outcome left no recoverable snapshot behind.
+                                discoverPendingState(currentFirst, notifyFailure = true)
+                                discoverPendingState(currentSecond, notifyFailure = true)
                                 result.completeExceptionally(
                                     IllegalStateException("Could not durably store both inventories in MySQL", unwrap(storageFailure)),
                                 )
@@ -111,7 +113,7 @@ class DuelSessionManager internal constructor(
                                 preparingPlayers -= currentSecond.uniqueId
                                 runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
                                 requireNotNull(stored).values.forEach { saved ->
-                                    plugin.server.getPlayer(saved.escrow.playerId.value)?.let { restoreAndAcknowledge(it, saved) }
+                                    plugin.server.getPlayer(saved.escrow.playerId.value)?.let { restoreAndRetain(it, saved) }
                                 }
                                 result.completeExceptionally(IllegalStateException("A player left before the match started"))
                                 return@runSync
@@ -120,7 +122,7 @@ class DuelSessionManager internal constructor(
                                 .onSuccess(result::complete)
                                 .onFailure { setupFailure ->
                                     requireNotNull(stored).values.forEach { saved ->
-                                        plugin.server.getPlayer(saved.escrow.playerId.value)?.let { restoreAndAcknowledge(it, saved) }
+                                        plugin.server.getPlayer(saved.escrow.playerId.value)?.let { restoreAndRetain(it, saved) }
                                     }
                                     runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
                                     result.completeExceptionally(setupFailure)
@@ -193,7 +195,7 @@ class DuelSessionManager internal constructor(
                 }
                 player.sendMessage(locales.component(player, "session.recovering"))
                 runCatching { playerStates.decode(escrow) }
-                    .onSuccess { restoreAndAcknowledge(player, it) }
+                    .onSuccess { restoreAndRetain(player, it) }
                     .onFailure { failure ->
                         plugin.logger.severe("Could not decode pending duel state for ${player.uniqueId}: ${failure.message}")
                         player.sendMessage(locales.component(player, "session.recovery-failed"))
@@ -207,7 +209,7 @@ class DuelSessionManager internal constructor(
         val escrow = playerStates.pending(player.uniqueId) ?: return false
         preparingPlayers += player.uniqueId
         runCatching { playerStates.decode(escrow) }
-            .onSuccess { restoreAndAcknowledge(player, it) }
+            .onSuccess { restoreAndRetain(player, it) }
             .onFailure { failure ->
                 plugin.logger.severe("Manual duel recovery failed for ${player.uniqueId}: ${failure.message}")
             }
@@ -245,7 +247,7 @@ class DuelSessionManager internal constructor(
             runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
             return
         }
-        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { restoreAndAcknowledge(player, it) }
+        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { restoreAndRetain(player, it) }
         if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
             coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.DISCONNECT)
                 .whenComplete { completed, failure ->
@@ -647,13 +649,13 @@ class DuelSessionManager internal constructor(
         var restored = true
         session.snapshots.forEach { (uuid, snapshot) ->
             plugin.server.getPlayer(uuid)?.let { player ->
-                if (!restoreAndAcknowledge(player, snapshot)) restored = false
+                if (!restoreAndRetain(player, snapshot)) restored = false
             }
         }
         return restored
     }
 
-    private fun restoreAndAcknowledge(
+    private fun restoreAndRetain(
         player: Player,
         stored: StoredPlayerSnapshot,
     ): Boolean {
@@ -666,7 +668,7 @@ class DuelSessionManager internal constructor(
             }
             .isSuccess
         if (!restored) return false
-        playerStates.acknowledge(stored).whenComplete { _, failure ->
+        playerStates.retain(stored).whenComplete { _, failure ->
             runSync {
                 if (failure == null) {
                     preparingPlayers -= player.uniqueId
@@ -675,14 +677,14 @@ class DuelSessionManager internal constructor(
                     }
                 } else {
                     plugin.logger.severe(
-                        "Could not acknowledge restored duel state for ${player.uniqueId}; the durable snapshot remains retryable: ${unwrap(failure).message}",
+                        "Could not archive restored duel state for ${player.uniqueId}; the active snapshot remains retryable: ${unwrap(failure).message}",
                     )
                     if (player.isOnline) {
                         player.sendMessage(locales.component(player, "session.ack-retry"))
                     }
                     plugin.server.scheduler.runTaskLater(
                         plugin,
-                        Runnable { retryAcknowledgement(player, stored) },
+                        Runnable { retryRetention(player, stored) },
                         RECOVERY_RETRY_TICKS,
                     )
                 }
@@ -691,20 +693,20 @@ class DuelSessionManager internal constructor(
         return true
     }
 
-    private fun retryAcknowledgement(
+    private fun retryRetention(
         player: Player,
         stored: StoredPlayerSnapshot,
     ) {
-        playerStates.acknowledge(stored).whenComplete { _, failure ->
+        playerStates.retain(stored).whenComplete { _, failure ->
             runSync {
                 if (failure == null) {
                     preparingPlayers -= player.uniqueId
                 } else if (plugin.isEnabled) {
-                    plugin.logger.severe("Player state acknowledgement retry failed for ${player.uniqueId}: ${unwrap(failure).message}")
+                    plugin.logger.severe("Player state archival retry failed for ${player.uniqueId}: ${unwrap(failure).message}")
                     if (player.isOnline) {
                         plugin.server.scheduler.runTaskLater(
                             plugin,
-                            Runnable { retryAcknowledgement(player, stored) },
+                            Runnable { retryRetention(player, stored) },
                             RECOVERY_RETRY_TICKS,
                         )
                     }

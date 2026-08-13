@@ -169,7 +169,7 @@ session:
   match-loss: '<gradient:#ff5555:#aa0000><bold>ПОРАЖЕНИЕ</bold></gradient>'
   persistence-retry: '<red>Не удалось сохранить результат. Повтор через 3 секунды…</red>'
   restored: '<green>Инвентарь и состояние надёжно восстановлены.</green>'
-  ack-retry: '<yellow>Состояние восстановлено, но подтверждение MySQL будет повторено. Не выходи с сервера.</yellow>'
+  ack-retry: '<yellow>Состояние восстановлено, но безопасный перенос снимка в архив MySQL будет повторён. Не выходи с сервера.</yellow>'
   score: '<gray>Счёт:</gray> <aqua><first></aqua> <dark_gray>—</dark_gray> <red><second></red>'
   command-blocked: '<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>'
 

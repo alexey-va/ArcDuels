@@ -68,6 +68,16 @@ interface PlayerStateEscrowRepository {
 
     fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>>
 
-    /** Removes a snapshot only if match id and checksum still identify the exact applied state. */
-    fun acknowledgeRestored(snapshot: PlayerStateEscrow): CompletableFuture<Boolean>
+    /**
+     * Atomically moves the exact applied snapshot out of active recovery and
+     * into retained history. A retained snapshot is never auto-applied.
+     */
+    fun retainRestored(
+        snapshot: PlayerStateEscrow,
+        restoredAt: Instant,
+        purgeAfter: Instant,
+    ): CompletableFuture<Boolean>
+
+    /** Deletes only retained snapshots whose durable retention deadline elapsed. */
+    fun purgeRetained(cutoff: Instant): CompletableFuture<Int>
 }

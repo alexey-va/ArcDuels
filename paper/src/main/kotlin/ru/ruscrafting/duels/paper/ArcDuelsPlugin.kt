@@ -22,6 +22,7 @@ import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
@@ -54,10 +55,33 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val statistics = persistence.statistics
         val publisher = createNetwork(serverId, statistics, locales)
         val coordinator = MatchCoordinator(serverId, arenas, statistics, publisher, Clock.systemUTC())
-        val playerStates = DurablePlayerStateService(this, serverId, persistence.playerStates)
+        val retentionDays = config.getLong("mysql.inventory-snapshots.retention-days", 7L)
+        require(retentionDays in 1L..3_650L) { "mysql.inventory-snapshots.retention-days must be between 1 and 3650" }
+        val cleanupMinutes = config.getLong("mysql.inventory-snapshots.cleanup-interval-minutes", 60L)
+        require(cleanupMinutes in 1L..10_080L) {
+            "mysql.inventory-snapshots.cleanup-interval-minutes must be between 1 and 10080"
+        }
+        val playerStates =
+            DurablePlayerStateService(
+                this,
+                serverId,
+                persistence.playerStates,
+                retention = Duration.ofDays(retentionDays),
+            )
         if (persistence.durable) {
             val recovered = playerStates.loadPending(config.getLong("mysql.pool.connection-timeout-ms", 10_000L) + 30_000L)
             if (recovered > 0) logger.warning("Loaded $recovered pending player state snapshot(s) for crash recovery")
+            val purge = Runnable {
+                playerStates.purgeExpired().whenComplete { deleted, failure ->
+                    if (failure != null) {
+                        logger.warning("Could not purge expired retained player snapshots: ${failure.message}")
+                    } else if (deleted > 0) {
+                        logger.info("Purged $deleted expired retained player snapshot(s)")
+                    }
+                }
+            }
+            purge.run()
+            server.scheduler.runTaskTimer(this, purge, cleanupMinutes * 1_200L, cleanupMinutes * 1_200L)
         } else {
             logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
         }
@@ -207,6 +231,12 @@ open class ArcDuelsPlugin : JavaPlugin() {
         override fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>> =
             CompletableFuture.completedFuture(emptyList())
 
-        override fun acknowledgeRestored(snapshot: PlayerStateEscrow): CompletableFuture<Boolean> = unavailable()
+        override fun retainRestored(
+            snapshot: PlayerStateEscrow,
+            restoredAt: Instant,
+            purgeAfter: Instant,
+        ): CompletableFuture<Boolean> = unavailable()
+
+        override fun purgeRetained(cutoff: Instant): CompletableFuture<Int> = unavailable()
     }
 }

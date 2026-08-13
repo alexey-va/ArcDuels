@@ -122,5 +122,28 @@ object MySqlDuelMigrations {
                         """.trimIndent(),
                     ),
             ),
+            SqlMigration(
+                version = 5,
+                description = "retain restored player snapshots before expiry",
+                statements =
+                    listOf(
+                        """
+                        CREATE TABLE IF NOT EXISTS `arcduels_player_state_archive` (
+                            `player_id` BINARY(16) NOT NULL,
+                            `match_id` BINARY(16) NOT NULL,
+                            `server_id` VARCHAR(48) NOT NULL,
+                            `format_version` INT UNSIGNED NOT NULL,
+                            `payload` MEDIUMBLOB NOT NULL,
+                            `payload_sha256` BINARY(32) NOT NULL,
+                            `created_at` DATETIME(3) NOT NULL,
+                            `restored_at` DATETIME(3) NOT NULL,
+                            `purge_after` DATETIME(3) NOT NULL,
+                            PRIMARY KEY (`player_id`, `match_id`),
+                            KEY `idx_arcduels_archive_expiry` (`purge_after`),
+                            KEY `idx_arcduels_archive_player` (`player_id`, `restored_at` DESC)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """.trimIndent(),
+                    ),
+            ),
         )
 }

@@ -33,7 +33,8 @@ This repository is under active development. The first vertical slice targets:
 - countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
 - bounded arenas, scoped internal teleports and protected player inventories;
 - FIFO waiting for a free arena and in-game `/duels admin arena` setup;
-- crash-safe, versioned MySQL player-state escrow before any duel mutation;
+- crash-safe, versioned MySQL player-state escrow before any duel mutation,
+  with restored snapshots retained in a non-replayable archive for configurable N days;
 - real KOTH capture zones with contested progress, particles, action bars, and
   objective-compatible arena allocation.
 

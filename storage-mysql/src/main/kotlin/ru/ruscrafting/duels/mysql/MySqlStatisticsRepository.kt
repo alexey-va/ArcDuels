@@ -149,8 +149,31 @@ class MySqlStatisticsRepository(
             }
         }
 
-    override fun acknowledgeRestored(snapshot: PlayerStateEscrow): CompletableFuture<Boolean> =
-        runtime.executor.transaction { connection ->
+    override fun retainRestored(
+        snapshot: PlayerStateEscrow,
+        restoredAt: Instant,
+        purgeAfter: Instant,
+    ): CompletableFuture<Boolean> {
+        validateEscrow(snapshot)
+        require(purgeAfter.isAfter(restoredAt)) { "Retained escrow expiry must follow restoration" }
+        return runtime.executor.transaction { connection ->
+            val active = findEscrow(connection, snapshot.playerId, lock = true)
+            val retained = findRetainedEscrow(connection, snapshot.playerId, snapshot.matchId, lock = true)
+            if (active == null) {
+                return@transaction retained?.sameContent(snapshot) == true
+            }
+            if (!active.sameContent(snapshot)) return@transaction false
+            if (retained == null) {
+                insertRetainedEscrow(connection, snapshot, restoredAt, purgeAfter)
+            } else {
+                check(retained.sameContent(snapshot)) {
+                    "A different retained escrow already exists for ${snapshot.playerId} and ${snapshot.matchId}"
+                }
+            }
+            checkNotNull(findRetainedEscrow(connection, snapshot.playerId, snapshot.matchId, lock = false)).also {
+                check(it.sameContent(snapshot)) { "Retained escrow verification failed for ${snapshot.playerId}" }
+                validateEscrow(it)
+            }
             connection.prepareStatement(
                 """
                 DELETE FROM `arcduels_player_state_escrow`
@@ -160,11 +183,19 @@ class MySqlStatisticsRepository(
                 statement.setBytes(1, UuidBytes.encode(snapshot.playerId.value))
                 statement.setBytes(2, UuidBytes.encode(snapshot.matchId.value))
                 statement.setBytes(3, snapshot.checksum)
-                when (statement.executeUpdate()) {
-                    1 -> true
-                    0 -> findEscrow(connection, snapshot.playerId, lock = true) == null
-                    else -> error("Escrow acknowledgement affected more than one row")
-                }
+                check(statement.executeUpdate() == 1) { "Active escrow changed before archival completed" }
+            }
+            true
+        }
+    }
+
+    override fun purgeRetained(cutoff: Instant): CompletableFuture<Int> =
+        runtime.executor.transaction { connection ->
+            connection.prepareStatement(
+                "DELETE FROM `arcduels_player_state_archive` WHERE `purge_after` <= ? ORDER BY `purge_after` LIMIT $PURGE_BATCH_SIZE",
+            ).use { statement ->
+                statement.setTimestamp(1, Timestamp.from(cutoff))
+                statement.executeUpdate()
             }
         }
 
@@ -252,6 +283,32 @@ class MySqlStatisticsRepository(
         }
     }
 
+    private fun insertRetainedEscrow(
+        connection: Connection,
+        snapshot: PlayerStateEscrow,
+        restoredAt: Instant,
+        purgeAfter: Instant,
+    ) {
+        connection.prepareStatement(
+            """
+            INSERT INTO `arcduels_player_state_archive`
+                (`player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`, `restored_at`, `purge_after`)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setBytes(1, UuidBytes.encode(snapshot.playerId.value))
+            statement.setBytes(2, UuidBytes.encode(snapshot.matchId.value))
+            statement.setString(3, snapshot.serverId.value)
+            statement.setInt(4, snapshot.formatVersion)
+            statement.setBytes(5, snapshot.payload)
+            statement.setBytes(6, snapshot.checksum)
+            statement.setTimestamp(7, Timestamp.from(snapshot.createdAt))
+            statement.setTimestamp(8, Timestamp.from(restoredAt))
+            statement.setTimestamp(9, Timestamp.from(purgeAfter))
+            check(statement.executeUpdate() == 1) { "Could not retain restored player state escrow" }
+        }
+    }
+
     private fun findEscrow(
         connection: Connection,
         playerId: PlayerId,
@@ -265,6 +322,24 @@ class MySqlStatisticsRepository(
             """.trimIndent(),
         ).use { statement ->
             statement.setBytes(1, UuidBytes.encode(playerId.value))
+            statement.executeQuery().use { result -> if (result.next()) result.toEscrow() else null }
+        }
+
+    private fun findRetainedEscrow(
+        connection: Connection,
+        playerId: PlayerId,
+        matchId: MatchId,
+        lock: Boolean,
+    ): PlayerStateEscrow? =
+        connection.prepareStatement(
+            """
+            SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+            FROM `arcduels_player_state_archive`
+            WHERE `player_id` = ? AND `match_id` = ?${if (lock) " FOR UPDATE" else ""}
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setBytes(1, UuidBytes.encode(playerId.value))
+            statement.setBytes(2, UuidBytes.encode(matchId.value))
             statement.executeQuery().use { result -> if (result.next()) result.toEscrow() else null }
         }
 
@@ -523,6 +598,7 @@ class MySqlStatisticsRepository(
         // duplicate burst safely.
         const val MAX_TRANSACTION_RETRIES = 8
         const val RETRY_BASE_DELAY_MS = 10L
+        const val PURGE_BATCH_SIZE = 1_000
         const val MAX_ESCROW_PAYLOAD_BYTES = 8 * 1024 * 1024
         const val MIGRATION_NAMESPACE = "arcduels"
         const val STAT_COLUMNS =

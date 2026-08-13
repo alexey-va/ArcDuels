@@ -24,6 +24,10 @@ mysql:
   password: ''
   # DISABLED, REQUIRED, VERIFY_CA, or VERIFY_IDENTITY
   ssl-mode: VERIFY_IDENTITY
+  inventory-snapshots:
+    # Restored snapshots are archived for manual recovery and never auto-applied.
+    retention-days: 7
+    cleanup-interval-minutes: 60
   pool:
     minimum-idle: 1
     maximum-size: 8

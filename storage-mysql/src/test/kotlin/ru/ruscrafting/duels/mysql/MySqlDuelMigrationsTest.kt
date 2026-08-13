@@ -11,9 +11,10 @@ class MySqlDuelMigrationsTest : StringSpec({
         val initial = migrations.first()
         val names = migrations[1]
         val escrow = migrations[2]
-        val objective = migrations.last()
+        val objective = migrations[3]
+        val archive = migrations[4]
 
-        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4)
+        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5)
         initial.statements shouldHaveSize 4
         initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
         initial.statements[2] shouldContain "INSERT IGNORE"
@@ -29,5 +30,9 @@ class MySqlDuelMigrationsTest : StringSpec({
         objective.statements[1] shouldContain "PREPARE arcduels_migration_4_statement"
         objective.statements[2] shouldContain "EXECUTE arcduels_migration_4_statement"
         objective.statements[3] shouldContain "DEALLOCATE PREPARE arcduels_migration_4_statement"
+        archive.statements.single() shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_player_state_archive`"
+        archive.statements.single() shouldContain "`restored_at` DATETIME(3) NOT NULL"
+        archive.statements.single() shouldContain "`purge_after` DATETIME(3) NOT NULL"
+        archive.statements.single() shouldContain "PRIMARY KEY (`player_id`, `match_id`)"
     }
 })

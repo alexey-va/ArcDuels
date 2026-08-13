@@ -122,11 +122,28 @@ original location, inventory, armor, off-hand, health, hunger, experience, game
 mode, flight state, cursor item, selected slot, movement state, and potion
 effects after completion, disconnect, cancellation, or shutdown. Items use
 Paper's versioned NBT byte format so Minecraft data conversion can migrate them
-after an upgrade. The active escrow row is deleted only after exact state
-application, verification, and a synchronous save of Paper's playerdata; a
-crash before acknowledgement simply causes the same idempotent restore on the next join. A snapshot belonging to another
-network node locks duel state and identifies the originating `server-id`
-instead of applying world data on the wrong server.
+after an upgrade. After exact state application, verification, and a synchronous
+save of Paper's playerdata, one InnoDB transaction copies the exact active row
+to `arcduels_player_state_archive` and deletes it from active recovery. A lost
+transaction response is safe to retry. Archived rows are never auto-applied, so
+retention cannot rewind or duplicate a player's later inventory. A crash before
+that transaction commits leaves the active row and causes the same idempotent
+restore on the next join.
+
+Restored snapshots are retained for seven days by default and expired archive
+rows are purged in bounded batches once per hour. Both values are configurable:
+
+```yaml
+mysql:
+  inventory-snapshots:
+    retention-days: 7
+    cleanup-interval-minutes: 60
+```
+
+The retention period is bounded to `1..3650` days. Cleanup can run every
+`1..10080` minutes and never touches active recovery rows. A snapshot belonging
+to another network node locks duel state and identifies the originating
+`server-id` instead of applying world data on the wrong server.
 
 The bundled starter kits are `classic`, `axe`, `archer`, `uhc`, `tank`, and
 `sumo`. The UHC selection starts with natural regeneration disabled; every

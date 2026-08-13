@@ -20,6 +20,7 @@ import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Instant
 import java.security.MessageDigest
+import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.ExecutionException
 
@@ -53,8 +54,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     "arcduels-it",
                 )
             repository = MySqlStatisticsRepository(runtime)
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4)
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5)
         }
 
         afterSpec {
@@ -201,11 +202,13 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             duplicate shouldBe firstWrite.copy(newlyRecorded = false)
         }
 
-        "player state pair is atomic verified idempotent and acknowledged by exact checksum" {
+        "player state pair is atomically moved to retained history and purged only after expiry" {
             val serverId = ServerId("duels-it")
             val matchId = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000060"))
             val first = escrow("00000000-0000-0000-0000-000000000061", matchId, serverId, "first-state")
             val second = escrow("00000000-0000-0000-0000-000000000062", matchId, serverId, "second-state")
+            val restoredAt = Instant.parse("2026-08-14T12:00:00Z")
+            val purgeAfter = Instant.parse("2026-08-21T12:00:00Z")
 
             repository.savePair(first, second).get()
             repository.savePair(first, second).get()
@@ -215,14 +218,21 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             repository.pending(serverId).get().map { it.playerId } shouldContainExactly listOf(first.playerId, second.playerId)
 
             val wrongReceipt = escrow(first.playerId.value.toString(), matchId, serverId, "different-state")
-            repository.acknowledgeRestored(wrongReceipt).get() shouldBe false
+            repository.retainRestored(wrongReceipt, restoredAt, purgeAfter).get() shouldBe false
             repository.findPending(first.playerId).get()?.sameContent(first) shouldBe true
 
-            repository.acknowledgeRestored(first).get() shouldBe true
-            repository.acknowledgeRestored(first).get() shouldBe true
+            repository.retainRestored(first, restoredAt, purgeAfter).get() shouldBe true
+            repository.retainRestored(first, restoredAt.plusSeconds(30), purgeAfter.plusSeconds(30)).get() shouldBe true
             repository.findPending(first.playerId).get() shouldBe null
             repository.findPending(second.playerId).get()?.sameContent(second) shouldBe true
-            repository.acknowledgeRestored(second).get() shouldBe true
+            retainedCount(first) shouldBe 1
+            repository.purgeRetained(purgeAfter.minusMillis(1)).get() shouldBe 0
+            retainedCount(first) shouldBe 1
+
+            repository.retainRestored(second, restoredAt, purgeAfter).get() shouldBe true
+            repository.purgeRetained(purgeAfter).get() shouldBe 2
+            retainedCount(first) shouldBe 0
+            retainedCount(second) shouldBe 0
         }
 
         "conflicting participant rolls back the other participant in the pair" {
@@ -240,8 +250,10 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
 
             repository.findPending(innocent.playerId).get() shouldBe null
             repository.findPending(conflictPlayer.playerId).get()?.sameContent(conflictPlayer) shouldBe true
-            repository.acknowledgeRestored(conflictPlayer).get() shouldBe true
-            repository.acknowledgeRestored(occupiedPeer).get() shouldBe true
+            val restoredAt = Instant.parse("2026-08-14T13:00:00Z")
+            val purgeAfter = Instant.parse("2026-08-21T13:00:00Z")
+            repository.retainRestored(conflictPlayer, restoredAt, purgeAfter).get() shouldBe true
+            repository.retainRestored(occupiedPeer, restoredAt, purgeAfter).get() shouldBe true
         }
 
         "migration rerun converges after ddl committed before history record" {
@@ -252,7 +264,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             }
 
             repository.migrate().get().appliedVersions shouldContainExactly listOf(4)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5)
         }
     }
 
@@ -273,4 +285,24 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             Instant.parse("2026-08-13T11:00:00Z"),
         )
     }
+
+    private fun retainedCount(snapshot: PlayerStateEscrow): Int =
+        mysql.createConnection("").use { connection ->
+            connection.prepareStatement(
+                "SELECT COUNT(*) FROM `arcduels_player_state_archive` WHERE `player_id` = ? AND `match_id` = ?",
+            ).use { statement ->
+                statement.setBytes(1, snapshot.playerId.value.toBytes())
+                statement.setBytes(2, snapshot.matchId.value.toBytes())
+                statement.executeQuery().use { result ->
+                    check(result.next())
+                    result.getInt(1)
+                }
+            }
+        }
+
+    private fun UUID.toBytes(): ByteArray =
+        ByteBuffer.allocate(16)
+            .putLong(mostSignificantBits)
+            .putLong(leastSignificantBits)
+            .array()
 }
