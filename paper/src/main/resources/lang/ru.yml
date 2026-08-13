@@ -1,0 +1,232 @@
+prefix: '<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>ДУЭЛИ</bold></gradient><dark_gray>]</dark_gray> '
+
+menu:
+  common:
+    back: '<aqua><bold>НАЗАД</bold></aqua>'
+    previous: '<yellow><bold>ПРЕДЫДУЩАЯ</bold></yellow>'
+    next: '<yellow><bold>СЛЕДУЮЩАЯ</bold></yellow>'
+    page: '<aqua>Страница <page>/<pages></aqua>'
+    enabled: '<green>Включено</green>'
+    disabled: '<red>Выключено</red>'
+    unavailable: '<gray>Недоступно</gray>'
+  main:
+    title: '<gradient:#55ffff:#5555ff><bold>ARCDUELS</bold></gradient>'
+    challenge: '<aqua><bold>ВЫЗВАТЬ НА БОЙ</bold></aqua>'
+    challenge-lore: ['<gray>Выбери соперника, режим, снаряжение</gray>', '<gray>и точные правила матча.</gray>', '', '<yellow>Нажми, чтобы начать настройку</yellow>']
+    queue: '<yellow><bold>АРЕНЫ И ОЧЕРЕДЬ</bold></yellow>'
+    queue-lore: ['<gray>Сейчас занято арен: <white><active></white></gray>', '<gray>Пар ожидает: <white><waiting></white></gray>', '', '<yellow>Нажми для подробностей</yellow>']
+    leaderboard: '<gold><bold>ЛИДЕРБОРД</bold></gold>'
+    leaderboard-lore: ['<gray>Глобальный рейтинг игроков</gray>', '<gray>из общей базы всех серверов.</gray>', '', '<yellow>Нажми, чтобы открыть</yellow>']
+    modes: '<green><bold>РЕЖИМЫ</bold></green>'
+    modes-lore: ['<gray>Обычная дуэль, царь горы и сумо.</gray>', '', '<yellow>Нажми, чтобы изучить</yellow>']
+    kits: '<light_purple><bold>КИТЫ</bold></light_purple>'
+    kits-lore: ['<gray>Готовые честные наборы экипировки.</gray>', '', '<yellow>Нажми, чтобы посмотреть</yellow>']
+    stats: '<aqua><bold>МОЯ СТАТИСТИКА</bold></aqua>'
+    stats-lore: ['<gray>Рейтинг, победы, винрейт и серии.</gray>', '', '<yellow>Нажми, чтобы показать</yellow>']
+    help: '<white><bold>КАК ЭТО РАБОТАЕТ</bold></white>'
+    help-lore: ['<gray>Команды и гарантия возврата вещей.</gray>', '', '<yellow>Нажми для справки</yellow>']
+    admin: '<red><bold>УПРАВЛЕНИЕ АРЕНАМИ</bold></red>'
+    admin-lore: ['<gray>Точки появления, границы и холм.</gray>', '', '<yellow>Только для администраторов</yellow>']
+  targets:
+    title: '<gradient:#55ffff:#5555ff><bold>СОПЕРНИК</bold></gradient> <gray><page>/<pages></gray>'
+    player: '<aqua><bold><player></bold></aqua>'
+    player-lore: ['<gray>Игрок свободен и может принять вызов.</gray>', '', '<yellow>Нажми, чтобы выбрать режим</yellow>']
+    empty: '<red>Нет свободных игроков</red>'
+  objectives:
+    title: '<gradient:#55ff55:#00aa00><bold>РЕЖИМ ПРОТИВ <player></bold></gradient>'
+  loadouts:
+    title: '<gradient:#ffaa00:#ff5555><bold>СНАРЯЖЕНИЕ</bold></gradient>'
+    own: '<light_purple><bold>СВОИ ВЕЩИ</bold></light_purple>'
+    own-lore: ['<gray>Каждый сражается своим инвентарём.</gray>', '<green>До телепорта всё сохраняется в MySQL.</green>', '<green>После боя состояние восстанавливается.</green>', '', '<yellow>Нажми, чтобы выбрать</yellow>']
+    sumo-missing: '<red>Кит sumo не настроен</red>'
+    kit-hint: ['', '<yellow>Нажми, чтобы выбрать этот кит</yellow>']
+  rules:
+    title: '<gradient:#ffaa00:#ff5555><bold>ПРАВИЛА ПРОТИВ <player></bold></gradient>'
+    ranked: '<gold><bold>РЕЙТИНГОВЫЙ МАТЧ</bold></gold>'
+    ranked-lore: ['<gray>Состояние: <state></gray>', '<dark_gray>Доступно только с одинаковым китом.</dark_gray>', '', '<yellow>Нажми, чтобы переключить</yellow>']
+    best-of: '<aqua><bold>ФОРМАТ: BO<value></bold></aqua>'
+    best-of-lore: ['<gray>До одной, двух или трёх побед.</gray>', '', '<yellow>Нажми: BO1 → BO3 → BO5</yellow>']
+    sudden-death: '<red><bold>ВНЕЗАПНАЯ СМЕРТЬ: <seconds>с</bold></red>'
+    sudden-death-lore: ['<gray>После таймера оба получают иссушение.</gray>', '<gray>Раунд больше не сможет затянуться.</gray>', '', '<yellow>Нажми, чтобы изменить</yellow>']
+    projectiles: '<aqua><bold>СНАРЯДЫ</bold></aqua>'
+    projectiles-lore: ['<gray>Состояние: <state></gray>', '<gray>Луки, арбалеты и трезубцы.</gray>', '', '<yellow>Нажми, чтобы переключить</yellow>']
+    consumables: '<light_purple><bold>РАСХОДНИКИ</bold></light_purple>'
+    consumables-lore: ['<gray>Состояние: <state></gray>', '<gray>Еда, зелья и золотые яблоки.</gray>', '', '<yellow>Нажми, чтобы переключить</yellow>']
+    pearls: '<dark_purple><bold>ЭНДЕР-ЖЕМЧУГ</bold></dark_purple>'
+    pearls-lore: ['<gray>Состояние: <state></gray>', '', '<yellow>Нажми, чтобы переключить</yellow>']
+    regeneration: '<green><bold>ЕСТЕСТВЕННАЯ РЕГЕНЕРАЦИЯ</bold></green>'
+    regeneration-lore: ['<gray>Состояние: <state></gray>', '', '<yellow>Нажми, чтобы переключить</yellow>']
+    capture: '<aqua><bold>ЗАХВАТ ХОЛМА: <seconds>с</bold></aqua>'
+    capture-lore: ['<gray>Столько нужно удерживать точку одному.</gray>', '<gray>При спорном захвате прогресс стоит.</gray>', '', '<yellow>Нажми, чтобы изменить</yellow>']
+    confirm: '<green><bold>ОТПРАВИТЬ ВЫЗОВ</bold></green>'
+    confirm-lore: ['<gray>Все параметры выбраны.</gray>', '', '<yellow>Нажми для подтверждения</yellow>']
+  leaderboard:
+    loading: '<gray>Загружаю глобальный рейтинг…</gray>'
+    title: '<gradient:#ffd700:#ff8c00><bold>ЛИДЕРЫ</bold></gradient> <gray><page>/<pages></gray>'
+    entry: '<gold><bold>#<position></bold></gold> <white><player></white>'
+    entry-lore: ['<gray>Рейтинг:</gray> <aqua><bold><rating></bold></aqua>', '<gray>Победы:</gray> <green><wins></green>', '<gray>Поражения:</gray> <red><losses></red>']
+    empty: '<gray>Матчей пока нет</gray>'
+  modes:
+    title: '<gradient:#55ff55:#00aa00><bold>РЕЖИМЫ</bold></gradient>'
+  kits:
+    title: '<gradient:#aa55ff:#ff55ff><bold>КИТЫ</bold></gradient>'
+  queue:
+    title: '<gradient:#ffff55:#ffaa00><bold>АРЕНЫ И ОЧЕРЕДЬ</bold></gradient>'
+    active: '<red><bold>ИДУТ БОИ: <active></bold></red>'
+    active-lore: ['<gray>Количество занятых сейчас арен.</gray>']
+    waiting: '<yellow><bold>ОЖИДАЮТ: <waiting></bold></yellow>'
+    waiting-lore: ['<gray>Пары получают арену строго по очереди.</gray>']
+
+objective:
+  elimination:
+    name: '<red><bold>КЛАССИЧЕСКАЯ ДУЭЛЬ</bold></red>'
+    description: ['<gray>Победи соперника в прямом бою.</gray>', '<gray>Выход за границу считается поражением.</gray>', '', '<yellow>Нажми, чтобы выбрать</yellow>']
+  koth:
+    name: '<aqua><bold>ЦАРЬ ГОРЫ</bold></aqua>'
+    description: ['<gray>Удерживай отмеченную точку на арене.</gray>', '<gray>Если оба стоят на ней — захват спорный.</gray>', '', '<yellow>Нажми, чтобы выбрать</yellow>']
+  sumo:
+    name: '<green><bold>СУМО</bold></green>'
+    description: ['<gray>Урон отключён: вытолкни соперника</gray>', '<gray>за безопасные границы арены.</gray>', '', '<yellow>Нажми, чтобы выбрать</yellow>']
+
+kit:
+  classic:
+    name: '<aqua><bold>КЛАССИКА</bold></aqua>'
+    description: ['<gray>Алмазный меч, лук, броня и яблоки.</gray>']
+  axe:
+    name: '<gold><bold>ТОПОРЫ И ЩИТЫ</bold></gold>'
+    description: ['<gray>Тактический бой топором против щита.</gray>']
+  archer:
+    name: '<yellow><bold>ЛУЧНИК</bold></yellow>'
+    description: ['<gray>Дистанционный бой с ограниченными стрелами.</gray>']
+  uhc:
+    name: '<red><bold>UHC</bold></red>'
+    description: ['<gray>Сильное снаряжение без естественной регенерации.</gray>']
+  tank:
+    name: '<blue><bold>ТАНК</bold></blue>'
+    description: ['<gray>Тяжёлая броня, щит и долгий ближний бой.</gray>']
+  sumo:
+    name: '<green><bold>СУМО</bold></green>'
+    description: ['<gray>Пустые руки и равные условия.</gray>']
+
+error:
+  player-only: '<red>Эта команда доступна только игроку.</red>'
+  player-left: '<red>Игрок уже вышел или начал другой бой.</red>'
+  leaderboard: '<red>Не удалось загрузить рейтинг.</red>'
+  invalid-challenge-id: '<red>Некорректный идентификатор вызова.</red>'
+
+controller:
+  busy: '<red>Один из игроков уже в очереди, в бою или ожидает восстановления.</red>'
+  sent: '<green>Вызов отправлен игроку <white><player></white>.</green>'
+  failed: '<red>Не удалось обработать вызов на дуэль.</red>'
+  expired: '<red>Этот вызов уже истёк.</red>'
+  start-failed: '<red>Не удалось начать дуэль: <reason></red>'
+  wait-cancelled: '<gray>ожидание арены отменено</gray>'
+  start-internal: '<gray>арена или надёжное хранилище сейчас недоступны</gray>'
+  denied: '<gray>Вызов на дуэль отклонён.</gray>'
+  cancelled: '<gray>Вызов на дуэль отменён.</gray>'
+  forfeit: '<gray>Ты сдался. Результат дуэли сохраняется…</gray>'
+  not-fighting: '<red>Ты сейчас не участвуешь в активной дуэли.</red>'
+  stats-failed: '<red>Не удалось загрузить статистику.</red>'
+  stats: |-
+    <dark_gray>────────</dark_gray> <gradient:#55ffff:#5555ff><bold><player></bold></gradient> <dark_gray>────────</dark_gray>
+    <gray>Рейтинг:</gray> <aqua><bold><rating></bold></aqua>
+    <gray>Победы:</gray> <green><wins></green>  <gray>Поражения:</gray> <red><losses></red>
+    <gray>Винрейт:</gray> <yellow><winrate>%</yellow>
+    <gray>Серия:</gray> <gold><streak></gold>  <gray>Лучшая:</gray> <gold><best></gold>
+    <dark_gray>────────────────────</dark_gray>
+  no-incoming: '<red>У тебя нет входящих вызовов.</red>'
+  no-outgoing: '<red>У тебя нет исходящих вызовов.</red>'
+  loadout-kit: '<gray>кит <white><kit></white></gray>'
+  loadout-own: '<gray>своё снаряжение</gray>'
+  received: |-
+    <yellow><white><player></white> вызывает тебя на дуэль: <objective></yellow>
+    <gray>Снаряжение:</gray> <loadout> <dark_gray>•</dark_gray> <gray>BO<bestof></gray> <dark_gray>•</dark_gray> <gray>Рейтинг:</gray> <ranked>
+    <gray>Внезапная смерть:</gray> <white><sudden>с</white> <dark_gray>•</dark_gray> <gray>Снаряды:</gray> <projectiles> <dark_gray>•</dark_gray> <gray>Расходники:</gray> <consumables>
+    <gray>Жемчуг:</gray> <pearls> <dark_gray>•</dark_gray> <gray>Регенерация:</gray> <regeneration>
+
+  accept: '<newline><green><bold>[ПРИНЯТЬ]</bold></green>'
+  accept-hover: '<green>Начать дуэль</green>'
+  deny: ' <red><bold>[ОТКЛОНИТЬ]</bold></red>'
+  deny-hover: '<red>Отклонить вызов</red>'
+
+session:
+  queued: '<yellow>Все совместимые арены заняты. Ваша пара в очереди: <white>#<position></white>.</yellow>'
+  recovery-check-retry: '<red>Проверка восстановления в MySQL временно недоступна.</red> <yellow>Состояние надёжно заблокировано; ArcDuels повторит попытку автоматически.</yellow>'
+  remote-recovery: '<red>У тебя есть незавершённое восстановление ArcDuels на сервере <white><server></white>.</red> <yellow>Вернись туда или обратись к администратору; снимок сохранён в MySQL.</yellow>'
+  recovering: '<yellow>Восстанавливаю сохранённое состояние после незавершённой дуэли…</yellow>'
+  recovery-failed: '<red>Состояние не восстановлено. Обратись к администратору; инвентарь остаётся сохранён в MySQL.</red>'
+  fight-title: '<red><bold>В БОЙ!</bold></red>'
+  fight-subtitle: '<gray>Удачи — она пригодится</gray>'
+  hill-contested: '<yellow>Холм оспаривается</yellow>'
+  hill-capturing: '<green>Захват</green>'
+  hill-free: '<gray>Холм свободен</gray>'
+  hill-enemy: '<red>Соперник захватывает</red>'
+  hill-progress: '<state> <dark_gray>•</dark_gray> <aqua><percent>%</aqua>'
+  sudden-death: '<red><bold>ВНЕЗАПНАЯ СМЕРТЬ!</bold></red> <gray>Теперь здоровье постоянно убывает.</gray>'
+  round-win: '<green><bold>РАУНД ТВОЙ</bold></green>'
+  round-loss: '<red><bold>РАУНД ПРОИГРАН</bold></red>'
+  match-win: '<gradient:#55ff55:#00aa00><bold>ПОБЕДА</bold></gradient>'
+  match-loss: '<gradient:#ff5555:#aa0000><bold>ПОРАЖЕНИЕ</bold></gradient>'
+  persistence-retry: '<red>Не удалось сохранить результат. Повтор через 3 секунды…</red>'
+  restored: '<green>Инвентарь и состояние надёжно восстановлены.</green>'
+  ack-retry: '<yellow>Состояние восстановлено, но подтверждение MySQL будет повторено. Не выходи с сервера.</yellow>'
+  score: '<gray>Счёт:</gray> <aqua><first></aqua> <dark_gray>—</dark_gray> <red><second></red>'
+  command-blocked: '<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>'
+
+network:
+  win: '<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>ДУЭЛИ</bold></gradient><dark_gray>]</dark_gray> <aqua><winner></aqua> <gray>победил</gray> <red><loser></red> <dark_gray>(<rating>)</dark_gray>'
+
+admin:
+  no-permission: '<red>Нет права <permission>.</red>'
+  status: '<aqua>ArcDuels:</aqua> арен <white><arenas></white>, занято <white><active></white>, пар в очереди <white><waiting></white>.'
+  arena-exists: '<red>Арена <white><arena></white> уже существует.</red>'
+  arena-created: '<green>Арена <white><arena></white> создана выключенной.</green> <gray>Теперь задай spawn 1/2, corner 1/2 и при необходимости hill.</gray>'
+  arena-editing: '<yellow>Редактируется арена <arena></yellow>'
+  spawn-saved: '<green>Точка появления <point> арены <white><arena></white> сохранена.</green>'
+  wrong-world: '<red>Границы нужно отмечать в мире первой точки появления: <white><world></white>.</red>'
+  corner-saved: '<green>Угол <point> арены <white><arena></white> сохранён.</green> <gray>При включении координаты автоматически нормализуются.</gray>'
+  hill-range: '<red>Радиус и высота холма должны быть от 1 до 32 блоков.</red>'
+  hill-saved: '<green>Холм арены <white><arena></white> сохранён: радиус <radius>, высота <height>.</green>'
+  arena-invalid: '<red>Арена не применена: <reason></red>'
+  arena-enabled: '<green>Арена <white><arena></white> проверена и включена. Активных арен: <count>.</green>'
+  arena-disabled: '<yellow>Арена <white><arena></white> выключена. Активных арен: <count>.</yellow>'
+  reloaded: '<green>Конфигурация перечитана; активных арен: <count>.</green>'
+  reload-failed: '<red>Ошибка конфигурации арен: <reason></red>'
+  no-arenas: '<gray>Арены ещё не созданы.</gray>'
+  arena-list: '<aqua>Арены:</aqua>'
+  arena-list-entry: '<dark_gray>•</dark_gray> <white><arena></white> <state>'
+  state-enabled: '<green>включена</green>'
+  state-disabled: '<gray>выключена</gray>'
+  arena-info: '<aqua><arena></aqua>: <state>; spawn1=<spawn1>, spawn2=<spawn2>, corner1=<corner1>, corner2=<corner2>, hill=<hill>'
+  recover-usage: '<red>Использование: /duels admin recover (онлайн-игрок)</red>'
+  player-offline: '<red>Игрок должен быть онлайн.</red>'
+  recovery-started: '<green>Запущено безопасное восстановление <player>.</green>'
+  no-snapshot: '<gray>У <player> нет ожидающего снимка.</gray>'
+  busy: '<red>Изменение арен запрещено, пока идёт бой или есть очередь.</red>'
+  arena-not-found: '<red>Арена <white><arena></white> не найдена.</red>'
+  arena-id-required: '<red>Укажи id арены.</red>'
+  arena-id-invalid: '<red>Некорректный id арены: <reason></red>'
+  point-invalid: '<red>Номер точки должен быть 1 или 2.</red>'
+  player-required: '<red>Эта команда требует позицию игрока.</red>'
+  help:
+    - '<aqua><bold>ArcDuels admin</bold></aqua>'
+    - '<white>/duels admin arena create (id)</white>'
+    - '<white>/duels admin arena setspawn (id) (1|2)</white>'
+    - '<white>/duels admin arena setcorner (id) (1|2)</white>'
+    - '<white>/duels admin arena sethill (id) [радиус] [высота]</white>'
+    - '<white>/duels admin arena enable|disable (id)</white>'
+    - '<white>/duels admin arena list|info (id)|reload</white>'
+    - '<white>/duels admin status</white>'
+    - '<white>/duels admin recover (онлайн-игрок)</white>'
+
+help:
+  lines:
+    - '<dark_gray>────────</dark_gray> <gradient:#55ffff:#5555ff><bold>ArcDuels</bold></gradient> <dark_gray>────────</dark_gray>'
+    - '<white>/duel</white> <gray>— открыть главное меню</gray>'
+    - '<white>/duel (игрок)</white> <gray>— настроить вызов</gray>'
+    - '<white>/duel accept|deny</white> <gray>— принять или отклонить</gray>'
+    - '<white>/duel leave</white> <gray>— сдаться</gray>'
+    - '<white>/duel stats</white> <gray>— статистика</gray>'
+    - '<green>Инвентарь сохраняется в MySQL до телепорта</green>'
+    - '<green>и удаляется из escrow только после успешного восстановления.</green>'
+    - '<dark_gray>────────────────────────</dark_gray>'

@@ -2,6 +2,11 @@
 server-id: duels-1
 challenge-timeout-seconds: 45
 
+locale:
+  # ru or en. When enabled, Russian Minecraft clients get ru and all others en.
+  default: ru
+  use-client-locale: true
+
 celebration:
   fireworks:
     enabled: true
@@ -61,6 +66,51 @@ kits:
       chestplate: IRON_CHESTPLATE
       leggings: IRON_LEGGINGS
       boots: IRON_BOOTS
+  archer:
+    display-name: '<gradient:#ffff55:#ffaa00><bold>ЛУЧНИК</bold></gradient>'
+    icon: BOW
+    items:
+      '0': BOW
+      '1': STONE_SWORD
+      '7': GOLDEN_APPLE 2
+      '8': ARROW 24
+    armor:
+      helmet: CHAINMAIL_HELMET
+      chestplate: LEATHER_CHESTPLATE
+      leggings: CHAINMAIL_LEGGINGS
+      boots: LEATHER_BOOTS
+  uhc:
+    display-name: '<gradient:#ff5555:#aa0000><bold>UHC</bold></gradient>'
+    icon: GOLDEN_APPLE
+    items:
+      '0': DIAMOND_SWORD
+      '1': BOW
+      '2': GOLDEN_APPLE 6
+      '3': LAVA_BUCKET
+      '4': WATER_BUCKET
+      '8': ARROW 16
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: DIAMOND_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: DIAMOND_BOOTS
+  tank:
+    display-name: '<gradient:#5555ff:#55ffff><bold>ТАНК</bold></gradient>'
+    icon: NETHERITE_CHESTPLATE
+    items:
+      '0': IRON_SWORD
+      '1': SHIELD
+      '2': GOLDEN_APPLE 2
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: NETHERITE_CHESTPLATE
+      leggings: DIAMOND_LEGGINGS
+      boots: DIAMOND_BOOTS
+  sumo:
+    display-name: '<gradient:#55ff55:#00aa00><bold>СУМО</bold></gradient>'
+    icon: SLIME_BALL
+    items: {}
+    armor: {}
 
 # The example is disabled intentionally. Set real isolated coordinates and
 # enable it before accepting production matches.
@@ -90,3 +140,15 @@ arenas:
         x: 15.0
         y: 100.0
         z: 15.0
+    # Required only for king-of-the-hill matches. Configure in game with
+    # /duels admin arena sethill <id> [radius] [height].
+    hill:
+      center:
+        world: world
+        x: 0.5
+        y: 80.0
+        z: 0.5
+        yaw: 0.0
+        pitch: 0.0
+      radius: 3.5
+      height: 3.0

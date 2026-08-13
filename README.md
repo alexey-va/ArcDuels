@@ -25,13 +25,17 @@ This repository is under active development. The first vertical slice targets:
 - validated challenges and one active match per player;
 - local and MySQL-backed statistics;
 - global leaderboard invalidation and cross-server announcements over Redis;
-- casual/ranked BO1 and BO3 selection in the inventory GUI;
-- paginated player, kit and global top-100 leaderboard inventories;
+- a Lands-inspired 45-slot main hub with challenge, queue, mode, kit, statistics,
+  help, leaderboard, and administrative branches;
+- elimination, king-of-the-hill, and sumo objectives with BO1/BO3/BO5,
+  ranked play, sudden death, and per-match combat modifiers;
+- six bundled starter kits and Russian/English client-locale presentation;
 - countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
 - bounded arenas, scoped internal teleports and protected player inventories;
 - FIFO waiting for a free arena and in-game `/duels admin arena` setup;
 - crash-safe, versioned MySQL player-state escrow before any duel mutation;
-- a state-machine-wired objective boundary for future KOTH modes.
+- real KOTH capture zones with contested progress, particles, action bars, and
+  objective-compatible arena allocation.
 
 ## Build
 

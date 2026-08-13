@@ -11,6 +11,7 @@ import ru.arc.sql.SqlConnectionConfig
 import ru.arc.sql.SqlRuntime
 import ru.arc.sql.SqlSslMode
 import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
@@ -52,8 +53,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     "arcduels-it",
                 )
             repository = MySqlStatisticsRepository(runtime)
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3)
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4)
         }
 
         afterSpec {
@@ -74,6 +75,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     ranked = true,
                     serverId = ServerId("duels-it"),
                     completedAt = Instant.parse("2026-08-13T10:00:00Z"),
+                    objective = DuelObjectiveType.KING_OF_THE_HILL,
                 )
             repository.rememberPlayerName(winner, "Winner").get()
             repository.rememberPlayerName(loser, "Loser").get()

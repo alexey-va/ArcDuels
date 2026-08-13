@@ -23,6 +23,14 @@ warning, and continues locally without cross-server announcements.
 Every network node needs a unique `server-id` containing only letters, digits,
 dot, underscore, or hyphen.
 
+## Localization
+
+ArcDuels ships `lang/ru.yml` and `lang/en.yml`. With
+`locale.use-client-locale: true`, Russian clients receive Russian and other
+clients receive English; `locale.default` is used for the console and when
+client detection is disabled. External locale files can override any bundled
+key while newly introduced keys continue to fall back to the JAR defaults.
+
 ## Winner celebration
 
 Winner particles, sounds, and titles are always shown. Real firework rockets
@@ -69,6 +77,10 @@ arenas:
     bounds:
       min: { x: -12, y: 60, z: -12 }
       max: { x: 12, y: 85, z: 12 }
+    hill:
+      center: { world: duels, x: 0.5, y: 65, z: 0.5, yaw: 0, pitch: 0 }
+      radius: 3.5
+      height: 3.0
 ```
 
 Arena reservations are exclusive. If all arenas are occupied, accepted pairs
@@ -86,6 +98,7 @@ match owns an arena or a pair is waiting.
 /duels admin arena create <id>
 /duels admin arena setspawn <id> <1|2>
 /duels admin arena setcorner <id> <1|2>
+/duels admin arena sethill <id> [radius] [height]
 /duels admin arena enable|disable <id>
 /duels admin arena list
 /duels admin arena info <id>
@@ -110,17 +123,20 @@ crash before acknowledgement simply causes the same idempotent restore on the ne
 network node locks duel state and identifies the originating `server-id`
 instead of applying world data on the wrong server.
 
-The target browser shows 45 players per page, the kit picker shows 28 kits per
-page, and the leaderboard exposes the global top 100 in pages of 45 entries.
+The bundled starter kits are `classic`, `axe`, `archer`, `uhc`, `tank`, and
+`sumo`. The UHC selection starts with natural regeneration disabled; every
+setting remains visible before the challenge is sent.
 
-Kit buttons use left click for BO1 and right click for BO3. Holding Shift makes
-the selected kit duel ranked, so it updates ELO. Own-inventory matches are
-always unranked.
+`/duel` opens the main hub. Challenge setup is deliberately hierarchical:
+opponent → objective → loadout → rules → confirmation. Rules include
+BO1/BO3/BO5, ranked kit matches, sudden-death time, projectiles, consumables,
+ender pearls, natural regeneration, and KOTH capture time. The recipient sees
+the selected rules before accepting. Own-inventory matches remain unranked.
 
 ## Commands
 
-- `/duel` — open the player browser;
-- `/duel <player>` — open the mode and kit picker;
+- `/duel` — open the main hub;
+- `/duel <player>` — open objective selection for that player;
 - `/duel accept [challenge-id]`, `/duel deny [challenge-id]`;
 - `/duel cancel`;
 - `/duel leave` — forfeit the current match;

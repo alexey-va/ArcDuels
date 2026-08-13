@@ -1,0 +1,232 @@
+prefix: '<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>DUELS</bold></gradient><dark_gray>]</dark_gray> '
+
+menu:
+  common:
+    back: '<aqua><bold>BACK</bold></aqua>'
+    previous: '<yellow><bold>PREVIOUS</bold></yellow>'
+    next: '<yellow><bold>NEXT</bold></yellow>'
+    page: '<aqua>Page <page>/<pages></aqua>'
+    enabled: '<green>Enabled</green>'
+    disabled: '<red>Disabled</red>'
+    unavailable: '<gray>Unavailable</gray>'
+  main:
+    title: '<gradient:#55ffff:#5555ff><bold>ARCDUELS</bold></gradient>'
+    challenge: '<aqua><bold>CHALLENGE A PLAYER</bold></aqua>'
+    challenge-lore: ['<gray>Choose an opponent, objective, loadout,</gray>', '<gray>and precise match rules.</gray>', '', '<yellow>Click to start configuring</yellow>']
+    queue: '<yellow><bold>ARENAS & QUEUE</bold></yellow>'
+    queue-lore: ['<gray>Busy arenas: <white><active></white></gray>', '<gray>Waiting pairs: <white><waiting></white></gray>', '', '<yellow>Click for details</yellow>']
+    leaderboard: '<gold><bold>LEADERBOARD</bold></gold>'
+    leaderboard-lore: ['<gray>Network-wide ranking backed by</gray>', '<gray>the shared database.</gray>', '', '<yellow>Click to open</yellow>']
+    modes: '<green><bold>GAME MODES</bold></green>'
+    modes-lore: ['<gray>Elimination, king of the hill, and sumo.</gray>', '', '<yellow>Click to explore</yellow>']
+    kits: '<light_purple><bold>KITS</bold></light_purple>'
+    kits-lore: ['<gray>Ready-made balanced loadouts.</gray>', '', '<yellow>Click to browse</yellow>']
+    stats: '<aqua><bold>MY STATISTICS</bold></aqua>'
+    stats-lore: ['<gray>Rating, wins, win rate, and streaks.</gray>', '', '<yellow>Click to view</yellow>']
+    help: '<white><bold>HOW IT WORKS</bold></white>'
+    help-lore: ['<gray>Commands and inventory safety guarantees.</gray>', '', '<yellow>Click for help</yellow>']
+    admin: '<red><bold>ARENA MANAGEMENT</bold></red>'
+    admin-lore: ['<gray>Spawns, bounds, and hill zones.</gray>', '', '<yellow>Administrators only</yellow>']
+  targets:
+    title: '<gradient:#55ffff:#5555ff><bold>OPPONENT</bold></gradient> <gray><page>/<pages></gray>'
+    player: '<aqua><bold><player></bold></aqua>'
+    player-lore: ['<gray>This player is available for a match.</gray>', '', '<yellow>Click to choose an objective</yellow>']
+    empty: '<red>No available players</red>'
+  objectives:
+    title: '<gradient:#55ff55:#00aa00><bold>MODE VS <player></bold></gradient>'
+  loadouts:
+    title: '<gradient:#ffaa00:#ff5555><bold>LOADOUT</bold></gradient>'
+    own: '<light_purple><bold>OWN INVENTORY</bold></light_purple>'
+    own-lore: ['<gray>Each player fights with their own items.</gray>', '<green>Everything is saved to MySQL before teleport.</green>', '<green>The exact state is restored after the match.</green>', '', '<yellow>Click to select</yellow>']
+    sumo-missing: '<red>The sumo kit is not configured</red>'
+    kit-hint: ['', '<yellow>Click to select this kit</yellow>']
+  rules:
+    title: '<gradient:#ffaa00:#ff5555><bold>RULES VS <player></bold></gradient>'
+    ranked: '<gold><bold>RANKED MATCH</bold></gold>'
+    ranked-lore: ['<gray>State: <state></gray>', '<dark_gray>Only available with an identical kit.</dark_gray>', '', '<yellow>Click to toggle</yellow>']
+    best-of: '<aqua><bold>FORMAT: BO<value></bold></aqua>'
+    best-of-lore: ['<gray>First to one, two, or three round wins.</gray>', '', '<yellow>Click: BO1 → BO3 → BO5</yellow>']
+    sudden-death: '<red><bold>SUDDEN DEATH: <seconds>s</bold></red>'
+    sudden-death-lore: ['<gray>Both players receive Wither after the timer.</gray>', '<gray>No round can stall forever.</gray>', '', '<yellow>Click to change</yellow>']
+    projectiles: '<aqua><bold>PROJECTILES</bold></aqua>'
+    projectiles-lore: ['<gray>State: <state></gray>', '<gray>Bows, crossbows, and tridents.</gray>', '', '<yellow>Click to toggle</yellow>']
+    consumables: '<light_purple><bold>CONSUMABLES</bold></light_purple>'
+    consumables-lore: ['<gray>State: <state></gray>', '<gray>Food, potions, and golden apples.</gray>', '', '<yellow>Click to toggle</yellow>']
+    pearls: '<dark_purple><bold>ENDER PEARLS</bold></dark_purple>'
+    pearls-lore: ['<gray>State: <state></gray>', '', '<yellow>Click to toggle</yellow>']
+    regeneration: '<green><bold>NATURAL REGENERATION</bold></green>'
+    regeneration-lore: ['<gray>State: <state></gray>', '', '<yellow>Click to toggle</yellow>']
+    capture: '<aqua><bold>HILL CAPTURE: <seconds>s</bold></aqua>'
+    capture-lore: ['<gray>Hold the point alone for this long.</gray>', '<gray>Progress pauses while the hill is contested.</gray>', '', '<yellow>Click to change</yellow>']
+    confirm: '<green><bold>SEND CHALLENGE</bold></green>'
+    confirm-lore: ['<gray>All match options are configured.</gray>', '', '<yellow>Click to confirm</yellow>']
+  leaderboard:
+    loading: '<gray>Loading the global leaderboard…</gray>'
+    title: '<gradient:#ffd700:#ff8c00><bold>LEADERS</bold></gradient> <gray><page>/<pages></gray>'
+    entry: '<gold><bold>#<position></bold></gold> <white><player></white>'
+    entry-lore: ['<gray>Rating:</gray> <aqua><bold><rating></bold></aqua>', '<gray>Wins:</gray> <green><wins></green>', '<gray>Losses:</gray> <red><losses></red>']
+    empty: '<gray>No matches yet</gray>'
+  modes:
+    title: '<gradient:#55ff55:#00aa00><bold>GAME MODES</bold></gradient>'
+  kits:
+    title: '<gradient:#aa55ff:#ff55ff><bold>KITS</bold></gradient>'
+  queue:
+    title: '<gradient:#ffff55:#ffaa00><bold>ARENAS & QUEUE</bold></gradient>'
+    active: '<red><bold>ACTIVE MATCHES: <active></bold></red>'
+    active-lore: ['<gray>Number of arenas currently reserved.</gray>']
+    waiting: '<yellow><bold>WAITING: <waiting></bold></yellow>'
+    waiting-lore: ['<gray>Pairs receive compatible arenas in queue order.</gray>']
+
+objective:
+  elimination:
+    name: '<red><bold>ELIMINATION</bold></red>'
+    description: ['<gray>Defeat your opponent in direct combat.</gray>', '<gray>Leaving arena bounds is a loss.</gray>', '', '<yellow>Click to select</yellow>']
+  koth:
+    name: '<aqua><bold>KING OF THE HILL</bold></aqua>'
+    description: ['<gray>Hold the marked arena objective.</gray>', '<gray>Capture pauses while both players contest it.</gray>', '', '<yellow>Click to select</yellow>']
+  sumo:
+    name: '<green><bold>SUMO</bold></green>'
+    description: ['<gray>Damage is disabled: knock your opponent</gray>', '<gray>outside the safe arena bounds.</gray>', '', '<yellow>Click to select</yellow>']
+
+kit:
+  classic:
+    name: '<aqua><bold>CLASSIC</bold></aqua>'
+    description: ['<gray>Diamond sword, bow, armor, and apples.</gray>']
+  axe:
+    name: '<gold><bold>AXE & SHIELD</bold></gold>'
+    description: ['<gray>Tactical axe combat against a shield.</gray>']
+  archer:
+    name: '<yellow><bold>ARCHER</bold></yellow>'
+    description: ['<gray>Ranged combat with limited arrows.</gray>']
+  uhc:
+    name: '<red><bold>UHC</bold></red>'
+    description: ['<gray>Strong equipment without natural regeneration.</gray>']
+  tank:
+    name: '<blue><bold>TANK</bold></blue>'
+    description: ['<gray>Heavy armor, shield, and prolonged melee.</gray>']
+  sumo:
+    name: '<green><bold>SUMO</bold></green>'
+    description: ['<gray>Empty hands and perfectly equal conditions.</gray>']
+
+error:
+  player-only: '<red>This command requires a player.</red>'
+  player-left: '<red>The player left or entered another match.</red>'
+  leaderboard: '<red>Could not load the leaderboard.</red>'
+  invalid-challenge-id: '<red>Invalid challenge identifier.</red>'
+
+controller:
+  busy: '<red>One of the players is already queued, fighting, or awaiting recovery.</red>'
+  sent: '<green>Challenge sent to <white><player></white>.</green>'
+  failed: '<red>Could not process the duel challenge.</red>'
+  expired: '<red>This challenge has expired.</red>'
+  start-failed: '<red>Could not start the duel: <reason></red>'
+  wait-cancelled: '<gray>arena wait was cancelled</gray>'
+  start-internal: '<gray>an arena or durable storage is currently unavailable</gray>'
+  denied: '<gray>The duel challenge was declined.</gray>'
+  cancelled: '<gray>The duel challenge was cancelled.</gray>'
+  forfeit: '<gray>You forfeited. Saving the result…</gray>'
+  not-fighting: '<red>You are not in an active duel.</red>'
+  stats-failed: '<red>Could not load statistics.</red>'
+  stats: |-
+    <dark_gray>────────</dark_gray> <gradient:#55ffff:#5555ff><bold><player></bold></gradient> <dark_gray>────────</dark_gray>
+    <gray>Rating:</gray> <aqua><bold><rating></bold></aqua>
+    <gray>Wins:</gray> <green><wins></green>  <gray>Losses:</gray> <red><losses></red>
+    <gray>Win rate:</gray> <yellow><winrate>%</yellow>
+    <gray>Streak:</gray> <gold><streak></gold>  <gray>Best:</gray> <gold><best></gold>
+    <dark_gray>────────────────────</dark_gray>
+  no-incoming: '<red>You have no incoming challenges.</red>'
+  no-outgoing: '<red>You have no outgoing challenges.</red>'
+  loadout-kit: '<gray>kit <white><kit></white></gray>'
+  loadout-own: '<gray>own inventory</gray>'
+  received: |-
+    <yellow><white><player></white> challenged you: <objective></yellow>
+    <gray>Loadout:</gray> <loadout> <dark_gray>•</dark_gray> <gray>BO<bestof></gray> <dark_gray>•</dark_gray> <gray>Ranked:</gray> <ranked>
+    <gray>Sudden death:</gray> <white><sudden>s</white> <dark_gray>•</dark_gray> <gray>Projectiles:</gray> <projectiles> <dark_gray>•</dark_gray> <gray>Consumables:</gray> <consumables>
+    <gray>Pearls:</gray> <pearls> <dark_gray>•</dark_gray> <gray>Regeneration:</gray> <regeneration>
+
+  accept: '<newline><green><bold>[ACCEPT]</bold></green>'
+  accept-hover: '<green>Start the duel</green>'
+  deny: ' <red><bold>[DECLINE]</bold></red>'
+  deny-hover: '<red>Decline the challenge</red>'
+
+session:
+  queued: '<yellow>All compatible arenas are busy. Your pair is queue position <white>#<position></white>.</yellow>'
+  recovery-check-retry: '<red>MySQL recovery check is temporarily unavailable.</red> <yellow>Your state is locked safely; ArcDuels will retry automatically.</yellow>'
+  remote-recovery: '<red>You have an unfinished ArcDuels recovery on server <white><server></white>.</red> <yellow>Return there or contact an administrator; the snapshot remains in MySQL.</yellow>'
+  recovering: '<yellow>Restoring your saved state from an unfinished duel…</yellow>'
+  recovery-failed: '<red>State recovery failed. Contact an administrator; your inventory remains stored in MySQL.</red>'
+  fight-title: '<red><bold>FIGHT!</bold></red>'
+  fight-subtitle: '<gray>Good luck — you may need it</gray>'
+  hill-contested: '<yellow>Hill contested</yellow>'
+  hill-capturing: '<green>Capturing</green>'
+  hill-free: '<gray>Hill is free</gray>'
+  hill-enemy: '<red>Opponent is capturing</red>'
+  hill-progress: '<state> <dark_gray>•</dark_gray> <aqua><percent>%</aqua>'
+  sudden-death: '<red><bold>SUDDEN DEATH!</bold></red> <gray>Both players now lose health continuously.</gray>'
+  round-win: '<green><bold>ROUND WON</bold></green>'
+  round-loss: '<red><bold>ROUND LOST</bold></red>'
+  match-win: '<gradient:#55ff55:#00aa00><bold>VICTORY</bold></gradient>'
+  match-loss: '<gradient:#ff5555:#aa0000><bold>DEFEAT</bold></gradient>'
+  persistence-retry: '<red>Could not save the result. Retrying in 3 seconds…</red>'
+  restored: '<green>Your inventory and state were safely restored.</green>'
+  ack-retry: '<yellow>Your state is restored, but MySQL acknowledgement will retry. Do not leave the server.</yellow>'
+  score: '<gray>Score:</gray> <aqua><first></aqua> <dark_gray>—</dark_gray> <red><second></red>'
+  command-blocked: '<red>This command is unavailable during a duel.</red> <gray>Forfeit with <white>/duel leave</white></gray>'
+
+network:
+  win: '<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>DUELS</bold></gradient><dark_gray>]</dark_gray> <aqua><winner></aqua> <gray>defeated</gray> <red><loser></red> <dark_gray>(<rating>)</dark_gray>'
+
+admin:
+  no-permission: '<red>Missing permission <permission>.</red>'
+  status: '<aqua>ArcDuels:</aqua> arenas <white><arenas></white>, busy <white><active></white>, waiting pairs <white><waiting></white>.'
+  arena-exists: '<red>Arena <white><arena></white> already exists.</red>'
+  arena-created: '<green>Arena <white><arena></white> was created disabled.</green> <gray>Set spawn 1/2, corner 1/2, and an optional hill.</gray>'
+  arena-editing: '<yellow>Editing arena <arena></yellow>'
+  spawn-saved: '<green>Spawn <point> for arena <white><arena></white> was saved.</green>'
+  wrong-world: '<red>Bounds must be marked in the first spawn world: <white><world></white>.</red>'
+  corner-saved: '<green>Corner <point> for arena <white><arena></white> was saved.</green> <gray>Coordinates are normalized when enabled.</gray>'
+  hill-range: '<red>Hill radius and height must be between 1 and 32 blocks.</red>'
+  hill-saved: '<green>Hill for arena <white><arena></white> was saved: radius <radius>, height <height>.</green>'
+  arena-invalid: '<red>Arena was not applied: <reason></red>'
+  arena-enabled: '<green>Arena <white><arena></white> was validated and enabled. Active arenas: <count>.</green>'
+  arena-disabled: '<yellow>Arena <white><arena></white> was disabled. Active arenas: <count>.</yellow>'
+  reloaded: '<green>Configuration reloaded; active arenas: <count>.</green>'
+  reload-failed: '<red>Arena configuration error: <reason></red>'
+  no-arenas: '<gray>No arenas have been created.</gray>'
+  arena-list: '<aqua>Arenas:</aqua>'
+  arena-list-entry: '<dark_gray>•</dark_gray> <white><arena></white> <state>'
+  state-enabled: '<green>enabled</green>'
+  state-disabled: '<gray>disabled</gray>'
+  arena-info: '<aqua><arena></aqua>: <state>; spawn1=<spawn1>, spawn2=<spawn2>, corner1=<corner1>, corner2=<corner2>, hill=<hill>'
+  recover-usage: '<red>Usage: /duels admin recover (online-player)</red>'
+  player-offline: '<red>The player must be online.</red>'
+  recovery-started: '<green>Safe recovery started for <player>.</green>'
+  no-snapshot: '<gray><player> has no pending snapshot.</gray>'
+  busy: '<red>Arenas cannot be edited while a match or queue is active.</red>'
+  arena-not-found: '<red>Arena <white><arena></white> was not found.</red>'
+  arena-id-required: '<red>Specify an arena id.</red>'
+  arena-id-invalid: '<red>Invalid arena id: <reason></red>'
+  point-invalid: '<red>The point number must be 1 or 2.</red>'
+  player-required: '<red>This command requires a player position.</red>'
+  help:
+    - '<aqua><bold>ArcDuels admin</bold></aqua>'
+    - '<white>/duels admin arena create (id)</white>'
+    - '<white>/duels admin arena setspawn (id) (1|2)</white>'
+    - '<white>/duels admin arena setcorner (id) (1|2)</white>'
+    - '<white>/duels admin arena sethill (id) [radius] [height]</white>'
+    - '<white>/duels admin arena enable|disable (id)</white>'
+    - '<white>/duels admin arena list|info (id)|reload</white>'
+    - '<white>/duels admin status</white>'
+    - '<white>/duels admin recover (online-player)</white>'
+
+help:
+  lines:
+    - '<dark_gray>────────</dark_gray> <gradient:#55ffff:#5555ff><bold>ArcDuels</bold></gradient> <dark_gray>────────</dark_gray>'
+    - '<white>/duel</white> <gray>— open the main menu</gray>'
+    - '<white>/duel (player)</white> <gray>— configure a challenge</gray>'
+    - '<white>/duel accept|deny</white> <gray>— accept or reject</gray>'
+    - '<white>/duel leave</white> <gray>— forfeit</gray>'
+    - '<white>/duel stats</white> <gray>— statistics</gray>'
+    - '<green>Your inventory is stored in MySQL before teleport</green>'
+    - '<green>and escrow is deleted only after successful restoration.</green>'
+    - '<dark_gray>────────────────────────</dark_gray>'

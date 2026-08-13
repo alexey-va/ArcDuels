@@ -130,7 +130,7 @@ class MatchCoordinator(
             synchronized(lock) {
                 val current = getRequired(matchId)
                 check(current.state == MatchState.ACTIVE) { "Objectives can only be evaluated for an active match" }
-                require(frame.contenders.all { it == current.firstPlayer || it == current.secondPlayer }) {
+                require((frame.contenders + frame.progressTicks.keys).all { it == current.firstPlayer || it == current.secondPlayer }) {
                     "Objective frame contains a player who is not in the match"
                 }
                 when (val decision = objective.evaluate(current, frame)) {
@@ -190,6 +190,7 @@ class MatchCoordinator(
                 ranked = match.rules.ranked,
                 serverId = match.serverId,
                 completedAt = requireNotNull(match.completedAt).truncatedTo(ChronoUnit.MILLIS),
+                objective = match.rules.objective,
             )
         return statistics.record(outcome).thenApply { persisted ->
             val (completed, firstCompletion) =
@@ -236,6 +237,7 @@ class MatchCoordinator(
                     kitId = match.rules.kitId,
                     ranked = match.rules.ranked,
                     winnerRating = persisted.winnerRatingAfter,
+                    objective = match.rules.objective,
                 ),
                 LeaderboardInvalidatedEvent(
                     eventId = "${match.id}:leaderboard",

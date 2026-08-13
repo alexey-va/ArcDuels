@@ -4,6 +4,7 @@ import ru.arc.sql.MySqlMigrator
 import ru.arc.sql.SqlMigrationReport
 import ru.arc.sql.SqlRuntime
 import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.LeaderboardEntry
 import ru.ruscrafting.duels.domain.MatchId
@@ -444,22 +445,23 @@ class MySqlStatisticsRepository(
         connection.prepareStatement(
             """
             INSERT INTO `arcduels_matches`
-                (`match_id`, `winner_id`, `loser_id`, `mode`, `kit_id`, `ranked`, `server_id`, `completed_at`,
+                (`match_id`, `winner_id`, `loser_id`, `mode`, `objective`, `kit_id`, `ranked`, `server_id`, `completed_at`,
                  `winner_rating_after`, `loser_rating_after`, `leaderboard_revision`)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
         ).use { statement ->
             statement.setBytes(1, UuidBytes.encode(outcome.matchId.value))
             statement.setBytes(2, UuidBytes.encode(outcome.winner.value))
             statement.setBytes(3, UuidBytes.encode(outcome.loser.value))
             statement.setString(4, outcome.mode.name)
-            statement.setString(5, outcome.kitId?.value)
-            statement.setBoolean(6, outcome.ranked)
-            statement.setString(7, outcome.serverId.value)
-            statement.setTimestamp(8, Timestamp.from(outcome.completedAt))
-            statement.setInt(9, winnerRating)
-            statement.setInt(10, loserRating)
-            statement.setLong(11, leaderboardRevision)
+            statement.setString(5, outcome.objective.name)
+            statement.setString(6, outcome.kitId?.value)
+            statement.setBoolean(7, outcome.ranked)
+            statement.setString(8, outcome.serverId.value)
+            statement.setTimestamp(9, Timestamp.from(outcome.completedAt))
+            statement.setInt(10, winnerRating)
+            statement.setInt(11, loserRating)
+            statement.setLong(12, leaderboardRevision)
             check(statement.executeUpdate() == 1) { "Could not insert duel match result" }
         }
     }
@@ -470,7 +472,7 @@ class MySqlStatisticsRepository(
     ): PersistedMatchResult? =
         connection.prepareStatement(
             """
-            SELECT `winner_id`, `loser_id`, `mode`, `kit_id`, `ranked`, `server_id`, `completed_at`,
+            SELECT `winner_id`, `loser_id`, `mode`, `objective`, `kit_id`, `ranked`, `server_id`, `completed_at`,
                    `winner_rating_after`, `loser_rating_after`, `leaderboard_revision`
             FROM `arcduels_matches`
             WHERE `match_id` = ?
@@ -489,6 +491,7 @@ class MySqlStatisticsRepository(
                         ranked = result.getBoolean("ranked"),
                         serverId = ServerId(result.getString("server_id")),
                         completedAt = result.getTimestamp("completed_at").toInstant(),
+                        objective = DuelObjectiveType.valueOf(result.getString("objective")),
                     )
                 check(stored == expected) { "Match id collision with a different duel outcome" }
                 PersistedMatchResult(
@@ -513,7 +516,12 @@ class MySqlStatisticsRepository(
         )
 
     private companion object {
-        const val MAX_TRANSACTION_RETRIES = 4
+        // A four-connection pool can produce several consecutive InnoDB victims
+        // when many servers deliver the same match receipt at once. Eight
+        // bounded retries (nine total attempts) still fail fast for
+        // non-rollback errors while the exponential delay drains that
+        // duplicate burst safely.
+        const val MAX_TRANSACTION_RETRIES = 8
         const val RETRY_BASE_DELAY_MS = 10L
         const val MAX_ESCROW_PAYLOAD_BYTES = 8 * 1024 * 1024
         const val MIGRATION_NAMESPACE = "arcduels"

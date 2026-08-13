@@ -9,12 +9,15 @@ import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
+import org.bukkit.event.inventory.ClickType
 import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import ru.ruscrafting.duels.domain.ChallengeId
 import java.util.UUID
 
+@Suppress("DEPRECATION")
 class ArcDuelsPluginTest : StringSpec({
     lateinit var server: ServerMock
     lateinit var plugin: ArcDuelsPlugin
@@ -33,6 +36,9 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.isEnabled shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
         plugin.getCommand("duel")?.executor?.javaClass shouldBe DuelCommand::class.java
+        KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "classic", "sumo", "tank", "uhc")
+        java.io.File(plugin.dataFolder, "lang/ru.yml").isFile shouldBe true
+        java.io.File(plugin.dataFolder, "lang/en.yml").isFile shouldBe true
     }
 
     "player snapshot restores cursor slot experience and movement state" {
@@ -148,5 +154,31 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.set("arenas.Example.enabled", true)
 
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+    }
+
+    "main hub follows the challenge submenu path and renders the client language" {
+        val player = server.addPlayer("MenuTester")
+        server.addPlayer("Opponent")
+        player.setLocale(java.util.Locale.ENGLISH)
+
+        player.performCommand("duel") shouldBe true
+        player.openInventory.topInventory.size shouldBe 45
+        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.NETHERITE_SWORD
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "CHALLENGE A PLAYER"
+
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
+        player.openInventory.topInventory.getItem(10)?.type shouldBe Material.PLAYER_HEAD
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
+        player.openInventory.topInventory.getItem(13)?.type shouldBe Material.BEACON
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 13)
+        player.openInventory.topInventory.getItem(10)?.type shouldBe Material.BOW
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
+        player.openInventory.topInventory.getItem(31)?.type shouldBe Material.BEACON
+        player.openInventory.topInventory.getItem(40)?.type shouldBe Material.LIME_CONCRETE
+
+        player.closeInventory()
+        player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        player.performCommand("duel") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "ВЫЗВАТЬ НА БОЙ"
     }
 })

@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonParseException
 import ru.ruscrafting.duels.domain.DuelEvent
 import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.LeaderboardInvalidatedEvent
 import ru.ruscrafting.duels.domain.MatchCompletedEvent
@@ -30,6 +31,7 @@ internal class DuelEventCodec(
                         winner = event.winner.toString(),
                         loser = event.loser.toString(),
                         mode = event.mode.name,
+                        objective = event.objective.name,
                         kitId = event.kitId?.value,
                         ranked = event.ranked,
                         winnerRating = event.winnerRating,
@@ -62,6 +64,7 @@ internal class DuelEventCodec(
                 val winner = PlayerId(UUID.fromString(requireNotNull(wire.winner)))
                 val loser = PlayerId(UUID.fromString(requireNotNull(wire.loser)))
                 val mode = DuelMode.valueOf(requireNotNull(wire.mode))
+                val objective = wire.objective?.let(DuelObjectiveType::valueOf) ?: DuelObjectiveType.ELIMINATION
                 val kitId = wire.kitId?.let(::KitId)
                 val winnerRating = requireNotNull(wire.winnerRating)
                 require(winner != loser) { "Winner and loser must be different players" }
@@ -79,6 +82,7 @@ internal class DuelEventCodec(
                     kitId = kitId,
                     ranked = wire.ranked,
                     winnerRating = winnerRating,
+                    objective = objective,
                 )
             }
             LEADERBOARD_INVALIDATED -> {
@@ -105,6 +109,7 @@ internal class DuelEventCodec(
         val winner: String? = null,
         val loser: String? = null,
         val mode: String? = null,
+        val objective: String? = null,
         val kitId: String? = null,
         val ranked: Boolean? = null,
         val winnerRating: Int? = null,

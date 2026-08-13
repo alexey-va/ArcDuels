@@ -50,12 +50,13 @@ verified and saved both online snapshots. Only then does the coordinator release
 the reservation. MySQL acknowledgement is an exact match-id/checksum delete and is
 idempotent: an unknown acknowledgement outcome leaves a safe repeatable restore.
 
-## Match modes
+## Match objectives and loadouts
 
-`KIT` and `OWN_INVENTORY` are launch modes. KOTH is modeled as a future match
-objective rather than another storage or transport concern. A Paper adapter can
-submit an `ObjectiveFrame` containing elapsed ticks and the match participants
-currently contesting a zone. `MatchCoordinator.evaluateObjective` validates the
-frame and applies an objective winner atomically through the normal round,
-persistence, rating, and event path. Objectives cannot mutate statistics
-directly.
+`KIT` and `OWN_INVENTORY` describe loadout ownership, independently of the
+`ELIMINATION`, `KING_OF_THE_HILL`, and `SUMO` objectives. Combat modifiers are
+immutable challenge data, so both participants accept the same validated
+rules. KOTH arenas declare a bounded hill zone; incompatible arenas are never
+reserved for that objective. The Paper adapter submits capture progress through
+`ObjectiveFrame`, and `MatchCoordinator.evaluateObjective` applies a winner
+atomically through the normal round, persistence, rating, and event path.
+Objectives cannot mutate statistics directly.

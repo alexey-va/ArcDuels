@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchCompletedEvent
 import ru.ruscrafting.duels.domain.MatchId
@@ -28,6 +29,7 @@ class DuelEventCodecTest : StringSpec({
                 kitId = KitId("classic"),
                 ranked = true,
                 winnerRating = 1_016,
+                objective = DuelObjectiveType.KING_OF_THE_HILL,
             )
 
         val codec = DuelEventCodec()

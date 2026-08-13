@@ -30,7 +30,7 @@ class CelebrationEffectsTest : StringSpec({
         val event = mockk<EntityDamageByEntityEvent>(relaxed = true) {
             every { damager } returns firework
         }
-        val listener = DuelGameplayListener(mockk(relaxed = true))
+        val listener = DuelGameplayListener(mockk(relaxed = true), mockk(relaxed = true))
 
         listener.onDecorativeFireworkDamage(event)
 

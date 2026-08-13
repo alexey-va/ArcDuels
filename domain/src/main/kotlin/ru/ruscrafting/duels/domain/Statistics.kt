@@ -41,11 +41,13 @@ data class MatchOutcome(
     val ranked: Boolean,
     val serverId: ServerId,
     val completedAt: Instant,
+    val objective: DuelObjectiveType = DuelObjectiveType.ELIMINATION,
 ) {
     init {
         require(winner != loser) { "Winner and loser must be different players" }
         require((mode == DuelMode.KIT) == (kitId != null)) { "Outcome mode and kit do not agree" }
         require(!ranked || mode == DuelMode.KIT) { "Ranked outcome must use a kit" }
+        require(objective != DuelObjectiveType.SUMO || mode == DuelMode.KIT) { "SUMO outcome must use a controlled kit" }
     }
 
     /** MySQL stores timestamps at millisecond precision; all adapters share that canonical form. */

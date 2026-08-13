@@ -91,5 +91,16 @@ object MySqlDuelMigrations {
                         """.trimIndent(),
                     ),
             ),
+            SqlMigration(
+                version = 4,
+                description = "record duel objective in match history",
+                statements =
+                    listOf(
+                        """
+                        ALTER TABLE `arcduels_matches`
+                        ADD COLUMN `objective` VARCHAR(32) NOT NULL DEFAULT 'ELIMINATION' AFTER `mode`
+                        """.trimIndent(),
+                    ),
+            ),
         )
 }

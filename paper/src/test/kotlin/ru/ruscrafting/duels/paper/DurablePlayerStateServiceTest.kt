@@ -48,8 +48,33 @@ class DurablePlayerStateServiceTest : StringSpec({
         service.decode(stored.getValue(second.uniqueId).escrow).snapshot.storage[4]?.type shouldBe Material.TOTEM_OF_UNDYING
 
         service.acknowledge(stored.getValue(first.uniqueId)).get()
+        service.acknowledge(stored.getValue(first.uniqueId)).get()
         service.isPending(first.uniqueId) shouldBe false
         repository.acknowledged shouldBe first.uniqueId
+        repository.acknowledgementCalls shouldBe 1
+    }
+
+    "concurrent restoration paths share one database acknowledgement" {
+        val repository = GatedEscrowRepository()
+        val acknowledgement = CompletableFuture<Boolean>()
+        repository.acknowledgement = acknowledgement
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val first = server.addPlayer()
+        val second = server.addPlayer()
+        val storedFuture = service.storePair(MatchId.random(), first, second)
+        repository.commit.complete(Unit)
+        val stored = storedFuture.get().getValue(first.uniqueId)
+
+        val firstAttempt = service.acknowledge(stored)
+        val secondAttempt = service.acknowledge(stored)
+
+        repository.acknowledgementCalls shouldBe 1
+        firstAttempt.isDone shouldBe false
+        secondAttempt.isDone shouldBe false
+        acknowledgement.complete(true)
+        firstAttempt.get()
+        secondAttempt.get()
+        service.isPending(first.uniqueId) shouldBe false
     }
 })
 
@@ -57,6 +82,8 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
     val commit = CompletableFuture<Unit>()
     var saved: List<PlayerStateEscrow>? = null
     var acknowledged: UUID? = null
+    var acknowledgementCalls: Int = 0
+    var acknowledgement: CompletableFuture<Boolean> = CompletableFuture.completedFuture(true)
 
     override fun savePair(
         first: PlayerStateEscrow,
@@ -73,7 +100,8 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
         CompletableFuture.completedFuture(saved.orEmpty().filter { it.serverId == serverId })
 
     override fun acknowledgeRestored(snapshot: PlayerStateEscrow): CompletableFuture<Boolean> {
+        acknowledgementCalls++
         acknowledged = snapshot.playerId.value
-        return CompletableFuture.completedFuture(true)
+        return acknowledgement
     }
 }

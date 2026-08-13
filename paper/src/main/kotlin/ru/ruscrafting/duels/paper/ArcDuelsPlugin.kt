@@ -1,8 +1,5 @@
 package ru.ruscrafting.duels.paper
 
-import net.kyori.adventure.text.Component
-import net.kyori.adventure.text.format.NamedTextColor
-import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.redis.RedisConnection
 import ru.arc.redis.RedisManager
@@ -50,11 +47,12 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     private fun bootstrap() {
         val serverId = ServerId(config.getString("server-id", server.name)!!)
+        val locales = LocaleService.load(this)
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
         val persistence = createPersistence()
         val statistics = persistence.statistics
-        val publisher = createNetwork(serverId, statistics)
+        val publisher = createNetwork(serverId, statistics, locales)
         val coordinator = MatchCoordinator(serverId, arenas, statistics, publisher, Clock.systemUTC())
         val playerStates = DurablePlayerStateService(this, serverId, persistence.playerStates)
         if (persistence.durable) {
@@ -63,22 +61,22 @@ open class ArcDuelsPlugin : JavaPlugin() {
         } else {
             logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
         }
-        val sessionManager = DuelSessionManager(this, coordinator, arenas, kits, playerStates)
+        val sessionManager = DuelSessionManager(this, coordinator, arenas, kits, playerStates, locales)
         sessions = sessionManager
         val challenges =
             ChallengeRegistry(
                 Clock.systemUTC(),
                 Duration.ofSeconds(config.getLong("challenge-timeout-seconds", 45L).coerceIn(5L, 600L)),
             )
-        val controller = DuelController(this, challenges, sessionManager, statistics)
-        val gui = DuelGuiService(this, kits, statistics, controller::challenge)
-        val admin = DuelAdminCommand(this, arenas, sessionManager)
-        val command = DuelCommand(controller, gui, admin)
+        val controller = DuelController(this, challenges, sessionManager, statistics, locales)
+        val gui = DuelGuiService(this, kits, statistics, sessionManager, locales, controller::challenge, controller::showStatistics)
+        val admin = DuelAdminCommand(this, arenas, sessionManager, locales)
+        val command = DuelCommand(controller, gui, admin, locales)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command
         server.pluginManager.registerEvents(gui, this)
-        server.pluginManager.registerEvents(DuelGameplayListener(sessionManager), this)
+        server.pluginManager.registerEvents(DuelGameplayListener(sessionManager, locales), this)
         val identities = PlayerIdentityListener(this, statistics)
         server.pluginManager.registerEvents(identities, this)
         server.onlinePlayers.forEach(identities::remember)
@@ -126,6 +124,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private fun createNetwork(
         serverId: ServerId,
         statistics: StatisticsRepository,
+        locales: LocaleService,
     ): DuelEventPublisher {
         if (!config.getBoolean("redis.enabled", false)) return NoOpDuelEventPublisher
         val username = config.getString("redis.username")?.takeIf(String::isNotBlank)
@@ -151,17 +150,18 @@ open class ArcDuelsPlugin : JavaPlugin() {
                             server.scheduler.runTask(this, Runnable {
                                 val winner = names?.first ?: server.getOfflinePlayer(event.winner.value).name ?: event.winner.toString().take(8)
                                 val loser = names?.second ?: server.getOfflinePlayer(event.loser.value).name ?: event.loser.toString().take(8)
-                                val prefix =
-                                    MiniMessage.miniMessage().deserialize(
-                                        "<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>ДУЭЛИ</bold></gradient><dark_gray>]</dark_gray> ",
+                                val recipients = server.onlinePlayers.toList() + server.consoleSender
+                                recipients.forEach { recipient ->
+                                    recipient.sendMessage(
+                                        locales.component(
+                                            recipient,
+                                            "network.win",
+                                            LocaleService.text("winner", winner),
+                                            LocaleService.text("loser", loser),
+                                            LocaleService.text("rating", event.winnerRating),
+                                        ),
                                     )
-                                server.broadcast(
-                                    prefix
-                                        .append(Component.text(winner, NamedTextColor.AQUA))
-                                        .append(Component.text(" победил ", NamedTextColor.GRAY))
-                                        .append(Component.text(loser, NamedTextColor.RED))
-                                        .append(Component.text(" (${event.winnerRating})", NamedTextColor.DARK_GRAY)),
-                                )
+                                }
                             })
                         }
                 }
@@ -194,16 +194,18 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     private object UnavailablePlayerStateEscrowRepository : PlayerStateEscrowRepository {
         private fun <T> unavailable(): CompletableFuture<T> =
-            CompletableFuture.failedFuture(IllegalStateException("MySQL для надёжного хранения инвентарей не настроен"))
+            CompletableFuture.failedFuture(IllegalStateException("MySQL durable inventory escrow is not configured"))
 
         override fun savePair(
             first: PlayerStateEscrow,
             second: PlayerStateEscrow,
         ): CompletableFuture<Unit> = unavailable()
 
-        override fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> = unavailable()
+        override fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> =
+            CompletableFuture.completedFuture(null)
 
-        override fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>> = unavailable()
+        override fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>> =
+            CompletableFuture.completedFuture(emptyList())
 
         override fun acknowledgeRestored(snapshot: PlayerStateEscrow): CompletableFuture<Boolean> = unavailable()
     }

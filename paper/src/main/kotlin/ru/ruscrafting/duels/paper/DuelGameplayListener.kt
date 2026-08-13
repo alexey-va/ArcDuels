@@ -1,8 +1,9 @@
 package ru.ruscrafting.duels.paper
 
-import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.entity.Player
 import org.bukkit.entity.Projectile
+import org.bukkit.entity.ThrownPotion
+import org.bukkit.entity.EnderPearl
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -11,7 +12,9 @@ import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.EntityPickupItemEvent
+import org.bukkit.event.entity.EntityRegainHealthEvent
 import org.bukkit.event.entity.FoodLevelChangeEvent
+import org.bukkit.event.entity.ProjectileLaunchEvent
 import org.bukkit.event.inventory.InventoryClickEvent
 import org.bukkit.event.inventory.InventoryDragEvent
 import org.bukkit.event.inventory.InventoryOpenEvent
@@ -35,9 +38,9 @@ import ru.ruscrafting.duels.domain.PlayerId
 
 internal class DuelGameplayListener(
     private val sessions: DuelSessionManager,
+    private val locales: LocaleService,
     private val commandPolicy: DuelCommandPolicy = DuelCommandPolicy(),
 ) : Listener {
-    private val miniMessage = MiniMessage.miniMessage()
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onDecorativeFireworkDamage(event: EntityDamageByEntityEvent) {
@@ -61,7 +64,13 @@ internal class DuelGameplayListener(
         val expectedAttacker = victimMatch.opponentOf(PlayerId(victim.uniqueId))
         if (attacker.uniqueId != expectedAttacker.value || victimMatch.state != MatchState.ACTIVE) {
             event.isCancelled = true
+            return
         }
+        if (event.damager is Projectile && !sessions.allowsProjectiles(attacker)) {
+            event.isCancelled = true
+            return
+        }
+        if (sessions.isSumo(victim)) event.damage = 0.0
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -78,6 +87,10 @@ internal class DuelGameplayListener(
         }
         if (match.state != MatchState.ACTIVE) {
             event.isCancelled = true
+            return
+        }
+        if (sessions.isSumo(player) && event.cause != EntityDamageEvent.DamageCause.WITHER) {
+            event.damage = 0.0
             return
         }
         if (event.finalDamage >= player.health) {
@@ -187,12 +200,29 @@ internal class DuelGameplayListener(
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onInteract(event: PlayerInteractEvent) {
-        if (requiresFullFreeze(event.player)) event.isCancelled = true
+        if (requiresFullFreeze(event.player) ||
+            (event.item?.type == org.bukkit.Material.ENDER_PEARL && !sessions.allowsEnderPearls(event.player))
+        ) {
+            event.isCancelled = true
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onConsume(event: PlayerItemConsumeEvent) {
-        if (requiresFullFreeze(event.player)) event.isCancelled = true
+        if (requiresFullFreeze(event.player) || !sessions.allowsConsumables(event.player)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onProjectileLaunch(event: ProjectileLaunchEvent) {
+        val projectile = event.entity
+        val player = projectile.shooter as? Player ?: return
+        if (!sessions.isStateLocked(player)) return
+        if ((projectile is EnderPearl && !sessions.allowsEnderPearls(player)) ||
+            (projectile !is EnderPearl && !sessions.allowsProjectiles(player)) ||
+            (projectile is ThrownPotion && !sessions.allowsConsumables(player))
+        ) {
+            event.isCancelled = true
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -214,9 +244,7 @@ internal class DuelGameplayListener(
     fun onCommand(event: PlayerCommandPreprocessEvent) {
         if (!sessions.isStateLocked(event.player) || commandPolicy.isAllowed(event.message)) return
         event.isCancelled = true
-        event.player.sendMessage(
-            miniMessage.deserialize("<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>"),
-        )
+        event.player.sendMessage(locales.component(event.player, "session.command-blocked"))
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -233,6 +261,14 @@ internal class DuelGameplayListener(
     fun onHunger(event: FoodLevelChangeEvent) {
         val player = event.entity as? Player ?: return
         if (sessions.isStateLocked(player)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onNaturalRegeneration(event: EntityRegainHealthEvent) {
+        val player = event.entity as? Player ?: return
+        if (event.regainReason == EntityRegainHealthEvent.RegainReason.SATIATED && !sessions.allowsNaturalRegeneration(player)) {
+            event.isCancelled = true
+        }
     }
 
     private fun org.bukkit.entity.Entity.attackingPlayer(): Player? =

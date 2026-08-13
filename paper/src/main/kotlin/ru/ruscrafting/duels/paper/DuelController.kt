@@ -3,7 +3,6 @@ package ru.ruscrafting.duels.paper
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.event.HoverEvent
-import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ChallengeId
@@ -21,8 +20,8 @@ class DuelController(
     private val challenges: ChallengeRegistry,
     private val sessions: DuelSessionManager,
     private val statistics: StatisticsRepository,
+    private val locales: LocaleService,
 ) {
-    private val miniMessage = MiniMessage.miniMessage()
 
     fun challenge(
         challenger: Player,
@@ -32,16 +31,16 @@ class DuelController(
         if (sessions.isEngaged(challenger) || sessions.isEngaged(target) ||
             sessions.isStateLocked(challenger) || sessions.isStateLocked(target)
         ) {
-            challenger.sendMessage(message("<red>Один из игроков уже в очереди, в бою или ожидает восстановления.</red>"))
+            challenger.sendMessage(locales.component(challenger, "controller.busy"))
             return
         }
         runCatching { challenges.create(PlayerId(challenger.uniqueId), PlayerId(target.uniqueId), rules) }
             .onSuccess { challenge ->
-                challenger.sendMessage(message("<green>Вызов отправлен игроку <white>${target.name}</white>.</green>"))
-                target.sendMessage(challengeMessage(challenger, challenge))
+                challenger.sendMessage(locales.component(challenger, "controller.sent", LocaleService.text("player", target.name)))
+                target.sendMessage(challengeMessage(target, challenger, challenge))
                 target.playSound(target.location, org.bukkit.Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.5f)
             }
-            .onFailure { failure -> challenger.sendMessage(message("<red>${failure.message}</red>")) }
+            .onFailure { challenger.sendMessage(locales.component(challenger, "controller.failed")) }
     }
 
     fun accept(
@@ -52,11 +51,11 @@ class DuelController(
         val accepted =
             runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.ACCEPTED) }
                 .getOrElse { failure ->
-                    player.sendMessage(message("<red>${failure.message}</red>"))
+                    player.sendMessage(locales.component(player, "controller.failed"))
                     return
                 }
         if (accepted.status != ChallengeStatus.ACCEPTED) {
-            player.sendMessage(message("<red>Этот вызов уже истёк.</red>"))
+            player.sendMessage(locales.component(player, "controller.expired"))
             return
         }
         runCatching { sessions.start(accepted) }
@@ -65,8 +64,10 @@ class DuelController(
                 runSync {
                     if (failure != null) {
                         val cause = unwrap(failure)
-                        val reason = if (cause is CancellationException) "ожидание арены отменено" else cause.message ?: "неизвестная ошибка"
-                        participants(accepted).forEach { it.sendMessage(message("<red>Не удалось начать дуэль: $reason</red>")) }
+                        participants(accepted).forEach {
+                            val reasonKey = if (cause is CancellationException) "controller.wait-cancelled" else "controller.start-internal"
+                            it.sendMessage(locales.component(it, "controller.start-failed", LocaleService.component("reason", locales.component(it, reasonKey))))
+                        }
                     }
                 }
             }
@@ -79,23 +80,23 @@ class DuelController(
         val challenge = resolveCandidate(player, challengeId, incoming = true) ?: return
         runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.DENIED) }
             .onSuccess { resolved ->
-                participants(resolved).forEach { it.sendMessage(message("<gray>Вызов на дуэль отклонён.</gray>")) }
+                participants(resolved).forEach { it.sendMessage(locales.component(it, "controller.denied")) }
             }
-            .onFailure { failure -> player.sendMessage(message("<red>${failure.message}</red>")) }
+            .onFailure { player.sendMessage(locales.component(player, "controller.failed")) }
     }
 
     fun cancel(player: Player) {
         val challenge = resolveCandidate(player, null, incoming = false) ?: return
         runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.CANCELLED) }
-            .onSuccess { resolved -> participants(resolved).forEach { it.sendMessage(message("<gray>Вызов отменён.</gray>")) } }
-            .onFailure { failure -> player.sendMessage(message("<red>${failure.message}</red>")) }
+            .onSuccess { resolved -> participants(resolved).forEach { it.sendMessage(locales.component(it, "controller.cancelled")) } }
+            .onFailure { player.sendMessage(locales.component(player, "controller.failed")) }
     }
 
     fun leave(player: Player) {
         if (sessions.handleForfeit(player)) {
-            player.sendMessage(message("<gray>Ты сдался. Результат дуэли сохраняется…</gray>"))
+            player.sendMessage(locales.component(player, "controller.forfeit"))
         } else {
-            player.sendMessage(message("<red>Ты сейчас не участвуешь в активной дуэли.</red>"))
+            player.sendMessage(locales.component(player, "controller.not-fighting"))
         }
     }
 
@@ -106,19 +107,20 @@ class DuelController(
         statistics.find(PlayerId(target.uniqueId)).whenComplete { stats, failure ->
             runSync {
                 if (failure != null) {
-                    viewer.sendMessage(message("<red>Не удалось загрузить статистику.</red>"))
+                    viewer.sendMessage(locales.component(viewer, "controller.stats-failed"))
                     return@runSync
                 }
                 viewer.sendMessage(
-                    message(
-                        """
-                        <dark_gray>────────</dark_gray> <gradient:#55ffff:#5555ff><bold>${target.name}</bold></gradient> <dark_gray>────────</dark_gray>
-                        <gray>Рейтинг:</gray> <aqua><bold>${stats.rating}</bold></aqua>
-                        <gray>Победы:</gray> <green>${stats.wins}</green>  <gray>Поражения:</gray> <red>${stats.losses}</red>
-                        <gray>Винрейт:</gray> <yellow>${"%.1f".format(stats.winRate * 100)}%</yellow>
-                        <gray>Серия:</gray> <gold>${stats.currentWinStreak}</gold>  <gray>Лучшая:</gray> <gold>${stats.bestWinStreak}</gold>
-                        <dark_gray>────────────────────</dark_gray>
-                        """.trimIndent(),
+                    locales.component(
+                        viewer,
+                        "controller.stats",
+                        LocaleService.text("player", target.name),
+                        LocaleService.text("rating", stats.rating),
+                        LocaleService.text("wins", stats.wins),
+                        LocaleService.text("losses", stats.losses),
+                        LocaleService.text("winrate", "%.1f".format(java.util.Locale.ROOT, stats.winRate * 100)),
+                        LocaleService.text("streak", stats.currentWinStreak),
+                        LocaleService.text("best", stats.bestWinStreak),
                     ),
                 )
             }
@@ -136,38 +138,62 @@ class DuelController(
             challengeId?.let(challenges::find)
                 ?: pending.lastOrNull { if (incoming) it.target == playerId else it.challenger == playerId }
         if (candidate == null) {
-            player.sendMessage(message(if (incoming) "<red>У тебя нет входящих вызовов.</red>" else "<red>У тебя нет исходящих вызовов.</red>"))
+            player.sendMessage(locales.component(player, if (incoming) "controller.no-incoming" else "controller.no-outgoing"))
         }
         return candidate
     }
 
     private fun challengeMessage(
+        recipient: Player,
         challenger: Player,
         challenge: DuelChallenge,
     ): Component {
         val kitId = challenge.rules.kitId
         val mode =
             if (kitId != null) {
-                "кит <white>${kitId.value}</white>"
+                val key = "kit.${kitId.value}.name"
+                val kitName =
+                    if (locales.hasKey(locales.language(recipient), key)) locales.component(recipient, key)
+                    else Component.text(kitId.value)
+                locales.component(recipient, "controller.loadout-kit", LocaleService.component("kit", kitName))
             } else {
-                "своё снаряжение"
+                locales.component(recipient, "controller.loadout-own")
             }
-        val prefix = message("<yellow><white>${challenger.name}</white> вызывает тебя на дуэль: $mode.</yellow> ")
+        val objectiveKey =
+            when (challenge.rules.objective) {
+                ru.ruscrafting.duels.domain.DuelObjectiveType.ELIMINATION -> "objective.elimination.name"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.KING_OF_THE_HILL -> "objective.koth.name"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO -> "objective.sumo.name"
+            }
+        fun state(value: Boolean) = locales.component(recipient, if (value) "menu.common.enabled" else "menu.common.disabled")
+        val prefix =
+            locales.component(
+                recipient,
+                "controller.received",
+                LocaleService.text("player", challenger.name),
+                LocaleService.component("objective", locales.component(recipient, objectiveKey)),
+                LocaleService.component("loadout", mode),
+                LocaleService.text("bestof", challenge.rules.bestOf),
+                LocaleService.component("ranked", state(challenge.rules.ranked)),
+                LocaleService.text("sudden", challenge.rules.modifiers.suddenDeathAfterSeconds),
+                LocaleService.component("projectiles", state(challenge.rules.modifiers.projectiles)),
+                LocaleService.component("consumables", state(challenge.rules.modifiers.consumables)),
+                LocaleService.component("pearls", state(challenge.rules.modifiers.enderPearls)),
+                LocaleService.component("regeneration", state(challenge.rules.modifiers.naturalRegeneration)),
+            )
         val accept =
-            message("<green><bold>[ПРИНЯТЬ]</bold></green>")
+            locales.component(recipient, "controller.accept")
                 .clickEvent(ClickEvent.runCommand("/duel accept ${challenge.id}"))
-                .hoverEvent(HoverEvent.showText(message("<green>Начать дуэль</green>")))
+                .hoverEvent(HoverEvent.showText(locales.component(recipient, "controller.accept-hover")))
         val deny =
-            message(" <red><bold>[ОТКЛОНИТЬ]</bold></red>")
+            locales.component(recipient, "controller.deny")
                 .clickEvent(ClickEvent.runCommand("/duel deny ${challenge.id}"))
-                .hoverEvent(HoverEvent.showText(message("<red>Отклонить вызов</red>")))
+                .hoverEvent(HoverEvent.showText(locales.component(recipient, "controller.deny-hover")))
         return prefix.append(accept).append(deny)
     }
 
     private fun participants(challenge: DuelChallenge): List<Player> =
         listOfNotNull(plugin.server.getPlayer(challenge.challenger.value), plugin.server.getPlayer(challenge.target.value))
-
-    private fun message(input: String): Component = miniMessage.deserialize(input)
 
     private fun runSync(block: () -> Unit) {
         if (!plugin.isEnabled) return

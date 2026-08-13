@@ -12,6 +12,8 @@ The suite covers:
 
 - challenge authorization, expiry, duplicate pairs, and bounded TTL;
 - every match transition, BO1/BO3 scoring, forfeits, objectives, and cleanup;
+- exact KOTH capture thresholds, contested-progress pauses, compatible-arena
+  selection, and invalid SUMO/loadout combinations;
 - queued player ownership, FIFO arena handoff, cancellation, and overlapping persistence completion;
 - local statistics idempotency under concurrent duplicate writes;
 - long result sequences, rating bounds, streaks, revisions, and leaderboards;
@@ -19,7 +21,8 @@ The suite covers:
   source collisions, and TTL expiry;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
   arena and kit validation, pagination matrices, teleport authorization, and
-  damage-free celebration entities.
+  damage-free celebration entities, default-kit presence, and strict Russian /
+  English locale-key and MiniMessage parity.
 
 ## MySQL integration suite
 
@@ -36,7 +39,7 @@ participant conflict. It is intentionally not part of a fake JDBC test double.
 
 ## Artifact gate
 
-The deployable artifact is `paper/build/libs/ArcDuels-0.1.0-SNAPSHOT.jar`.
+The deployable artifact is `paper/build/libs/ArcDuels-0.2.0.jar`.
 Before distribution, verify it is a valid shadow JAR containing ArcDuels,
 Kotlin, `arc-core-sql`, `arc-core-redis`, HikariCP, Connector/J, and Jedis while
 excluding Paper and MockBukkit classes.

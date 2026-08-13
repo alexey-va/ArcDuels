@@ -5,11 +5,14 @@ import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.title.Title
 import org.bukkit.GameMode
 import org.bukkit.Sound
+import org.bukkit.Particle
 import org.bukkit.attribute.Attribute
 import org.bukkit.entity.Player
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
+import org.bukkit.potion.PotionEffect
+import org.bukkit.potion.PotionEffectType
 import org.bukkit.scheduler.BukkitRunnable
 import org.bukkit.scheduler.BukkitTask
 import org.bukkit.util.Vector
@@ -17,11 +20,14 @@ import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelMatch
+import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.KingOfTheHillObjective
 import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.MatchEndReason
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchState
 import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.ObjectiveFrame
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -33,11 +39,13 @@ class DuelSessionManager internal constructor(
     private val arenas: PaperArenaCatalog,
     private val kits: KitRegistry,
     private val playerStates: DurablePlayerStateService,
+    private val locales: LocaleService,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
     private val countdownTasks = ConcurrentHashMap<MatchId, BukkitTask>()
+    private val objectiveTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val pendingStarts = ConcurrentHashMap<UUID, CompletableFuture<DuelMatch>>()
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val internalTeleports = InternalTeleportAuthorizer()
@@ -46,9 +54,9 @@ class DuelSessionManager internal constructor(
     fun start(challenge: DuelChallenge): CompletableFuture<DuelMatch> {
         check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
         val first = plugin.server.getPlayer(challenge.challenger.value)
-            ?: return CompletableFuture.failedFuture(IllegalStateException("Первый игрок вышел с сервера"))
+            ?: return CompletableFuture.failedFuture(IllegalStateException("The first player left the server"))
         val second = plugin.server.getPlayer(challenge.target.value)
-            ?: return CompletableFuture.failedFuture(IllegalStateException("Второй игрок вышел с сервера"))
+            ?: return CompletableFuture.failedFuture(IllegalStateException("The second player left the server"))
         val result = CompletableFuture<DuelMatch>()
         val reservation =
             runCatching { coordinator.reserve(PlayerId(first.uniqueId), PlayerId(second.uniqueId), challenge.rules) }
@@ -60,9 +68,8 @@ class DuelSessionManager internal constructor(
         pendingStarts[second.uniqueId] = result
         if (!reservation.isDone) {
             val position = arenas.queueSize()
-            val message = miniMessage.deserialize("<yellow>Все арены заняты. Ваша пара в очереди: <white>#$position</white>.</yellow>")
-            first.sendMessage(message)
-            second.sendMessage(message)
+            first.sendMessage(locales.component(first, "session.queued", LocaleService.text("position", position)))
+            second.sendMessage(locales.component(second, "session.queued", LocaleService.text("position", position)))
         }
         reservation
             .whenComplete { match, failure ->
@@ -80,7 +87,7 @@ class DuelSessionManager internal constructor(
                     val currentSecond = plugin.server.getPlayer(second.uniqueId)
                     if (currentFirst == null || currentSecond == null) {
                         runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
-                        result.completeExceptionally(IllegalStateException("Один из игроков вышел во время ожидания арены"))
+                        result.completeExceptionally(IllegalStateException("A player left while waiting for an arena"))
                         return@runSync
                     }
                     preparingPlayers += currentFirst.uniqueId
@@ -95,7 +102,7 @@ class DuelSessionManager internal constructor(
                                 preparingPlayers -= currentSecond.uniqueId
                                 runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
                                 result.completeExceptionally(
-                                    IllegalStateException("Не удалось надёжно сохранить инвентари в MySQL; бой отменён", unwrap(storageFailure)),
+                                    IllegalStateException("Could not durably store both inventories in MySQL", unwrap(storageFailure)),
                                 )
                                 return@runSync
                             }
@@ -106,7 +113,7 @@ class DuelSessionManager internal constructor(
                                 requireNotNull(stored).values.forEach { saved ->
                                     plugin.server.getPlayer(saved.escrow.playerId.value)?.let { restoreAndAcknowledge(it, saved) }
                                 }
-                                result.completeExceptionally(IllegalStateException("Один из игроков вышел до начала боя"))
+                                result.completeExceptionally(IllegalStateException("A player left before the match started"))
                                 return@runSync
                             }
                             runCatching { prepareNewSession(reservedMatch, requireNotNull(stored)) }
@@ -150,11 +157,29 @@ class DuelSessionManager internal constructor(
 
     fun handleJoin(player: Player) {
         preparingPlayers += player.uniqueId
+        discoverPendingState(player, notifyFailure = true)
+    }
+
+    private fun discoverPendingState(
+        player: Player,
+        notifyFailure: Boolean,
+    ) {
         playerStates.discover(player.uniqueId).whenComplete { escrow, lookupFailure ->
             runSync {
                 if (lookupFailure != null) {
-                    preparingPlayers -= player.uniqueId
                     plugin.logger.warning("Could not check pending duel state for ${player.uniqueId}: ${unwrap(lookupFailure).message}")
+                    if (player.isOnline) {
+                        if (notifyFailure) player.sendMessage(locales.component(player, "session.recovery-check-retry"))
+                        plugin.server.scheduler.runTaskLater(
+                            plugin,
+                            Runnable {
+                                if (player.isOnline && player.uniqueId in preparingPlayers) {
+                                    discoverPendingState(player, notifyFailure = false)
+                                }
+                            },
+                            RECOVERY_RETRY_TICKS,
+                        )
+                    }
                     return@runSync
                 }
                 if (escrow == null) {
@@ -163,20 +188,15 @@ class DuelSessionManager internal constructor(
                 }
                 if (!player.isOnline) return@runSync
                 if (!playerStates.isLocal(escrow)) {
-                    player.sendMessage(
-                        miniMessage.deserialize(
-                            "<red>У тебя есть незавершённое восстановление ArcDuels на сервере <white>${escrow.serverId.value}</white>.</red> " +
-                                "<yellow>Вернись туда или обратись к администратору; снимок сохранён в MySQL.</yellow>",
-                        ),
-                    )
+                    player.sendMessage(locales.component(player, "session.remote-recovery", LocaleService.text("server", escrow.serverId.value)))
                     return@runSync
                 }
-                player.sendMessage(miniMessage.deserialize("<yellow>Восстанавливаю сохранённое состояние после незавершённой дуэли…</yellow>"))
+                player.sendMessage(locales.component(player, "session.recovering"))
                 runCatching { playerStates.decode(escrow) }
                     .onSuccess { restoreAndAcknowledge(player, it) }
                     .onFailure { failure ->
                         plugin.logger.severe("Could not decode pending duel state for ${player.uniqueId}: ${failure.message}")
-                        player.sendMessage(miniMessage.deserialize("<red>Состояние не восстановлено. Обратись к администратору; инвентарь остаётся сохранён в MySQL.</red>"))
+                        player.sendMessage(locales.component(player, "session.recovery-failed"))
                     }
             }
         }
@@ -197,30 +217,30 @@ class DuelSessionManager internal constructor(
     fun handleElimination(loser: Player) {
         val match = matchFor(loser) ?: return
         if (match.state != MatchState.ACTIVE) return
+        objectiveTasks.remove(match.id)?.cancel()
         val winner = match.opponentOf(PlayerId(loser.uniqueId))
         coordinator.recordRoundWinner(match.id, winner).whenComplete { updated, failure ->
-            runSync {
-                if (failure != null) {
-                    announcePersistenceFailure(match.id, unwrap(failure))
-                } else if (updated.state == MatchState.COUNTDOWN) {
-                    announceRound(updated, winner)
-                    plugin.server.scheduler.runTaskLater(plugin, Runnable {
-                        val current = coordinator.find(updated.id)
-                        if (current?.state == MatchState.COUNTDOWN) {
-                            prepareRound(current)
-                            scheduleCountdown(current.id)
-                        }
-                    }, 30L)
-                } else {
-                    finish(updated)
-                }
-            }
+            runSync { handleRoundResult(match.id, winner, updated, failure) }
         }
     }
 
+    fun allowsProjectiles(player: Player): Boolean = matchFor(player)?.rules?.modifiers?.projectiles ?: true
+
+    fun allowsConsumables(player: Player): Boolean = matchFor(player)?.rules?.modifiers?.consumables ?: true
+
+    fun allowsEnderPearls(player: Player): Boolean = matchFor(player)?.rules?.modifiers?.enderPearls ?: true
+
+    fun allowsNaturalRegeneration(player: Player): Boolean = matchFor(player)?.rules?.modifiers?.naturalRegeneration ?: true
+
+    fun isSumo(player: Player): Boolean = matchFor(player)?.rules?.objective == DuelObjectiveType.SUMO
+
     fun handleQuit(player: Player) {
         pendingStarts[player.uniqueId]?.cancel(false)
-        val match = matchFor(player) ?: return
+        val match = matchFor(player)
+        if (match == null) {
+            preparingPlayers -= player.uniqueId
+            return
+        }
         if (preparingPlayers.contains(player.uniqueId) && sessions[match.id] == null) {
             runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
             return
@@ -274,6 +294,7 @@ class DuelSessionManager internal constructor(
         if (internalTeleports.isAuthorized(player.uniqueId, destination)) return true
         val match = matchFor(player) ?: return !isStateLocked(player)
         if (match.state != MatchState.ACTIVE || destination == null) return false
+        if (cause == PlayerTeleportEvent.TeleportCause.ENDER_PEARL && !match.rules.modifiers.enderPearls) return false
         return cause in PLAYER_COMBAT_TELEPORTS && arenas.get(match.arenaId).bounds.contains(destination)
     }
 
@@ -288,6 +309,8 @@ class DuelSessionManager internal constructor(
     fun shutdown() {
         countdownTasks.values.forEach(BukkitTask::cancel)
         countdownTasks.clear()
+        objectiveTasks.values.forEach(BukkitTask::cancel)
+        objectiveTasks.clear()
         pendingStarts.values.toSet().forEach { it.cancel(false) }
         pendingStarts.clear()
         coordinator.activeMatches()
@@ -336,6 +359,10 @@ class DuelSessionManager internal constructor(
 
     private fun prepareRound(match: DuelMatch) {
         val session = sessions[match.id] ?: error("Missing Paper session for match ${match.id}")
+        objectiveTasks.remove(match.id)?.cancel()
+        session.hillCapture.reset()
+        session.roundElapsedTicks = 0L
+        session.suddenDeathStarted = false
         val arena = arenas.get(match.arenaId)
         val first = requireOnline(match.firstPlayer)
         val second = requireOnline(match.secondPlayer)
@@ -343,8 +370,8 @@ class DuelSessionManager internal constructor(
         resetPlayer(second, session.snapshots.getValue(second.uniqueId), match.rules.mode, match.rules.kitId)
         check(teleportInternally(first, arena.firstSpawn)) { "Could not teleport the first player to the arena" }
         check(teleportInternally(second, arena.secondSpawn)) { "Could not teleport the second player to the arena" }
-        first.sendActionBar(scoreLine(match))
-        second.sendActionBar(scoreLine(match))
+        first.sendActionBar(scoreLine(match, first))
+        second.sendActionBar(scoreLine(match, second))
     }
 
     private fun resetPlayer(
@@ -409,18 +436,137 @@ class DuelSessionManager internal constructor(
                     participants(active).forEach { player ->
                         player.showTitle(
                             Title.title(
-                                miniMessage.deserialize("<red><bold>В БОЙ!</bold></red>"),
-                                miniMessage.deserialize("<gray>Удачи — она пригодится</gray>"),
+                                locales.component(player, "session.fight-title"),
+                                locales.component(player, "session.fight-subtitle"),
                                 Title.Times.times(Duration.ZERO, Duration.ofMillis(900), Duration.ofMillis(250)),
                             ),
                         )
                         player.playSound(player.location, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.45f, 1.5f)
                     }
+                    scheduleObjective(active)
                     countdownTasks.remove(matchId)
                     cancel()
                 }
             }.runTaskTimer(plugin, 0L, 20L)
         countdownTasks[matchId] = task
+    }
+
+    private fun scheduleObjective(match: DuelMatch) {
+        objectiveTasks.remove(match.id)?.cancel()
+        val session = sessions[match.id] ?: return
+        val task =
+            object : BukkitRunnable() {
+                override fun run() {
+                    val current = coordinator.find(match.id)
+                    if (current == null || current.state != MatchState.ACTIVE) {
+                        objectiveTasks.remove(match.id)
+                        cancel()
+                        return
+                    }
+                    session.roundElapsedTicks += OBJECTIVE_PERIOD_TICKS
+                    startSuddenDeathIfNeeded(current, session)
+                    if (current.rules.objective != DuelObjectiveType.KING_OF_THE_HILL) return
+                    val hill = requireNotNull(arenas.get(current.arenaId).hill)
+                    if (session.roundElapsedTicks % 20L == 0L) showHillBoundary(hill)
+                    val contenders = participants(current).filter { hill.contains(it.location) }.mapTo(linkedSetOf()) { PlayerId(it.uniqueId) }
+                    val progress = session.hillCapture.tick(contenders, OBJECTIVE_PERIOD_TICKS)
+                    showHillProgress(current, contenders, progress)
+                    val objective = KingOfTheHillObjective(current.rules.modifiers.kingOfTheHillCaptureSeconds)
+                    coordinator.evaluateObjective(
+                        current.id,
+                        objective,
+                        ObjectiveFrame(session.roundElapsedTicks, contenders, progress),
+                    ).whenComplete { updated, failure ->
+                        if (failure != null) {
+                            runSync { handleRoundResult(current.id, current.firstPlayer, null, failure) }
+                        } else if (updated.state != MatchState.ACTIVE) {
+                            val winner = updated.winner ?: updated.score.let { score ->
+                                when {
+                                    score.first > current.score.first -> current.firstPlayer
+                                    score.second > current.score.second -> current.secondPlayer
+                                    else -> null
+                                }
+                            }
+                            if (winner != null) runSync { handleRoundResult(current.id, winner, updated, null) }
+                        }
+                    }
+                }
+            }.runTaskTimer(plugin, OBJECTIVE_PERIOD_TICKS, OBJECTIVE_PERIOD_TICKS)
+        objectiveTasks[match.id] = task
+    }
+
+    private fun showHillProgress(
+        match: DuelMatch,
+        contenders: Set<PlayerId>,
+        progress: Map<PlayerId, Long>,
+    ) {
+        val target = match.rules.modifiers.kingOfTheHillCaptureSeconds * 20L
+        participants(match).forEach { player ->
+            val own = (progress[PlayerId(player.uniqueId)] ?: 0L).coerceAtMost(target)
+            val percent = (own * 100L / target).toInt()
+            val stateKey =
+                when {
+                    contenders.size > 1 -> "session.hill-contested"
+                    PlayerId(player.uniqueId) in contenders -> "session.hill-capturing"
+                    contenders.isEmpty() -> "session.hill-free"
+                    else -> "session.hill-enemy"
+                }
+            player.sendActionBar(locales.component(player, "session.hill-progress", LocaleService.component("state", locales.component(player, stateKey)), LocaleService.text("percent", percent)))
+        }
+    }
+
+    private fun showHillBoundary(hill: HillZone) {
+        val world = hill.center.world ?: return
+        repeat(HILL_PARTICLES) { index ->
+            val angle = Math.PI * 2.0 * index / HILL_PARTICLES
+            world.spawnParticle(
+                Particle.END_ROD,
+                hill.center.x + kotlin.math.cos(angle) * hill.radius,
+                hill.center.y + 0.15,
+                hill.center.z + kotlin.math.sin(angle) * hill.radius,
+                1,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            )
+        }
+    }
+
+    private fun startSuddenDeathIfNeeded(
+        match: DuelMatch,
+        session: PaperSession,
+    ) {
+        if (session.suddenDeathStarted || session.roundElapsedTicks < match.rules.modifiers.suddenDeathAfterSeconds * 20L) return
+        session.suddenDeathStarted = true
+        participants(match).forEach { player ->
+            player.addPotionEffect(PotionEffect(PotionEffectType.WITHER, Int.MAX_VALUE, 0, false, false, true))
+            player.sendMessage(locales.component(player, "session.sudden-death"))
+            player.playSound(player.location, Sound.ENTITY_WITHER_SPAWN, 0.6f, 1.2f)
+        }
+    }
+
+    private fun handleRoundResult(
+        matchId: MatchId,
+        winner: PlayerId,
+        updated: DuelMatch?,
+        failure: Throwable?,
+    ) {
+        objectiveTasks.remove(matchId)?.cancel()
+        if (failure != null) {
+            announcePersistenceFailure(matchId, unwrap(failure))
+        } else if (updated?.state == MatchState.COUNTDOWN) {
+            announceRound(updated, winner)
+            plugin.server.scheduler.runTaskLater(plugin, Runnable {
+                val current = coordinator.find(updated.id)
+                if (current?.state == MatchState.COUNTDOWN) {
+                    prepareRound(current)
+                    scheduleCountdown(current.id)
+                }
+            }, 30L)
+        } else if (updated != null) {
+            finish(updated)
+        }
     }
 
     private fun announceRound(
@@ -431,8 +577,8 @@ class DuelSessionManager internal constructor(
             val won = player.uniqueId == winner.value
             player.showTitle(
                 Title.title(
-                    miniMessage.deserialize(if (won) "<green><bold>РАУНД ТВОЙ</bold></green>" else "<red><bold>РАУНД ПРОИГРАН</bold></red>"),
-                    scoreLine(match),
+                    locales.component(player, if (won) "session.round-win" else "session.round-loss"),
+                    scoreLine(match, player),
                 ),
             )
         }
@@ -448,13 +594,14 @@ class DuelSessionManager internal constructor(
         }
         if (!session.finishing.compareAndSet(false, true)) return
         countdownTasks.remove(match.id)?.cancel()
+        objectiveTasks.remove(match.id)?.cancel()
         val winnerId = requireNotNull(match.winner)
         participants(match).forEach { player ->
             val won = player.uniqueId == winnerId.value
             player.showTitle(
                 Title.title(
-                    miniMessage.deserialize(if (won) "<gradient:#55ff55:#00aa00><bold>ПОБЕДА</bold></gradient>" else "<gradient:#ff5555:#aa0000><bold>ПОРАЖЕНИЕ</bold></gradient>"),
-                    scoreLine(match),
+                    locales.component(player, if (won) "session.match-win" else "session.match-loss"),
+                    scoreLine(match, player),
                     Title.Times.times(Duration.ofMillis(200), Duration.ofSeconds(2), Duration.ofMillis(500)),
                 ),
             )
@@ -486,7 +633,7 @@ class DuelSessionManager internal constructor(
         plugin.logger.severe("Could not persist duel $matchId: ${failure.javaClass.simpleName}: ${failure.message}")
         coordinator.find(matchId)?.let { match ->
             participants(match).forEach { player ->
-                player.sendActionBar(miniMessage.deserialize("<red>Не удалось сохранить результат. Повтор через 3 секунды…</red>"))
+                player.sendActionBar(locales.component(player, "session.persistence-retry"))
             }
         }
         plugin.server.scheduler.runTaskLater(plugin, Runnable { retryCompletion(matchId) }, 60L)
@@ -524,16 +671,20 @@ class DuelSessionManager internal constructor(
                 if (failure == null) {
                     preparingPlayers -= player.uniqueId
                     if (player.isOnline) {
-                        player.sendActionBar(miniMessage.deserialize("<green>Инвентарь и состояние надёжно восстановлены.</green>"))
+                        player.sendActionBar(locales.component(player, "session.restored"))
                     }
                 } else {
                     plugin.logger.severe(
                         "Could not acknowledge restored duel state for ${player.uniqueId}; the durable snapshot remains retryable: ${unwrap(failure).message}",
                     )
                     if (player.isOnline) {
-                        player.sendMessage(miniMessage.deserialize("<yellow>Состояние восстановлено, но подтверждение MySQL будет повторено. Не выходи с сервера.</yellow>"))
+                        player.sendMessage(locales.component(player, "session.ack-retry"))
                     }
-                    plugin.server.scheduler.runTaskLater(plugin, Runnable { retryAcknowledgement(player, stored) }, 60L)
+                    plugin.server.scheduler.runTaskLater(
+                        plugin,
+                        Runnable { retryAcknowledgement(player, stored) },
+                        RECOVERY_RETRY_TICKS,
+                    )
                 }
             }
         }
@@ -550,6 +701,13 @@ class DuelSessionManager internal constructor(
                     preparingPlayers -= player.uniqueId
                 } else if (plugin.isEnabled) {
                     plugin.logger.severe("Player state acknowledgement retry failed for ${player.uniqueId}: ${unwrap(failure).message}")
+                    if (player.isOnline) {
+                        plugin.server.scheduler.runTaskLater(
+                            plugin,
+                            Runnable { retryAcknowledgement(player, stored) },
+                            RECOVERY_RETRY_TICKS,
+                        )
+                    }
                 }
             }
         }
@@ -564,10 +722,10 @@ class DuelSessionManager internal constructor(
         listOfNotNull(plugin.server.getPlayer(match.firstPlayer.value), plugin.server.getPlayer(match.secondPlayer.value))
 
     private fun requireOnline(playerId: PlayerId): Player =
-        plugin.server.getPlayer(playerId.value) ?: error("Игрок $playerId вышел с сервера")
+        plugin.server.getPlayer(playerId.value) ?: error("Player $playerId left the server")
 
-    private fun scoreLine(match: DuelMatch): Component =
-        miniMessage.deserialize("<gray>Счёт:</gray> <aqua>${match.score.first}</aqua> <dark_gray>—</dark_gray> <red>${match.score.second}</red>")
+    private fun scoreLine(match: DuelMatch, player: Player): Component =
+        locales.component(player, "session.score", LocaleService.text("first", match.score.first), LocaleService.text("second", match.score.second))
 
     private fun runSync(block: () -> Unit) {
         if (!plugin.isEnabled) return
@@ -579,11 +737,17 @@ class DuelSessionManager internal constructor(
     private data class PaperSession(
         val matchId: MatchId,
         val snapshots: Map<UUID, StoredPlayerSnapshot>,
+        val hillCapture: HillCaptureTracker = HillCaptureTracker(),
+        var roundElapsedTicks: Long = 0L,
+        var suddenDeathStarted: Boolean = false,
         val finishing: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(),
     )
 
     private companion object {
         val PLAYER_COMBAT_TELEPORTS =
             setOf(PlayerTeleportEvent.TeleportCause.ENDER_PEARL, PlayerTeleportEvent.TeleportCause.CONSUMABLE_EFFECT)
+        const val OBJECTIVE_PERIOD_TICKS = 10L
+        const val HILL_PARTICLES = 16
+        const val RECOVERY_RETRY_TICKS = 60L
     }
 }

@@ -27,6 +27,7 @@ internal class DurablePlayerStateService(
 ) {
     private val codec = PlayerSnapshotCodec(plugin.server)
     private val pending = ConcurrentHashMap<UUID, PlayerStateEscrow>()
+    private val acknowledgements = ConcurrentHashMap<UUID, CompletableFuture<Unit>>()
 
     fun loadPending(timeoutMillis: Long): Int {
         val loaded = repository.pending(serverId).get(timeoutMillis, TimeUnit.MILLISECONDS)
@@ -82,12 +83,28 @@ internal class DurablePlayerStateService(
     }
 
     /** Must be called after the exact snapshot was applied and verified on the primary thread. */
-    fun acknowledge(stored: StoredPlayerSnapshot): CompletableFuture<Unit> =
-        repository.acknowledgeRestored(stored.escrow).thenApply { acknowledged ->
-            check(acknowledged) { "Escrow acknowledgement did not match the restored snapshot" }
-            pending.remove(stored.escrow.playerId.value, stored.escrow)
-            Unit
+    fun acknowledge(stored: StoredPlayerSnapshot): CompletableFuture<Unit> {
+        val playerId = stored.escrow.playerId.value
+        val current = pending[playerId]
+        if (current == null) return CompletableFuture.completedFuture(Unit)
+        if (current != stored.escrow) {
+            return CompletableFuture.failedFuture(
+                IllegalStateException("A different player escrow replaced the restored snapshot"),
+            )
         }
+        val acknowledgement =
+            acknowledgements.computeIfAbsent(playerId) {
+                repository.acknowledgeRestored(stored.escrow).thenApply { acknowledged ->
+                    check(acknowledged) { "Escrow acknowledgement did not match the restored snapshot" }
+                    check(pending.remove(playerId, stored.escrow)) {
+                        "Pending escrow changed before acknowledgement completed"
+                    }
+                    Unit
+                }
+            }
+        acknowledgement.whenComplete { _, _ -> acknowledgements.remove(playerId, acknowledgement) }
+        return acknowledgement
+    }
 
     private fun capture(
         matchId: MatchId,

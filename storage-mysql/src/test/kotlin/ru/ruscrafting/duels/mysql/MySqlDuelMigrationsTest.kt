@@ -10,9 +10,10 @@ class MySqlDuelMigrationsTest : StringSpec({
         val migrations = MySqlDuelMigrations.all
         val initial = migrations.first()
         val names = migrations[1]
-        val escrow = migrations.last()
+        val escrow = migrations[2]
+        val objective = migrations.last()
 
-        migrations.map { it.version } shouldBe listOf(1, 2, 3)
+        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4)
         initial.statements shouldHaveSize 4
         initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
         initial.statements[2] shouldContain "INSERT IGNORE"
@@ -20,5 +21,7 @@ class MySqlDuelMigrationsTest : StringSpec({
         escrow.statements.single() shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_player_state_escrow`"
         escrow.statements.single() shouldContain "MEDIUMBLOB"
         escrow.statements.single() shouldContain "BINARY(32)"
+        objective.statements.single() shouldContain "ADD COLUMN `objective`"
+        objective.statements.single() shouldContain "DEFAULT 'ELIMINATION'"
     }
 })

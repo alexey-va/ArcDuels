@@ -13,6 +13,7 @@ class DuelCommand internal constructor(
     private val controller: DuelController,
     private val gui: DuelGuiService,
     private val admin: DuelAdminCommand,
+    private val locales: LocaleService? = null,
 ) : CommandExecutor, TabCompleter {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -28,11 +29,11 @@ class DuelCommand internal constructor(
         }
         val player = sender as? Player
         if (player == null) {
-            sender.sendMessage("ArcDuels player command")
+            sender.sendMessage(locales?.component(sender, "error.player-only") ?: miniMessage.deserialize("<red>This command requires a player.</red>"))
             return true
         }
         if (args.isEmpty()) {
-            gui.openTargets(player)
+            gui.openMain(player)
             return true
         }
         when (args[0].lowercase()) {
@@ -50,7 +51,7 @@ class DuelCommand internal constructor(
                 val target =
                     if (args.size > 1) {
                         player.server.getPlayerExact(args[1]) ?: run {
-                            player.sendMessage(miniMessage.deserialize("<red>Игрок не найден.</red>"))
+                            player.sendMessage(message(player, "error.player-left", "<red>Player not found.</red>"))
                             return true
                         }
                     } else {
@@ -62,9 +63,9 @@ class DuelCommand internal constructor(
             else -> {
                 val target = player.server.getPlayerExact(args[0])
                 if (target == null || target.uniqueId == player.uniqueId) {
-                    player.sendMessage(miniMessage.deserialize("<red>Игрок не найден.</red>"))
+                    player.sendMessage(message(player, "error.player-left", "<red>Player not found.</red>"))
                 } else {
-                    gui.openMode(player, target)
+                    gui.openChallenge(player, target)
                 }
             }
         }
@@ -95,7 +96,10 @@ class DuelCommand internal constructor(
     ): ChallengeId? =
         args.getOrNull(1)?.let { raw ->
             runCatching { ChallengeId(UUID.fromString(raw)) }
-            .onFailure { player.sendMessage(miniMessage.deserialize("<red>Некорректный идентификатор вызова.</red>")) }
+            .onFailure { player.sendMessage(message(player, "error.invalid-challenge-id", "<red>Invalid challenge identifier.</red>")) }
             .getOrNull()
         }
+
+    private fun message(player: Player, key: String, fallback: String) =
+        locales?.component(player, key) ?: miniMessage.deserialize(fallback)
 }

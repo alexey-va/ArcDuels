@@ -8,6 +8,7 @@ import org.mockbukkit.mockbukkit.ServerMock
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 
 class PaperArenaQueueTest : StringSpec({
     lateinit var server: ServerMock
@@ -53,9 +54,34 @@ class PaperArenaQueueTest : StringSpec({
         val queued = catalog.reserve(DuelRules(DuelMode.OWN_INVENTORY))
 
         shouldThrow<IllegalStateException> { catalog.reload(plugin) }
+        shouldThrow<IllegalStateException> { catalog.disable(ArenaId("queue")) }
 
         active.close()
         queued.get().close()
+        catalog.disable(ArenaId("queue")) shouldBe 0
+        shouldThrow<java.util.concurrent.ExecutionException> {
+            catalog.reserve(DuelRules(DuelMode.OWN_INVENTORY)).get()
+        }
+    }
+
+    "king of the hill fails fast without a hill and reserves a compatible arena when configured" {
+        val eliminationOnly = PaperArenaCatalog.load(plugin)
+        val kothRules = DuelRules(DuelMode.OWN_INVENTORY, objective = DuelObjectiveType.KING_OF_THE_HILL)
+        shouldThrow<java.util.concurrent.ExecutionException> { eliminationOnly.reserve(kothRules).get() }
+
+        val path = "arenas.queue.hill"
+        plugin.config.set("$path.center.world", "queue-world")
+        plugin.config.set("$path.center.x", 0.0)
+        plugin.config.set("$path.center.y", 70.0)
+        plugin.config.set("$path.center.z", 0.0)
+        plugin.config.set("$path.radius", 3.5)
+        plugin.config.set("$path.height", 3.0)
+        val compatible = PaperArenaCatalog.load(plugin)
+
+        compatible.reserve(kothRules).get().arenaId shouldBe ArenaId("queue")
+
+        plugin.config.set("$path.radius", 20.0)
+        shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
     }
 })
 

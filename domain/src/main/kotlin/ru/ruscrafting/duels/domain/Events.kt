@@ -20,12 +20,14 @@ data class MatchCompletedEvent(
     val kitId: KitId?,
     val ranked: Boolean,
     val winnerRating: Int,
+    val objective: DuelObjectiveType = DuelObjectiveType.ELIMINATION,
 ) : DuelEvent {
     init {
         require(eventId.matches(EVENT_ID_PATTERN)) { "Unsafe event id" }
         require(winner != loser) { "Winner and loser must be different players" }
         require((mode == DuelMode.KIT) == (kitId != null)) { "Event mode and kit do not agree" }
         require(!ranked || mode == DuelMode.KIT) { "Ranked event must use a kit" }
+        require(objective != DuelObjectiveType.SUMO || mode == DuelMode.KIT) { "SUMO event must use a controlled kit" }
         require(winnerRating in 0..RatingCalculator.MAX_RATING) { "Winner rating is outside the supported range" }
     }
 }

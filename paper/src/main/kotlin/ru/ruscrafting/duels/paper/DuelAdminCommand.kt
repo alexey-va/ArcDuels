@@ -1,6 +1,7 @@
 package ru.ruscrafting.duels.paper
 
 import net.kyori.adventure.text.minimessage.MiniMessage
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver
 import org.bukkit.Location
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
@@ -11,6 +12,7 @@ internal class DuelAdminCommand(
     private val plugin: JavaPlugin,
     private val arenas: PaperArenaCatalog,
     private val sessions: DuelSessionManager,
+    private val locales: LocaleService? = null,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -19,17 +21,12 @@ internal class DuelAdminCommand(
         args: List<String>,
     ) {
         if (!sender.hasPermission(ADMIN_PERMISSION)) {
-            sender.sendMessage(message("<red>Нет права $ADMIN_PERMISSION.</red>"))
+            sender.sendMessage(message(sender, "admin.no-permission", LocaleService.text("permission", ADMIN_PERMISSION)))
             return
         }
         when (args.firstOrNull()?.lowercase()) {
             null, "help" -> help(sender)
-            "status" -> sender.sendMessage(
-                message(
-                    "<aqua>ArcDuels:</aqua> арен <white>${arenas.size()}</white>, занято <white>${sessions.activeArenaCount()}</white>, " +
-                        "пар в очереди <white>${sessions.queueSize()}</white>.",
-                ),
-            )
+            "status" -> sender.sendMessage(message(sender, "admin.status", LocaleService.text("arenas", arenas.size()), LocaleService.text("active", sessions.activeArenaCount()), LocaleService.text("waiting", sessions.queueSize())))
             "recover" -> recover(sender, args)
             "arena" -> arena(sender, args.drop(1))
             else -> help(sender)
@@ -46,7 +43,7 @@ internal class DuelAdminCommand(
             return filter(sender.server.onlinePlayers.map(Player::getName), args[1])
         }
         if (!args[0].equals("arena", true)) return emptyList()
-        if (args.size == 2) return filter(listOf("create", "setspawn", "setcorner", "enable", "disable", "list", "info", "reload"), args[1])
+        if (args.size == 2) return filter(listOf("create", "setspawn", "setcorner", "sethill", "enable", "disable", "list", "info", "reload"), args[1])
         val operation = args[1].lowercase()
         if (args.size == 3 && operation != "create" && operation !in setOf("list", "reload")) {
             return filter(arenaIds(), args[2])
@@ -65,18 +62,13 @@ internal class DuelAdminCommand(
                 val id = parseId(sender, args.getOrNull(1)) ?: return
                 val path = "arenas.${id.value}"
                 if (plugin.config.contains(path)) {
-                    sender.sendMessage(message("<red>Арена <white>${id.value}</white> уже существует.</red>"))
+                    sender.sendMessage(message(sender, "admin.arena-exists", LocaleService.text("arena", id.value)))
                     return
                 }
                 plugin.config.set("$path.enabled", false)
                 plugin.saveConfig()
-                sender.sendMessage(
-                    message(
-                        "<green>Арена <white>${id.value}</white> создана выключенной.</green> " +
-                            "<gray>Теперь задай spawn 1/2 и corner 1/2.</gray>",
-                    ),
-                )
-                player.sendActionBar(message("<yellow>Редактируется арена ${id.value}</yellow>"))
+                sender.sendMessage(message(sender, "admin.arena-created", LocaleService.text("arena", id.value)))
+                player.sendActionBar(message(player, "admin.arena-editing", LocaleService.text("arena", id.value)))
             }
             "setspawn" -> {
                 val player = requirePlayer(sender) ?: return
@@ -85,8 +77,8 @@ internal class DuelAdminCommand(
                 val point = parsePoint(sender, args.getOrNull(2)) ?: return
                 val path = "arenas.${id.value}"
                 writeLocation("$path.${if (point == 1) "first-spawn" else "second-spawn"}", player.location)
-                disableWhileEditing(path)
-                sender.sendMessage(message("<green>Точка появления $point арены <white>${id.value}</white> сохранена.</green>"))
+                disableWhileEditing(path, id)
+                sender.sendMessage(message(sender, "admin.spawn-saved", LocaleService.text("point", point), LocaleService.text("arena", id.value)))
             }
             "setcorner" -> {
                 val player = requirePlayer(sender) ?: return
@@ -94,7 +86,7 @@ internal class DuelAdminCommand(
                 val id = existingId(sender, args.getOrNull(1)) ?: return
                 val spawnWorld = plugin.config.getString("arenas.${id.value}.first-spawn.world")
                 if (spawnWorld != null && player.world.name != spawnWorld) {
-                    sender.sendMessage(message("<red>Границы нужно отмечать в мире первой точки появления: <white>$spawnWorld</white>.</red>"))
+                    sender.sendMessage(message(sender, "admin.wrong-world", LocaleService.text("world", spawnWorld)))
                     return
                 }
                 val point = parsePoint(sender, args.getOrNull(2)) ?: return
@@ -103,13 +95,25 @@ internal class DuelAdminCommand(
                 plugin.config.set("$path.bounds.$corner.x", player.location.x)
                 plugin.config.set("$path.bounds.$corner.y", player.location.y)
                 plugin.config.set("$path.bounds.$corner.z", player.location.z)
-                disableWhileEditing(path)
-                sender.sendMessage(
-                    message(
-                        "<green>Угол $point арены <white>${id.value}</white> сохранён.</green> " +
-                            "<gray>При включении координаты автоматически нормализуются.</gray>",
-                    ),
-                )
+                disableWhileEditing(path, id)
+                sender.sendMessage(message(sender, "admin.corner-saved", LocaleService.text("point", point), LocaleService.text("arena", id.value)))
+            }
+            "sethill" -> {
+                val player = requirePlayer(sender) ?: return
+                if (!requireIdle(sender)) return
+                val id = existingId(sender, args.getOrNull(1)) ?: return
+                val radius = args.getOrNull(2)?.toDoubleOrNull() ?: 3.5
+                val height = args.getOrNull(3)?.toDoubleOrNull() ?: 3.0
+                if (radius !in 1.0..32.0 || height !in 1.0..32.0) {
+                    sender.sendMessage(message(sender, "admin.hill-range"))
+                    return
+                }
+                val path = "arenas.${id.value}"
+                writeLocation("$path.hill.center", player.location)
+                plugin.config.set("$path.hill.radius", radius)
+                plugin.config.set("$path.hill.height", height)
+                disableWhileEditing(path, id)
+                sender.sendMessage(message(sender, "admin.hill-saved", LocaleService.text("arena", id.value), LocaleService.text("radius", radius), LocaleService.text("height", height)))
             }
             "enable" -> setEnabled(sender, args.getOrNull(1), true)
             "disable" -> setEnabled(sender, args.getOrNull(1), false)
@@ -128,27 +132,25 @@ internal class DuelAdminCommand(
         if (!requireIdle(sender)) return
         val id = existingId(sender, rawId) ?: return
         val path = "arenas.${id.value}"
-        if (enabled) normalizeBounds(path)
-        plugin.config.set("$path.enabled", enabled)
+        if (!enabled) {
+            plugin.config.set("$path.enabled", false)
+            plugin.saveConfig()
+            val count = arenas.disable(id)
+            sender.sendMessage(message(sender, "admin.arena-disabled", LocaleService.text("arena", id.value), LocaleService.text("count", count)))
+            return
+        }
+        normalizeBounds(path)
+        plugin.config.set("$path.enabled", true)
         plugin.saveConfig()
         val loaded = runCatching { arenas.reload(plugin) }
         if (loaded.isFailure) {
-            if (enabled) {
-                plugin.config.set("$path.enabled", false)
-                plugin.saveConfig()
-            }
-            sender.sendMessage(message("<red>Арена не применена: ${loaded.exceptionOrNull()?.message}</red>"))
+            plugin.config.set("$path.enabled", false)
+            plugin.saveConfig()
+            arenas.disable(id)
+            sender.sendMessage(message(sender, "admin.arena-invalid", LocaleService.text("reason", loaded.exceptionOrNull()?.message ?: "unknown")))
             return
         }
-        sender.sendMessage(
-            message(
-                if (enabled) {
-                    "<green>Арена <white>${id.value}</white> проверена и включена. Активных арен: ${loaded.getOrThrow()}.</green>"
-                } else {
-                    "<yellow>Арена <white>${id.value}</white> выключена. Активных арен: ${loaded.getOrThrow()}.</yellow>"
-                },
-            ),
-        )
+        sender.sendMessage(message(sender, "admin.arena-enabled", LocaleService.text("arena", id.value), LocaleService.text("count", loaded.getOrThrow())))
     }
 
     private fun reload(sender: CommandSender) {
@@ -157,20 +159,20 @@ internal class DuelAdminCommand(
             plugin.reloadConfig()
             arenas.reload(plugin)
         }
-        result.onSuccess { sender.sendMessage(message("<green>Конфигурация перечитана; активных арен: $it.</green>")) }
-            .onFailure { sender.sendMessage(message("<red>Ошибка конфигурации арен: ${it.message}</red>")) }
+        result.onSuccess { sender.sendMessage(message(sender, "admin.reloaded", LocaleService.text("count", it))) }
+            .onFailure { sender.sendMessage(message(sender, "admin.reload-failed", LocaleService.text("reason", it.message ?: "unknown"))) }
     }
 
     private fun list(sender: CommandSender) {
         val ids = arenaIds()
         if (ids.isEmpty()) {
-            sender.sendMessage(message("<gray>Арены ещё не созданы.</gray>"))
+            sender.sendMessage(message(sender, "admin.no-arenas"))
             return
         }
-        sender.sendMessage(message("<aqua>Арены:</aqua>"))
+        sender.sendMessage(message(sender, "admin.arena-list"))
         ids.forEach { id ->
             val enabled = plugin.config.getBoolean("arenas.$id.enabled", false)
-            sender.sendMessage(message("<dark_gray>•</dark_gray> <white>$id</white> ${if (enabled) "<green>включена</green>" else "<gray>выключена</gray>"}"))
+            sender.sendMessage(message(sender, "admin.arena-list-entry", LocaleService.text("arena", id), LocaleService.component("state", message(sender, if (enabled) "admin.state-enabled" else "admin.state-disabled"))))
         }
     }
 
@@ -184,12 +186,9 @@ internal class DuelAdminCommand(
         val second = plugin.config.getConfigurationSection("$path.second-spawn")
         val minimum = plugin.config.getConfigurationSection("$path.bounds.min")
         val maximum = plugin.config.getConfigurationSection("$path.bounds.max")
-        sender.sendMessage(
-            message(
-                "<aqua>${id.value}</aqua>: ${if (plugin.config.getBoolean("$path.enabled")) "<green>включена</green>" else "<gray>выключена</gray>"}; " +
-                    "spawn1=${first != null}, spawn2=${second != null}, corner1=${minimum != null}, corner2=${maximum != null}",
-            ),
-        )
+        val hill = plugin.config.getConfigurationSection("$path.hill.center")
+        val stateKey = if (plugin.config.getBoolean("$path.enabled")) "admin.state-enabled" else "admin.state-disabled"
+        sender.sendMessage(message(sender, "admin.arena-info", LocaleService.text("arena", id.value), LocaleService.component("state", message(sender, stateKey)), LocaleService.text("spawn1", first != null), LocaleService.text("spawn2", second != null), LocaleService.text("corner1", minimum != null), LocaleService.text("corner2", maximum != null), LocaleService.text("hill", hill != null)))
     }
 
     private fun recover(
@@ -198,30 +197,33 @@ internal class DuelAdminCommand(
     ) {
         val name = args.getOrNull(1)
         if (name == null) {
-            sender.sendMessage(message("<red>Использование: /duels admin recover <онлайн-игрок></red>"))
+            sender.sendMessage(message(sender, "admin.recover-usage"))
             return
         }
         val player = sender.server.getPlayerExact(name)
         if (player == null) {
-            sender.sendMessage(message("<red>Игрок должен быть онлайн.</red>"))
+            sender.sendMessage(message(sender, "admin.player-offline"))
             return
         }
         if (sessions.recover(player)) {
-            sender.sendMessage(message("<green>Запущено безопасное восстановление ${player.name}.</green>"))
+            sender.sendMessage(message(sender, "admin.recovery-started", LocaleService.text("player", player.name)))
         } else {
-            sender.sendMessage(message("<gray>У ${player.name} нет ожидающего снимка.</gray>"))
+            sender.sendMessage(message(sender, "admin.no-snapshot", LocaleService.text("player", player.name)))
         }
     }
 
-    private fun disableWhileEditing(path: String) {
+    private fun disableWhileEditing(
+        path: String,
+        id: ArenaId,
+    ) {
         plugin.config.set("$path.enabled", false)
         plugin.saveConfig()
-        if (sessions.activeArenaCount() == 0 && sessions.queueSize() == 0) runCatching { arenas.reload(plugin) }
+        arenas.disable(id)
     }
 
     private fun requireIdle(sender: CommandSender): Boolean {
         if (sessions.activeArenaCount() == 0 && sessions.queueSize() == 0) return true
-        sender.sendMessage(message("<red>Изменение арен запрещено, пока идёт бой или есть очередь.</red>"))
+        sender.sendMessage(message(sender, "admin.busy"))
         return false
     }
 
@@ -256,7 +258,7 @@ internal class DuelAdminCommand(
     ): ArenaId? {
         val id = parseId(sender, raw) ?: return null
         if (!plugin.config.contains("arenas.${id.value}")) {
-            sender.sendMessage(message("<red>Арена <white>${id.value}</white> не найдена.</red>"))
+            sender.sendMessage(message(sender, "admin.arena-not-found", LocaleService.text("arena", id.value)))
             return null
         }
         return id
@@ -267,11 +269,11 @@ internal class DuelAdminCommand(
         raw: String?,
     ): ArenaId? {
         if (raw == null) {
-            sender.sendMessage(message("<red>Укажи id арены.</red>"))
+            sender.sendMessage(message(sender, "admin.arena-id-required"))
             return null
         }
         return runCatching { ArenaId(raw.lowercase()) }
-            .onFailure { sender.sendMessage(message("<red>Некорректный id арены: ${it.message}</red>")) }
+            .onFailure { sender.sendMessage(message(sender, "admin.arena-id-invalid", LocaleService.text("reason", it.message ?: "unknown"))) }
             .getOrNull()
     }
 
@@ -280,13 +282,13 @@ internal class DuelAdminCommand(
         raw: String?,
     ): Int? =
         raw?.toIntOrNull()?.takeIf { it in 1..2 } ?: run {
-            sender.sendMessage(message("<red>Номер точки должен быть 1 или 2.</red>"))
+            sender.sendMessage(message(sender, "admin.point-invalid"))
             null
         }
 
     private fun requirePlayer(sender: CommandSender): Player? =
         (sender as? Player) ?: run {
-            sender.sendMessage(message("<red>Эта команда требует позицию игрока.</red>"))
+            sender.sendMessage(message(sender, "admin.player-required"))
             null
         }
 
@@ -294,23 +296,12 @@ internal class DuelAdminCommand(
         plugin.config.getConfigurationSection("arenas")?.getKeys(false)?.sorted() ?: emptyList()
 
     private fun help(sender: CommandSender) {
-        sender.sendMessage(
-            message(
-                """
-                <aqua><bold>ArcDuels admin</bold></aqua>
-                <white>/duels admin arena create <id></white>
-                <white>/duels admin arena setspawn <id> <1|2></white>
-                <white>/duels admin arena setcorner <id> <1|2></white>
-                <white>/duels admin arena enable|disable <id></white>
-                <white>/duels admin arena list|info <id>|reload</white>
-                <white>/duels admin status</white>
-                <white>/duels admin recover <онлайн-игрок></white>
-                """.trimIndent(),
-            ),
-        )
+        if (locales == null) sender.sendMessage(miniMessage.deserialize("<aqua><bold>ArcDuels admin</bold></aqua>"))
+        else locales.lines(sender, "admin.help").forEach(sender::sendMessage)
     }
 
-    private fun message(input: String) = miniMessage.deserialize(input)
+    private fun message(sender: CommandSender, key: String, vararg resolvers: TagResolver) =
+        locales?.component(sender, key, *resolvers) ?: miniMessage.deserialize("<gray>[$key]</gray>")
 
     private fun filter(
         values: Collection<String>,
