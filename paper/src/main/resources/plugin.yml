@@ -1,0 +1,16 @@
+name: RusDuels
+version: '${version}'
+main: ru.ruscrafting.duels.paper.RusDuelsPlugin
+api-version: '1.21'
+description: Modern Kotlin duels for RusCrafting
+author: RusCrafting
+commands:
+  duel:
+    description: Open duels or manage a challenge
+    usage: /duel [player|accept|deny|cancel|stats|top]
+    aliases: [duels, дуэль]
+    permission: rusduels.use
+permissions:
+  rusduels.use:
+    description: Use duel commands and menus
+    default: true

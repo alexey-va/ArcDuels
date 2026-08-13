@@ -1,0 +1,180 @@
+package ru.ruscrafting.duels.domain
+
+import java.time.Clock
+import java.time.temporal.ChronoUnit
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+
+class MatchCoordinator(
+    private val serverId: ServerId,
+    private val arenaAllocator: ArenaAllocator,
+    private val statistics: StatisticsRepository,
+    private val eventPublisher: DuelEventPublisher = NoOpDuelEventPublisher,
+    private val clock: Clock = Clock.systemUTC(),
+) {
+    private val lock = Any()
+    private val matches = ConcurrentHashMap<MatchId, DuelMatch>()
+    private val matchByPlayer = ConcurrentHashMap<PlayerId, MatchId>()
+    private val reservations = ConcurrentHashMap<MatchId, ArenaReservation>()
+
+    fun reserve(
+        firstPlayer: PlayerId,
+        secondPlayer: PlayerId,
+        rules: DuelRules,
+    ): CompletableFuture<DuelMatch> {
+        require(firstPlayer != secondPlayer) { "A player cannot duel themselves" }
+        synchronized(lock) {
+            check(matchByPlayer[firstPlayer] == null) { "First player is already in a match" }
+            check(matchByPlayer[secondPlayer] == null) { "Second player is already in a match" }
+        }
+        return arenaAllocator.reserve(rules).thenApply { reservation ->
+            try {
+                synchronized(lock) {
+                    check(matchByPlayer[firstPlayer] == null) { "First player joined another match" }
+                    check(matchByPlayer[secondPlayer] == null) { "Second player joined another match" }
+                    val match =
+                        DuelMatch.reserve(
+                            firstPlayer = firstPlayer,
+                            secondPlayer = secondPlayer,
+                            arenaId = reservation.arenaId,
+                            serverId = serverId,
+                            rules = rules,
+                            now = clock.instant(),
+                        )
+                    matches[match.id] = match
+                    matchByPlayer[firstPlayer] = match.id
+                    matchByPlayer[secondPlayer] = match.id
+                    reservations[match.id] = reservation
+                    match
+                }
+            } catch (failure: Throwable) {
+                reservation.close()
+                throw failure
+            }
+        }
+    }
+
+    fun beginCountdown(matchId: MatchId): DuelMatch =
+        update(matchId) { it.beginCountdown() }
+
+    fun activate(matchId: MatchId): DuelMatch =
+        update(matchId) { it.activate(clock.instant()) }
+
+    fun recordRoundWinner(
+        matchId: MatchId,
+        winner: PlayerId,
+        reason: MatchEndReason = MatchEndReason.ELIMINATION,
+    ): CompletableFuture<DuelMatch> {
+        val updated = update(matchId) { it.recordRoundWinner(winner, clock.instant(), reason) }
+        return if (updated.state == MatchState.COMPLETING) persistCompletion(updated) else CompletableFuture.completedFuture(updated)
+    }
+
+    /** Retries an unknown-commit-result failure without duplicating statistics. */
+    fun retryCompletion(matchId: MatchId): CompletableFuture<DuelMatch> {
+        val match = getRequired(matchId)
+        check(match.state == MatchState.COMPLETING) { "Match is not awaiting persistence" }
+        return persistCompletion(match)
+    }
+
+    fun forfeit(
+        matchId: MatchId,
+        losingPlayer: PlayerId,
+        reason: MatchEndReason,
+    ): CompletableFuture<DuelMatch> {
+        val updated = update(matchId) { it.forfeit(losingPlayer, clock.instant(), reason) }
+        return persistCompletion(updated)
+    }
+
+    fun cancel(
+        matchId: MatchId,
+        reason: MatchEndReason,
+    ): DuelMatch {
+        val cancelled = update(matchId) { it.cancel(clock.instant(), reason) }
+        release(cancelled)
+        return cancelled
+    }
+
+    fun find(matchId: MatchId): DuelMatch? = matches[matchId]
+
+    fun findByPlayer(playerId: PlayerId): DuelMatch? = matchByPlayer[playerId]?.let(matches::get)
+
+    fun activeMatches(): List<DuelMatch> =
+        matches.values.filter { it.state !in setOf(MatchState.COMPLETED, MatchState.CANCELLED) }.sortedBy(DuelMatch::createdAt)
+
+    private fun persistCompletion(match: DuelMatch): CompletableFuture<DuelMatch> {
+        val winner = requireNotNull(match.winner)
+        val outcome =
+            MatchOutcome(
+                matchId = match.id,
+                winner = winner,
+                loser = match.opponentOf(winner),
+                mode = match.rules.mode,
+                kitId = match.rules.kitId,
+                ranked = match.rules.ranked,
+                serverId = match.serverId,
+                completedAt = requireNotNull(match.completedAt).truncatedTo(ChronoUnit.MILLIS),
+            )
+        return statistics.record(outcome).thenApply { persisted ->
+            val completed =
+                synchronized(lock) {
+                    val current = getRequired(match.id)
+                    if (current.state == MatchState.COMPLETED) current else current.markPersisted().also { matches[it.id] = it }
+                }
+            release(completed)
+            publishCompletion(completed, persisted)
+            completed
+        }
+    }
+
+    private fun publishCompletion(
+        match: DuelMatch,
+        persisted: PersistedMatchResult,
+    ) {
+        val winner = requireNotNull(match.winner)
+        val occurredAt = requireNotNull(match.completedAt)
+        val events =
+            listOf(
+                MatchCompletedEvent(
+                    eventId = "${match.id}:completed",
+                    occurredAt = occurredAt,
+                    sourceServer = serverId,
+                    matchId = match.id,
+                    winner = winner,
+                    loser = match.opponentOf(winner),
+                    mode = match.rules.mode,
+                    kitId = match.rules.kitId,
+                    ranked = match.rules.ranked,
+                    winnerRating = persisted.winnerRatingAfter,
+                ),
+                LeaderboardInvalidatedEvent(
+                    eventId = "${match.id}:leaderboard",
+                    occurredAt = occurredAt,
+                    sourceServer = serverId,
+                    revision = persisted.leaderboardRevision,
+                ),
+            )
+        for (event in events) {
+            eventPublisher.publish(event).exceptionally { Unit }
+        }
+    }
+
+    private fun update(
+        matchId: MatchId,
+        transform: (DuelMatch) -> DuelMatch,
+    ): DuelMatch =
+        synchronized(lock) {
+            val updated = transform(getRequired(matchId))
+            matches[matchId] = updated
+            updated
+        }
+
+    private fun getRequired(matchId: MatchId): DuelMatch = matches[matchId] ?: error("Unknown match")
+
+    private fun release(match: DuelMatch) {
+        synchronized(lock) {
+            matchByPlayer.remove(match.firstPlayer, match.id)
+            matchByPlayer.remove(match.secondPlayer, match.id)
+            reservations.remove(match.id)?.close()
+        }
+    }
+}

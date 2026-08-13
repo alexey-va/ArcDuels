@@ -1,0 +1,3 @@
+[submodule "arc-core"]
+	path = arc-core
+	url = https://github.com/alexey-va/arc-core.git

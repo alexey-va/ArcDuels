@@ -1,0 +1,230 @@
+package ru.ruscrafting.duels.paper
+
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.minimessage.MiniMessage
+import io.papermc.paper.datacomponent.DataComponentTypes
+import io.papermc.paper.datacomponent.item.ResolvableProfile
+import org.bukkit.Bukkit
+import org.bukkit.Material
+import org.bukkit.entity.Player
+import org.bukkit.event.EventHandler
+import org.bukkit.event.Listener
+import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.inventory.Inventory
+import org.bukkit.inventory.InventoryHolder
+import org.bukkit.inventory.ItemFlag
+import org.bukkit.inventory.ItemStack
+import org.bukkit.plugin.java.JavaPlugin
+import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.StatisticsRepository
+import java.util.UUID
+
+class DuelGuiService(
+    private val plugin: JavaPlugin,
+    private val kits: KitRegistry,
+    private val statistics: StatisticsRepository,
+    private val challengeAction: (Player, Player, DuelRules) -> Unit,
+) : Listener {
+    private val miniMessage = MiniMessage.miniMessage()
+
+    fun openTargets(player: Player) {
+        val targets =
+            plugin.server.onlinePlayers
+                .filter { it.uniqueId != player.uniqueId }
+                .sortedWith { first, second -> String.CASE_INSENSITIVE_ORDER.compare(first.name, second.name) }
+        val holder = TargetMenuHolder()
+        val inventory = create(holder, 54, "<gradient:#55ffff:#5555ff><bold>ВЫБЕРИ СОПЕРНИКА</bold></gradient>")
+        decorate(inventory)
+        val slots = contentSlots()
+        targets.take(slots.size).forEachIndexed { index, target ->
+            val slot = slots[index]
+            holder.targets[slot] = target.uniqueId
+            inventory.setItem(slot, playerHead(target, "<aqua><bold>${target.name}</bold></aqua>", listOf("<gray>Нажми, чтобы выбрать режим</gray>")))
+        }
+        if (targets.isEmpty()) inventory.setItem(22, item(Material.BARRIER, "<red>Нет доступных игроков</red>"))
+        player.openInventory(inventory)
+    }
+
+    fun openMode(
+        player: Player,
+        target: Player,
+    ) {
+        val holder = ModeMenuHolder(target.uniqueId)
+        val inventory = create(holder, 27, "<gradient:#ffaa00:#ff5555><bold>РЕЖИМ ДУЭЛИ</bold></gradient>")
+        decorate(inventory)
+        val kitsList = kits.all()
+        kitsList.take(5).forEachIndexed { index, kit ->
+            val slot = 10 + index
+            holder.rules[slot] = DuelRules(DuelMode.KIT, kit.id)
+            inventory.setItem(
+                slot,
+                item(
+                    kit.icon,
+                    componentToMiniMessage(kit.displayName),
+                    listOf("<gray>Одинаковый набор для обоих</gray>", "", "<yellow>Нажми, чтобы вызвать</yellow>"),
+                ),
+            )
+        }
+        holder.rules[16] = DuelRules(DuelMode.OWN_INVENTORY)
+        inventory.setItem(
+            16,
+            item(
+                Material.ENDER_CHEST,
+                "<light_purple><bold>СВОЁ СНАРЯЖЕНИЕ</bold></light_purple>",
+                listOf("<gray>Каждый сражается своими вещами</gray>", "<dark_gray>Инвентарь восстановится после матча</dark_gray>", "", "<yellow>Нажми, чтобы вызвать</yellow>"),
+            ),
+        )
+        player.openInventory(inventory)
+    }
+
+    fun openLeaderboard(player: Player) {
+        player.sendActionBar(miniMessage.deserialize("<gray>Загружаю глобальный рейтинг…</gray>"))
+        statistics.leaderboard(45).whenComplete { entries, failure ->
+            if (!plugin.isEnabled) return@whenComplete
+            plugin.server.scheduler.runTask(plugin, Runnable {
+                if (failure != null) {
+                    player.sendMessage(miniMessage.deserialize("<red>Не удалось загрузить рейтинг.</red>"))
+                    return@Runnable
+                }
+                val holder = LeaderboardMenuHolder()
+                val inventory = create(holder, 54, "<gradient:#ffd700:#ff8c00><bold>ЛИДЕРЫ ДУЭЛЕЙ</bold></gradient>")
+                decorate(inventory)
+                val slots = contentSlots()
+                entries.take(slots.size).forEachIndexed { index, entry ->
+                    val slot = slots[index]
+                    val profileName = Bukkit.getOfflinePlayer(entry.playerId.value).name
+                    val stack = ItemStack(Material.PLAYER_HEAD)
+                    applyHeadProfile(stack, entry.playerId.value, profileName)
+                    val meta = stack.itemMeta
+                    meta.displayName(miniMessage.deserialize("<gold><bold>#${entry.position}</bold></gold> <yellow>${profileName ?: entry.playerId}</yellow>"))
+                    meta.lore(
+                        listOf(
+                            miniMessage.deserialize("<gray>Рейтинг:</gray> <aqua><bold>${entry.rating}</bold></aqua>"),
+                            miniMessage.deserialize("<gray>Победы:</gray> <green>${entry.wins}</green>"),
+                            miniMessage.deserialize("<gray>Поражения:</gray> <red>${entry.losses}</red>"),
+                        ),
+                    )
+                    stack.itemMeta = meta
+                    inventory.setItem(slot, stack)
+                }
+                if (entries.isEmpty()) inventory.setItem(22, item(Material.PAPER, "<gray>Матчей пока нет</gray>"))
+                player.openInventory(inventory)
+            })
+        }
+    }
+
+    @EventHandler
+    fun onClick(event: InventoryClickEvent) {
+        val player = event.whoClicked as? Player ?: return
+        when (val holder = event.view.topInventory.holder) {
+            is TargetMenuHolder -> {
+                event.isCancelled = true
+                if (event.clickedInventory != event.view.topInventory) return
+                val targetId = holder.targets[event.rawSlot] ?: return
+                val target = plugin.server.getPlayer(targetId)
+                if (target == null) {
+                    player.closeInventory()
+                    player.sendMessage(miniMessage.deserialize("<red>Игрок уже вышел.</red>"))
+                } else {
+                    openMode(player, target)
+                }
+            }
+            is ModeMenuHolder -> {
+                event.isCancelled = true
+                if (event.clickedInventory != event.view.topInventory) return
+                val rules = holder.rules[event.rawSlot] ?: return
+                val target = plugin.server.getPlayer(holder.target)
+                player.closeInventory()
+                if (target == null) {
+                    player.sendMessage(miniMessage.deserialize("<red>Игрок уже вышел.</red>"))
+                } else {
+                    challengeAction(player, target, rules)
+                }
+            }
+            is LeaderboardMenuHolder -> event.isCancelled = true
+        }
+    }
+
+    private fun create(
+        holder: MenuHolder,
+        size: Int,
+        title: String,
+    ): Inventory =
+        Bukkit.createInventory(holder, size, miniMessage.deserialize(title)).also(holder::attach)
+
+    private fun decorate(inventory: Inventory) {
+        val border = item(Material.BLACK_STAINED_GLASS_PANE, " ")
+        for (slot in 0 until inventory.size) {
+            val row = slot / 9
+            val column = slot % 9
+            if (row == 0 || row == inventory.size / 9 - 1 || column == 0 || column == 8) inventory.setItem(slot, border)
+        }
+    }
+
+    private fun playerHead(
+        player: Player,
+        name: String,
+        lore: List<String>,
+    ): ItemStack {
+        val stack = ItemStack(Material.PLAYER_HEAD)
+        applyHeadProfile(stack, player.uniqueId, player.name)
+        val meta = stack.itemMeta
+        meta.displayName(miniMessage.deserialize(name))
+        meta.lore(lore.map(miniMessage::deserialize))
+        stack.itemMeta = meta
+        return stack
+    }
+
+    private fun applyHeadProfile(
+        stack: ItemStack,
+        uuid: UUID,
+        name: String?,
+    ) {
+        val profile = ResolvableProfile.resolvableProfile().uuid(uuid)
+        if (name != null) profile.name(name)
+        stack.setData(DataComponentTypes.PROFILE, profile)
+    }
+
+    private fun item(
+        material: Material,
+        name: String,
+        lore: List<String> = emptyList(),
+    ): ItemStack =
+        ItemStack(material).apply {
+            itemMeta = itemMeta.apply {
+                displayName(miniMessage.deserialize(name))
+                lore(lore.map(miniMessage::deserialize))
+                addItemFlags(ItemFlag.HIDE_ATTRIBUTES)
+            }
+        }
+
+    private fun contentSlots(): List<Int> =
+        (0 until 54).filter { slot ->
+            val row = slot / 9
+            val column = slot % 9
+            row in 1..4 && column in 1..7
+        }
+
+    private fun componentToMiniMessage(component: Component): String = miniMessage.serialize(component)
+
+    private abstract class MenuHolder : InventoryHolder {
+        private lateinit var inventory: Inventory
+
+        fun attach(inventory: Inventory) {
+            this.inventory = inventory
+        }
+
+        override fun getInventory(): Inventory = inventory
+    }
+
+    private class TargetMenuHolder : MenuHolder() {
+        val targets = mutableMapOf<Int, UUID>()
+    }
+
+    private class ModeMenuHolder(val target: UUID) : MenuHolder() {
+        val rules = mutableMapOf<Int, DuelRules>()
+    }
+
+    private class LeaderboardMenuHolder : MenuHolder()
+}

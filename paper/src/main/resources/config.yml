@@ -1,0 +1,75 @@
+# Unique node id used in Redis event origin checks.
+server-id: duels-1
+challenge-timeout-seconds: 45
+
+mysql:
+  enabled: false
+  host: 127.0.0.1
+  port: 3306
+  database: rusduels
+  username: rusduels
+  password: ''
+  # DISABLED, REQUIRED, VERIFY_CA, or VERIFY_IDENTITY
+  ssl-mode: VERIFY_IDENTITY
+  pool:
+    minimum-idle: 1
+    maximum-size: 8
+    connection-timeout-ms: 10000
+    socket-timeout-ms: 30000
+    validation-timeout-ms: 5000
+    max-lifetime-ms: 1700000
+
+redis:
+  enabled: false
+  host: 127.0.0.1
+  port: 6379
+  username: ''
+  password: ''
+  broadcast-wins: true
+
+kits:
+  classic:
+    display-name: '<gradient:#55ffff:#5555ff><bold>КЛАССИКА</bold></gradient>'
+    icon: DIAMOND_SWORD
+    items:
+      '0': DIAMOND_SWORD
+      '1': BOW
+      '2': GOLDEN_APPLE 4
+      '8': ARROW 32
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: DIAMOND_CHESTPLATE
+      leggings: DIAMOND_LEGGINGS
+      boots: DIAMOND_BOOTS
+  axe:
+    display-name: '<gradient:#ffaa00:#ff5555><bold>ТОПОРЫ</bold></gradient>'
+    icon: DIAMOND_AXE
+    items:
+      '0': DIAMOND_AXE
+      '1': SHIELD
+      '2': GOLDEN_APPLE 3
+    armor:
+      helmet: IRON_HELMET
+      chestplate: IRON_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: IRON_BOOTS
+
+# The example is disabled intentionally. Set real isolated coordinates and
+# enable it before accepting production matches.
+arenas:
+  example:
+    enabled: false
+    first-spawn:
+      world: world
+      x: 0.5
+      y: 80.0
+      z: -10.5
+      yaw: 0.0
+      pitch: 0.0
+    second-spawn:
+      world: world
+      x: 0.5
+      y: 80.0
+      z: 10.5
+      yaw: 180.0
+      pitch: 0.0
