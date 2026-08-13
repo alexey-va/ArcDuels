@@ -4,9 +4,9 @@
 
 - challenge, accept, deny and cancel flows;
 - kit and own-inventory loadout policies;
-- arena reservation and safe snapshot/restore;
+- FIFO arena reservation and durable MySQL snapshot/restore;
 - countdown, combat, completion and recovery states;
-- local statistics plus optional MySQL persistence;
+- MySQL-gated gameplay with durable statistics and recovery;
 - optional Redis result broadcasts and leaderboard invalidation;
 - paginated duel browser, kit picker and global top-100 leaderboard inventories;
 - casual/ranked BO1 and BO3 selection;
@@ -18,9 +18,9 @@
 
 - ranked queues and ELO seasons;
 - rematches, spectators and match history;
-- arena editor and administration GUI;
+- arena administration GUI (the command editor is complete);
 - PlaceholderAPI expansion and moderation/audit commands;
-- crash recovery and orphaned-match reconciliation.
+- orphaned-match reconciliation and recovery audit history.
 
 ## Later
 

@@ -8,13 +8,14 @@ Paper, MySQL, and Redis:
 | Module | Responsibility |
 |---|---|
 | `domain` | Match state machine, challenges, modes, ratings and ports |
-| `storage-mysql` | Optional durable statistics and leaderboard queries |
+| `storage-mysql` | Durable player-state escrow, statistics and leaderboard queries |
 | `network-redis` | Optional cross-server events and cache invalidation |
 | `paper` | Commands, inventories, arena runtime and player presentation |
 
 `arc-core` is pinned as a Git submodule and consumed through a Gradle composite
-build. MySQL and Redis are optional at runtime; a single-server installation
-must remain usable without either service.
+build. Redis is optional at runtime. MySQL is mandatory for starting matches
+because ArcDuels will not mutate a player's inventory or location without a
+committed, checksum-verified recovery snapshot.
 
 ## Status
 
@@ -28,6 +29,8 @@ This repository is under active development. The first vertical slice targets:
 - paginated player, kit and global top-100 leaderboard inventories;
 - countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
 - bounded arenas, scoped internal teleports and protected player inventories;
+- FIFO waiting for a free arena and in-game `/duels admin arena` setup;
+- crash-safe, versioned MySQL player-state escrow before any duel mutation;
 - a state-machine-wired objective boundary for future KOTH modes.
 
 ## Build

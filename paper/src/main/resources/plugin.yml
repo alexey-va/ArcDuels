@@ -7,10 +7,13 @@ author: RusCrafting
 commands:
   duel:
     description: Open duels or manage a challenge
-    usage: /duel [player|accept|deny|cancel|leave|stats|top]
+    usage: /duel [player|accept|deny|cancel|leave|stats|top|admin]
     aliases: [duels, дуэль]
     permission: arcduels.use
 permissions:
   arcduels.use:
     description: Use duel commands and menus
     default: true
+  arcduels.admin:
+    description: Configure arenas and recover durable player state
+    default: op

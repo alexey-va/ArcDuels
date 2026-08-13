@@ -10,11 +10,14 @@ import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.PersistedMatchResult
 import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.PlayerStateEscrow
+import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
 import ru.ruscrafting.duels.domain.PlayerStatistics
 import ru.ruscrafting.duels.domain.RatingCalculator
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.domain.validatePlayerName
+import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.SQLException
@@ -27,7 +30,7 @@ import java.util.concurrent.TimeUnit
 
 class MySqlStatisticsRepository(
     private val runtime: SqlRuntime,
-) : StatisticsRepository, AutoCloseable {
+) : StatisticsRepository, PlayerStateEscrowRepository, AutoCloseable {
     fun migrate(): CompletableFuture<SqlMigrationReport> =
         runtime.executor.submit {
             MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(MySqlDuelMigrations.all)
@@ -115,7 +118,172 @@ class MySqlStatisticsRepository(
         }
     }
 
+    override fun savePair(
+        first: PlayerStateEscrow,
+        second: PlayerStateEscrow,
+    ): CompletableFuture<Unit> {
+        require(first.playerId != second.playerId) { "Escrow participants must be different players" }
+        require(first.matchId == second.matchId) { "Escrow participants must belong to the same match" }
+        require(first.serverId == second.serverId) { "Escrow participants must belong to the same server" }
+        validateEscrow(first)
+        validateEscrow(second)
+        return savePairWithRetry(listOf(first, second).sortedBy { it.playerId.value }, attempt = 0)
+    }
+
+    override fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> =
+        runtime.executor.read { connection -> findEscrow(connection, playerId, lock = false) }
+
+    override fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>> =
+        runtime.executor.read { connection ->
+            connection.prepareStatement(
+                """
+                SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+                FROM `arcduels_player_state_escrow`
+                WHERE `server_id` = ?
+                ORDER BY `created_at`, `player_id`
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, serverId.value)
+                statement.executeQuery().use { result -> buildList { while (result.next()) add(result.toEscrow()) } }
+            }
+        }
+
+    override fun acknowledgeRestored(snapshot: PlayerStateEscrow): CompletableFuture<Boolean> =
+        runtime.executor.transaction { connection ->
+            connection.prepareStatement(
+                """
+                DELETE FROM `arcduels_player_state_escrow`
+                WHERE `player_id` = ? AND `match_id` = ? AND `payload_sha256` = ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setBytes(1, UuidBytes.encode(snapshot.playerId.value))
+                statement.setBytes(2, UuidBytes.encode(snapshot.matchId.value))
+                statement.setBytes(3, snapshot.checksum)
+                when (statement.executeUpdate()) {
+                    1 -> true
+                    0 -> findEscrow(connection, snapshot.playerId, lock = true) == null
+                    else -> error("Escrow acknowledgement affected more than one row")
+                }
+            }
+        }
+
     override fun close() = runtime.close()
+
+    private fun savePairWithRetry(
+        snapshots: List<PlayerStateEscrow>,
+        attempt: Int,
+    ): CompletableFuture<Unit> =
+        runtime.executor.transaction { connection -> savePairTransaction(connection, snapshots) }
+            .handle { result, failure ->
+                if (failure == null) {
+                    CompletableFuture.completedFuture(result)
+                } else {
+                    val cause = failure.unwrapCompletion()
+                    if (attempt < MAX_TRANSACTION_RETRIES && cause.isRetryableMySqlTransactionFailure()) {
+                        CompletableFuture.runAsync(
+                            {},
+                            CompletableFuture.delayedExecutor(RETRY_BASE_DELAY_MS shl attempt, TimeUnit.MILLISECONDS),
+                        ).thenCompose { savePairWithRetry(snapshots, attempt + 1) }
+                    } else {
+                        CompletableFuture.failedFuture(cause)
+                    }
+                }
+            }.thenCompose { it }
+
+    private fun savePairTransaction(
+        connection: Connection,
+        snapshots: List<PlayerStateEscrow>,
+    ) {
+        val existing =
+            connection.prepareStatement(
+                """
+                SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+                FROM `arcduels_player_state_escrow`
+                WHERE `player_id` IN (?, ?)
+                ORDER BY `player_id`
+                FOR UPDATE
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setBytes(1, UuidBytes.encode(snapshots[0].playerId.value))
+                statement.setBytes(2, UuidBytes.encode(snapshots[1].playerId.value))
+                statement.executeQuery().use { result ->
+                    buildMap {
+                        while (result.next()) {
+                            val escrow = result.toEscrow()
+                            put(escrow.playerId, escrow)
+                        }
+                    }
+                }
+            }
+        for (snapshot in snapshots) {
+            existing[snapshot.playerId]?.let { stored ->
+                check(stored.sameContent(snapshot)) {
+                    "Player ${snapshot.playerId} already has a different pending state escrow"
+                }
+            } ?: insertEscrow(connection, snapshot)
+        }
+        for (snapshot in snapshots) {
+            val committed = checkNotNull(findEscrow(connection, snapshot.playerId, lock = false))
+            check(committed.sameContent(snapshot)) { "Committed escrow verification failed for ${snapshot.playerId}" }
+            validateEscrow(committed)
+        }
+    }
+
+    private fun insertEscrow(
+        connection: Connection,
+        snapshot: PlayerStateEscrow,
+    ) {
+        connection.prepareStatement(
+            """
+            INSERT INTO `arcduels_player_state_escrow`
+                (`player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setBytes(1, UuidBytes.encode(snapshot.playerId.value))
+            statement.setBytes(2, UuidBytes.encode(snapshot.matchId.value))
+            statement.setString(3, snapshot.serverId.value)
+            statement.setInt(4, snapshot.formatVersion)
+            statement.setBytes(5, snapshot.payload)
+            statement.setBytes(6, snapshot.checksum)
+            statement.setTimestamp(7, Timestamp.from(snapshot.createdAt))
+            check(statement.executeUpdate() == 1) { "Could not insert player state escrow" }
+        }
+    }
+
+    private fun findEscrow(
+        connection: Connection,
+        playerId: PlayerId,
+        lock: Boolean,
+    ): PlayerStateEscrow? =
+        connection.prepareStatement(
+            """
+            SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+            FROM `arcduels_player_state_escrow`
+            WHERE `player_id` = ?${if (lock) " FOR UPDATE" else ""}
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setBytes(1, UuidBytes.encode(playerId.value))
+            statement.executeQuery().use { result -> if (result.next()) result.toEscrow() else null }
+        }
+
+    private fun ResultSet.toEscrow(): PlayerStateEscrow =
+        PlayerStateEscrow(
+            playerId = PlayerId(UuidBytes.decode(getBytes("player_id"))),
+            matchId = MatchId(UuidBytes.decode(getBytes("match_id"))),
+            serverId = ServerId(getString("server_id")),
+            formatVersion = getInt("format_version"),
+            payload = getBytes("payload"),
+            checksum = getBytes("payload_sha256"),
+            createdAt = getTimestamp("created_at").toInstant(),
+        )
+
+    private fun validateEscrow(snapshot: PlayerStateEscrow) {
+        require(snapshot.payload.size <= MAX_ESCROW_PAYLOAD_BYTES) { "Escrow payload exceeds the 8 MiB safety limit" }
+        require(MessageDigest.isEqual(MessageDigest.getInstance("SHA-256").digest(snapshot.payload), snapshot.checksum)) {
+            "Escrow payload checksum does not match its contents"
+        }
+    }
 
     private fun recordWithRetry(
         outcome: MatchOutcome,
@@ -347,6 +515,7 @@ class MySqlStatisticsRepository(
     private companion object {
         const val MAX_TRANSACTION_RETRIES = 4
         const val RETRY_BASE_DELAY_MS = 10L
+        const val MAX_ESCROW_PAYLOAD_BYTES = 8 * 1024 * 1024
         const val MIGRATION_NAMESPACE = "arcduels"
         const val STAT_COLUMNS =
             "`wins`, `losses`, `current_win_streak`, `best_win_streak`, `rating`, `revision`"

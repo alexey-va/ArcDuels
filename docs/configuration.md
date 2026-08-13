@@ -2,14 +2,17 @@
 
 ## Runtime profiles
 
-The plugin boots in local mode by default. This is useful for development and
-single-server installations, but statistics disappear after a restart.
+The plugin boots with MySQL disabled by default so a fresh installation cannot
+write to an unintended database. Commands and configuration remain available,
+but matches are fail-closed until `mysql.enabled` is true.
 
-Enable `mysql.enabled` for durable statistics and global leaderboards. Startup
-is fail-closed in this profile: ArcDuels disables itself if it cannot validate
-the pool or apply checksum-protected schema migrations. Match result writes are
-also fail-closed and retry by match id, so an unknown network outcome cannot
-double-count a win.
+MySQL is mandatory for gameplay. Before the first teleport, inventory clear,
+kit issue, or state normalization, ArcDuels stores both complete player
+snapshots in one InnoDB transaction, reads the committed bytes back, and checks
+SHA-256. If any step fails, the arena is released and the duel never starts.
+Startup is fail-closed when MySQL is enabled but the pool or checksum-protected
+schema migrations cannot be prepared. Match result writes are also fail-closed
+and retry by match id, so an unknown network outcome cannot double-count a win.
 
 Enable `redis.enabled` independently for cross-server win announcements and
 leaderboard invalidation events. Redis transport is presentation-only and
@@ -68,11 +71,26 @@ arenas:
       max: { x: 12, y: 85, z: 12 }
 ```
 
-Arena reservations are exclusive. If all arenas are occupied, challenge
-acceptance fails without touching either player's inventory. Both spawns must
-be inside the bounds and use the same loaded world. Leaving the bounds loses
-the round; only scoped ArcDuels teleports and in-bounds combat teleports are
+Arena reservations are exclusive. If all arenas are occupied, accepted pairs
+wait in FIFO order without touching either player's inventory. Queue ownership
+prevents either participant from entering another duel. Both spawns must be
+inside the bounds and use the same loaded world. Leaving the bounds loses the
+round; only scoped ArcDuels teleports and in-bounds combat teleports are
 accepted while a player owns an arena.
+
+Operators can configure arenas in game. Any point edit disables the arena until
+the full definition validates again; edits and reloads are rejected while a
+match owns an arena or a pair is waiting.
+
+```text
+/duels admin arena create <id>
+/duels admin arena setspawn <id> <1|2>
+/duels admin arena setcorner <id> <1|2>
+/duels admin arena enable|disable <id>
+/duels admin arena list
+/duels admin arena info <id>
+/duels admin arena reload
+```
 
 ## Kits
 
@@ -81,10 +99,16 @@ dedicated helmet, chestplate, leggings, and boots keys. Invalid materials,
 oversized stacks, and unknown kits stop startup instead of failing halfway
 through a match.
 
-Own-inventory mode snapshots both players and restores their original location,
-inventory, armor, off-hand, health, hunger, experience, game mode, flight state,
-cursor item, selected slot, movement state, and potion effects after completion,
-disconnect, cancellation, or shutdown.
+Both own-inventory and kit modes snapshot both players and restore their
+original location, inventory, armor, off-hand, health, hunger, experience, game
+mode, flight state, cursor item, selected slot, movement state, and potion
+effects after completion, disconnect, cancellation, or shutdown. Items use
+Paper's versioned NBT byte format so Minecraft data conversion can migrate them
+after an upgrade. The active escrow row is deleted only after exact state
+application, verification, and a synchronous save of Paper's playerdata; a
+crash before acknowledgement simply causes the same idempotent restore on the next join. A snapshot belonging to another
+network node locks duel state and identifies the originating `server-id`
+instead of applying world data on the wrong server.
 
 The target browser shows 45 players per page, the kit picker shows 28 kits per
 page, and the leaderboard exposes the global top 100 in pages of 45 entries.
@@ -102,8 +126,11 @@ always unranked.
 - `/duel leave` — forfeit the current match;
 - `/duel stats [online-player]`;
 - `/duel top` — open the global leaderboard.
+- `/duels admin status` — active arenas and FIFO waiters;
+- `/duels admin recover <online-player>` — retry an exact pending recovery.
 
-All commands require `arcduels.use`, granted by default.
+Player commands require `arcduels.use`, granted by default. Administrative
+commands require `arcduels.admin`, granted to operators by default.
 
 During a match, chat/reply commands plus `/duel leave` and `/duel stats`
 remain available. Other commands are blocked to prevent external

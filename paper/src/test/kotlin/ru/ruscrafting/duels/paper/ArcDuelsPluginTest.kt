@@ -81,6 +81,34 @@ class ArcDuelsPluginTest : StringSpec({
         player.velocity shouldBe Vector(0.2, 0.3, -0.1)
     }
 
+    "versioned snapshot codec round trips Paper item bytes and rejects corrupt framing" {
+        val player = server.addPlayer()
+        val world = server.addSimpleWorld("codec-world")
+        player.teleport(Location(world, 2.5, 72.0, -3.5, 30f, -5f))
+        player.inventory.setItem(0, ItemStack(Material.DIAMOND_SWORD))
+        player.inventory.setItem(8, ItemStack(Material.GOLDEN_APPLE, 7))
+        player.inventory.helmet = ItemStack(Material.NETHERITE_HELMET)
+        player.setItemOnCursor(ItemStack(Material.EMERALD, 11))
+        val snapshot = PlayerSnapshot.capture(player)
+        val codec = PlayerSnapshotCodec(server)
+
+        val payload = codec.encode(snapshot)
+        val decoded = codec.decode(payload)
+        player.inventory.clear()
+        player.inventory.armorContents = arrayOfNulls(4)
+        player.setItemOnCursor(ItemStack.empty())
+        player.teleport(Location(world, 0.0, 64.0, 0.0))
+
+        decoded.restore(player) { restored, destination -> restored.teleport(destination) }
+
+        player.inventory.getItem(0)?.type shouldBe Material.DIAMOND_SWORD
+        player.inventory.getItem(8)?.amount shouldBe 7
+        player.inventory.helmet?.type shouldBe Material.NETHERITE_HELMET
+        player.itemOnCursor.amount shouldBe 11
+        val corrupt = payload.copyOf().also { it[0] = (it[0].toInt() xor 0x7f).toByte() }
+        shouldThrow<IllegalArgumentException> { codec.decode(corrupt) }
+    }
+
     "enabled arena requires valid bounds containing both spawns" {
         server.addSimpleWorld("world")
         plugin.config.set("arenas.example.enabled", true)
@@ -94,7 +122,8 @@ class ArcDuelsPluginTest : StringSpec({
     "invalid explicit challenge ids never fall back to another pending challenge" {
         val controller = mockk<DuelController>(relaxed = true)
         val gui = mockk<DuelGuiService>(relaxed = true)
-        val executor = DuelCommand(controller, gui)
+        val admin = mockk<DuelAdminCommand>(relaxed = true)
+        val executor = DuelCommand(controller, gui, admin)
         val player = server.addPlayer()
         val command = requireNotNull(plugin.getCommand("duel"))
 

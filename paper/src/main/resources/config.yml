@@ -9,6 +9,8 @@ celebration:
     count: 3
 
 mysql:
+  # Matches are fail-closed while this is false: ArcDuels requires a durable
+  # snapshot of both players before teleporting or replacing an inventory.
   enabled: false
   host: 127.0.0.1
   port: 3306

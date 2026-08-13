@@ -13,6 +13,7 @@ import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
 
 class DuelController(
@@ -28,8 +29,10 @@ class DuelController(
         target: Player,
         rules: DuelRules,
     ) {
-        if (sessions.matchFor(challenger) != null || sessions.matchFor(target) != null) {
-            challenger.sendMessage(message("<red>Один из игроков уже участвует в дуэли.</red>"))
+        if (sessions.isEngaged(challenger) || sessions.isEngaged(target) ||
+            sessions.isStateLocked(challenger) || sessions.isStateLocked(target)
+        ) {
+            challenger.sendMessage(message("<red>Один из игроков уже в очереди, в бою или ожидает восстановления.</red>"))
             return
         }
         runCatching { challenges.create(PlayerId(challenger.uniqueId), PlayerId(target.uniqueId), rules) }
@@ -59,12 +62,13 @@ class DuelController(
         runCatching { sessions.start(accepted) }
             .getOrElse { failure -> java.util.concurrent.CompletableFuture.failedFuture(failure) }
             .whenComplete { _, failure ->
-            runSync {
-                if (failure != null) {
-                    val cause = unwrap(failure)
-                    participants(accepted).forEach { it.sendMessage(message("<red>Не удалось начать дуэль: ${cause.message}</red>")) }
+                runSync {
+                    if (failure != null) {
+                        val cause = unwrap(failure)
+                        val reason = if (cause is CancellationException) "ожидание арены отменено" else cause.message ?: "неизвестная ошибка"
+                        participants(accepted).forEach { it.sendMessage(message("<red>Не удалось начать дуэль: $reason</red>")) }
+                    }
                 }
-            }
             }
     }
 

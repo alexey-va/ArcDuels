@@ -67,6 +67,35 @@ data class PlayerSnapshot(
         restoreState(player)
         check(teleport(player, location.clone())) { "Could not restore ${player.uniqueId} to their saved location" }
         player.velocity = velocity.clone()
+        verifyRestored(player)
+    }
+
+    fun verifyRestored(player: Player) {
+        check(player.inventory.storageContents.sameItems(storage)) { "Storage inventory verification failed" }
+        check(player.inventory.armorContents.sameItems(armor)) { "Armor inventory verification failed" }
+        check(player.inventory.itemInOffHand.sameItem(offHand)) { "Off-hand verification failed" }
+        check(player.itemOnCursor.sameItem(cursor)) { "Cursor item verification failed" }
+        check(player.inventory.heldItemSlot == heldItemSlot) { "Held item slot verification failed" }
+        check(player.gameMode == gameMode) { "Game mode verification failed" }
+        check(player.allowFlight == allowFlight && player.isFlying == (flying && allowFlight)) { "Flight state verification failed" }
+        check(player.foodLevel == foodLevel && player.saturation == saturation && player.exhaustion == exhaustion) {
+            "Food state verification failed"
+        }
+        check(player.totalExperience == totalExperience && player.level == level && player.exp == experience) {
+            "Experience verification failed"
+        }
+        check(player.fireTicks == fireTicks && player.fallDistance == fallDistance && player.remainingAir == remainingAir) {
+            "Movement state verification failed"
+        }
+        check(player.noDamageTicks == noDamageTicks && player.absorptionAmount == absorptionAmount) {
+            "Damage state verification failed"
+        }
+        check(player.health == health.coerceAtMost(player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0)) {
+            "Health verification failed"
+        }
+        check(player.activePotionEffects.toSet() == potionEffects.toSet()) { "Potion effect verification failed" }
+        check(player.location.sameLocation(location)) { "Location verification failed" }
+        check(player.velocity == velocity) { "Velocity verification failed" }
     }
 
     companion object {
@@ -98,5 +127,18 @@ data class PlayerSnapshot(
             )
 
         private fun Array<ItemStack?>.clonedItems(): Array<ItemStack?> = map { it?.clone() }.toTypedArray()
+
+        private fun Array<ItemStack?>.sameItems(other: Array<ItemStack?>): Boolean =
+            size == other.size && indices.all { this[it].sameItem(other[it]) }
+
+        private fun ItemStack?.sameItem(other: ItemStack?): Boolean {
+            val first = this?.takeUnless(ItemStack::isEmpty)
+            val second = other?.takeUnless(ItemStack::isEmpty)
+            return first == second
+        }
+
+        private fun Location.sameLocation(other: Location): Boolean =
+            world?.uid == other.world?.uid &&
+                x == other.x && y == other.y && z == other.z && yaw == other.yaw && pitch == other.pitch
     }
 }

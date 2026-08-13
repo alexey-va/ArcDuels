@@ -95,6 +95,7 @@ class DuelGuiService(
                 "<light_purple><bold>СВОЁ СНАРЯЖЕНИЕ</bold></light_purple>",
                 listOf(
                     "<gray>Каждый сражается своими вещами</gray>",
+                    "<dark_gray>Исходное состояние сначала сохраняется в MySQL</dark_gray>",
                     "<dark_gray>Инвентарь восстановится после матча</dark_gray>",
                     "",
                     "<yellow>ЛКМ:</yellow> <white>BO1</white>",

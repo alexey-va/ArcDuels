@@ -15,8 +15,10 @@ import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Instant
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ExecutionException
 
@@ -50,8 +52,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     "arcduels-it",
                 )
             repository = MySqlStatisticsRepository(runtime)
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2)
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3)
         }
 
         afterSpec {
@@ -196,5 +198,66 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             firstWrite.outcome.completedAt shouldBe Instant.parse("2026-08-13T10:04:00.123Z")
             duplicate shouldBe firstWrite.copy(newlyRecorded = false)
         }
+
+        "player state pair is atomic verified idempotent and acknowledged by exact checksum" {
+            val serverId = ServerId("duels-it")
+            val matchId = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000060"))
+            val first = escrow("00000000-0000-0000-0000-000000000061", matchId, serverId, "first-state")
+            val second = escrow("00000000-0000-0000-0000-000000000062", matchId, serverId, "second-state")
+
+            repository.savePair(first, second).get()
+            repository.savePair(first, second).get()
+
+            repository.findPending(first.playerId).get()?.sameContent(first) shouldBe true
+            repository.findPending(second.playerId).get()?.sameContent(second) shouldBe true
+            repository.pending(serverId).get().map { it.playerId } shouldContainExactly listOf(first.playerId, second.playerId)
+
+            val wrongReceipt = escrow(first.playerId.value.toString(), matchId, serverId, "different-state")
+            repository.acknowledgeRestored(wrongReceipt).get() shouldBe false
+            repository.findPending(first.playerId).get()?.sameContent(first) shouldBe true
+
+            repository.acknowledgeRestored(first).get() shouldBe true
+            repository.acknowledgeRestored(first).get() shouldBe true
+            repository.findPending(first.playerId).get() shouldBe null
+            repository.findPending(second.playerId).get()?.sameContent(second) shouldBe true
+            repository.acknowledgeRestored(second).get() shouldBe true
+        }
+
+        "conflicting participant rolls back the other participant in the pair" {
+            val serverId = ServerId("duels-it")
+            val occupiedMatch = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000070"))
+            val conflictPlayer = escrow("00000000-0000-0000-0000-000000000071", occupiedMatch, serverId, "occupied")
+            val occupiedPeer = escrow("00000000-0000-0000-0000-000000000072", occupiedMatch, serverId, "occupied-peer")
+            repository.savePair(conflictPlayer, occupiedPeer).get()
+
+            val newMatch = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000073"))
+            val innocent = escrow("00000000-0000-0000-0000-000000000074", newMatch, serverId, "must-roll-back")
+            val conflicting = escrow(conflictPlayer.playerId.value.toString(), newMatch, serverId, "new-conflict")
+
+            shouldThrow<ExecutionException> { repository.savePair(innocent, conflicting).get() }
+
+            repository.findPending(innocent.playerId).get() shouldBe null
+            repository.findPending(conflictPlayer.playerId).get()?.sameContent(conflictPlayer) shouldBe true
+            repository.acknowledgeRestored(conflictPlayer).get() shouldBe true
+            repository.acknowledgeRestored(occupiedPeer).get() shouldBe true
+        }
+    }
+
+    private fun escrow(
+        playerUuid: String,
+        matchId: MatchId,
+        serverId: ServerId,
+        content: String,
+    ): PlayerStateEscrow {
+        val payload = content.toByteArray()
+        return PlayerStateEscrow(
+            PlayerId(UUID.fromString(playerUuid)),
+            matchId,
+            serverId,
+            1,
+            payload,
+            MessageDigest.getInstance("SHA-256").digest(payload),
+            Instant.parse("2026-08-13T11:00:00Z"),
+        )
     }
 }

@@ -10,19 +10,19 @@ modules implement ports and never decide match outcomes.
 Paper commands/events -> domain services -> domain events -> Paper presentation
                               |                    |
                               v                    v
-                       statistics port       network event port
+                 statistics + escrow ports   network event port
                               |                    |
-                          optional MySQL       optional Redis
+                              MySQL             optional Redis
 ```
 
 ## Runtime modes
 
-- `LOCAL`: no external services; in-memory statistics and local announcements.
-- `MYSQL`: durable statistics and leaderboards shared through the database.
-- `NETWORK`: MySQL plus Redis fan-out for fast invalidation and announcements.
+- `CONFIG_ONLY`: MySQL is disabled; configuration works but matches are locked.
+- `MYSQL`: durable player recovery, statistics and leaderboards.
+- `NETWORK`: MySQL plus Redis fan-out for announcements.
 
-Optional infrastructure is fail-soft for presentation and cache invalidation,
-but match-result persistence is fail-closed when durable statistics are enabled.
+Optional Redis infrastructure is fail-soft for presentation and cache
+invalidation. Player-state escrow and match-result persistence are fail-closed.
 This avoids showing a win that was silently lost from the global ranking.
 The MySQL adapter uses the shared `arc-core-sql` runtime for Hikari pooling,
 TLS policy, bounded asynchronous execution, transactions, and checksum-locked
@@ -38,9 +38,17 @@ Redis is presentation-only. Startup failure closes both bus and client and
 falls back to local operation. Event deduplication is scoped by source server,
 bounded in size, and expires after one hour.
 
-Completed matches retain player and arena ownership until Paper has restored
-both snapshots. Only then does the coordinator release the reservation. This
-prevents another pair from entering an arena during end-of-match cleanup.
+The arena allocator queues accepted pairs FIFO. The coordinator owns both
+players while their request is queued, so racing challenges cannot allocate the
+same participant twice. Once an arena is available, Paper freezes inventory and
+movement mutations, captures both states on the primary thread, and commits the
+pair to MySQL atomically. No gameplay mutation happens before that future
+completes successfully.
+
+Completed matches retain player and arena ownership until Paper has applied and
+verified and saved both online snapshots. Only then does the coordinator release
+the reservation. MySQL acknowledgement is an exact match-id/checksum delete and is
+idempotent: an unknown acknowledgement outcome leaves a safe repeatable restore.
 
 ## Match modes
 

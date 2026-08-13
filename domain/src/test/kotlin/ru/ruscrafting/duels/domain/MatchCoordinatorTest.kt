@@ -181,9 +181,8 @@ class MatchCoordinatorTest : StringSpec({
         completed.endReason shouldBe MatchEndReason.OBJECTIVE
     }
 
-    "racing reservations leave one match and release the losing arena" {
+    "players are owned while waiting so a second racing reservation is rejected" {
         val pendingReservations = CopyOnWriteArrayList<CompletableFuture<ArenaReservation>>()
-        val losingReleases = AtomicInteger()
         val racingCoordinator =
             MatchCoordinator(
                 ServerId("duels-1"),
@@ -194,17 +193,36 @@ class MatchCoordinatorTest : StringSpec({
             )
 
         val firstAttempt = racingCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
-        val secondAttempt = racingCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
-        pendingReservations shouldHaveSize 2
+        shouldThrow<IllegalStateException> {
+            racingCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+        }
+        pendingReservations shouldHaveSize 1
 
         pendingReservations[0].complete(ArenaReservation(ArenaId("race-1")) {})
         val winner = firstAttempt.get()
-        pendingReservations[1].complete(ArenaReservation(ArenaId("race-2"), losingReleases::incrementAndGet))
 
-        shouldThrow<ExecutionException> { secondAttempt.get() }
         racingCoordinator.findByPlayer(first)?.id shouldBe winner.id
         racingCoordinator.activeMatches() shouldHaveSize 1
-        losingReleases.get() shouldBe 1
+    }
+
+    "cancelling an arena wait releases both queued player ownerships" {
+        val arenaFutures = CopyOnWriteArrayList<CompletableFuture<ArenaReservation>>()
+        val cancellable =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator { CompletableFuture<ArenaReservation>().also(arenaFutures::add) },
+                InMemoryStatisticsRepository(),
+            )
+
+        val firstWait = cancellable.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+        cancellable.isQueuedOrMatched(first) shouldBe true
+
+        firstWait.cancel(false) shouldBe true
+
+        cancellable.isQueuedOrMatched(first) shouldBe false
+        cancellable.isQueuedOrMatched(second) shouldBe false
+        cancellable.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+        arenaFutures shouldHaveSize 2
     }
 
     "overlapping successful persistence retries publish completion events once" {

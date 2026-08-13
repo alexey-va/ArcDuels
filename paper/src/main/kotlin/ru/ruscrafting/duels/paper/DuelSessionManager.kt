@@ -27,16 +27,19 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
-class DuelSessionManager(
+class DuelSessionManager internal constructor(
     private val plugin: JavaPlugin,
     private val coordinator: MatchCoordinator,
     private val arenas: PaperArenaCatalog,
     private val kits: KitRegistry,
+    private val playerStates: DurablePlayerStateService,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
     private val countdownTasks = ConcurrentHashMap<MatchId, BukkitTask>()
+    private val pendingStarts = ConcurrentHashMap<UUID, CompletableFuture<DuelMatch>>()
+    private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val internalTeleports = InternalTeleportAuthorizer()
     private val celebrationEffects = CelebrationEffects(plugin)
 
@@ -53,6 +56,14 @@ class DuelSessionManager(
                     result.completeExceptionally(failure)
                     return result
                 }
+        pendingStarts[first.uniqueId] = result
+        pendingStarts[second.uniqueId] = result
+        if (!reservation.isDone) {
+            val position = arenas.queueSize()
+            val message = miniMessage.deserialize("<yellow>Все арены заняты. Ваша пара в очереди: <white>#$position</white>.</yellow>")
+            first.sendMessage(message)
+            second.sendMessage(message)
+        }
         reservation
             .whenComplete { match, failure ->
                 runSync {
@@ -61,20 +72,127 @@ class DuelSessionManager(
                         return@runSync
                     }
                     val reservedMatch = requireNotNull(match)
-                    runCatching { prepareNewSession(reservedMatch, first, second) }
-                        .onSuccess(result::complete)
-                        .onFailure { setupFailure ->
-                            runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
-                            result.completeExceptionally(setupFailure)
+                    if (result.isCancelled) {
+                        runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
+                        return@runSync
+                    }
+                    val currentFirst = plugin.server.getPlayer(first.uniqueId)
+                    val currentSecond = plugin.server.getPlayer(second.uniqueId)
+                    if (currentFirst == null || currentSecond == null) {
+                        runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
+                        result.completeExceptionally(IllegalStateException("Один из игроков вышел во время ожидания арены"))
+                        return@runSync
+                    }
+                    preparingPlayers += currentFirst.uniqueId
+                    preparingPlayers += currentSecond.uniqueId
+                    val durableWrite =
+                        runCatching { playerStates.storePair(reservedMatch.id, currentFirst, currentSecond) }
+                            .getOrElse { CompletableFuture.failedFuture(it) }
+                    durableWrite.whenComplete { stored, storageFailure ->
+                        runSync {
+                            if (storageFailure != null) {
+                                preparingPlayers -= currentFirst.uniqueId
+                                preparingPlayers -= currentSecond.uniqueId
+                                runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
+                                result.completeExceptionally(
+                                    IllegalStateException("Не удалось надёжно сохранить инвентари в MySQL; бой отменён", unwrap(storageFailure)),
+                                )
+                                return@runSync
+                            }
+                            if (result.isCancelled || !currentFirst.isOnline || !currentSecond.isOnline) {
+                                preparingPlayers -= currentFirst.uniqueId
+                                preparingPlayers -= currentSecond.uniqueId
+                                runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
+                                requireNotNull(stored).values.forEach { saved ->
+                                    plugin.server.getPlayer(saved.escrow.playerId.value)?.let { restoreAndAcknowledge(it, saved) }
+                                }
+                                result.completeExceptionally(IllegalStateException("Один из игроков вышел до начала боя"))
+                                return@runSync
+                            }
+                            runCatching { prepareNewSession(reservedMatch, requireNotNull(stored)) }
+                                .onSuccess(result::complete)
+                                .onFailure { setupFailure ->
+                                    requireNotNull(stored).values.forEach { saved ->
+                                        plugin.server.getPlayer(saved.escrow.playerId.value)?.let { restoreAndAcknowledge(it, saved) }
+                                    }
+                                    runCatching { coordinator.cancel(reservedMatch.id, MatchEndReason.ADMIN_CANCEL) }
+                                    result.completeExceptionally(setupFailure)
+                                }
+                            preparingPlayers -= currentFirst.uniqueId
+                            preparingPlayers -= currentSecond.uniqueId
                         }
+                    }
                 }
             }
+        result.whenComplete { _, _ ->
+            pendingStarts.remove(first.uniqueId, result)
+            pendingStarts.remove(second.uniqueId, result)
+            if (result.isCancelled) reservation.cancel(false)
+        }
         return result
     }
 
     fun matchFor(player: Player): DuelMatch? =
         coordinator.findByPlayer(PlayerId(player.uniqueId))
             ?: sessionByPlayer[player.uniqueId]?.let(coordinator::find)
+
+    fun isEngaged(player: Player): Boolean =
+        coordinator.isQueuedOrMatched(PlayerId(player.uniqueId)) || pendingStarts.containsKey(player.uniqueId)
+
+    fun isStateLocked(player: Player): Boolean =
+        preparingPlayers.contains(player.uniqueId) || playerStates.isPending(player.uniqueId) || matchFor(player) != null
+
+    fun isPreparing(player: Player): Boolean = preparingPlayers.contains(player.uniqueId)
+
+    fun queueSize(): Int = arenas.queueSize()
+
+    fun activeArenaCount(): Int = arenas.reservedCount()
+
+    fun handleJoin(player: Player) {
+        preparingPlayers += player.uniqueId
+        playerStates.discover(player.uniqueId).whenComplete { escrow, lookupFailure ->
+            runSync {
+                if (lookupFailure != null) {
+                    preparingPlayers -= player.uniqueId
+                    plugin.logger.warning("Could not check pending duel state for ${player.uniqueId}: ${unwrap(lookupFailure).message}")
+                    return@runSync
+                }
+                if (escrow == null) {
+                    preparingPlayers -= player.uniqueId
+                    return@runSync
+                }
+                if (!player.isOnline) return@runSync
+                if (!playerStates.isLocal(escrow)) {
+                    player.sendMessage(
+                        miniMessage.deserialize(
+                            "<red>У тебя есть незавершённое восстановление ArcDuels на сервере <white>${escrow.serverId.value}</white>.</red> " +
+                                "<yellow>Вернись туда или обратись к администратору; снимок сохранён в MySQL.</yellow>",
+                        ),
+                    )
+                    return@runSync
+                }
+                player.sendMessage(miniMessage.deserialize("<yellow>Восстанавливаю сохранённое состояние после незавершённой дуэли…</yellow>"))
+                runCatching { playerStates.decode(escrow) }
+                    .onSuccess { restoreAndAcknowledge(player, it) }
+                    .onFailure { failure ->
+                        plugin.logger.severe("Could not decode pending duel state for ${player.uniqueId}: ${failure.message}")
+                        player.sendMessage(miniMessage.deserialize("<red>Состояние не восстановлено. Обратись к администратору; инвентарь остаётся сохранён в MySQL.</red>"))
+                    }
+            }
+        }
+    }
+
+    fun recover(player: Player): Boolean {
+        if (matchFor(player) != null || pendingStarts.containsKey(player.uniqueId)) return false
+        val escrow = playerStates.pending(player.uniqueId) ?: return false
+        preparingPlayers += player.uniqueId
+        runCatching { playerStates.decode(escrow) }
+            .onSuccess { restoreAndAcknowledge(player, it) }
+            .onFailure { failure ->
+                plugin.logger.severe("Manual duel recovery failed for ${player.uniqueId}: ${failure.message}")
+            }
+        return true
+    }
 
     fun handleElimination(loser: Player) {
         val match = matchFor(loser) ?: return
@@ -101,8 +219,13 @@ class DuelSessionManager(
     }
 
     fun handleQuit(player: Player) {
+        pendingStarts[player.uniqueId]?.cancel(false)
         val match = matchFor(player) ?: return
-        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { restorePlayer(player, it) }
+        if (preparingPlayers.contains(player.uniqueId) && sessions[match.id] == null) {
+            runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
+            return
+        }
+        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { restoreAndAcknowledge(player, it) }
         if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
             coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.DISCONNECT)
                 .whenComplete { completed, failure ->
@@ -114,7 +237,15 @@ class DuelSessionManager(
     }
 
     fun handleForfeit(player: Player): Boolean {
+        pendingStarts[player.uniqueId]?.let { pending ->
+            pending.cancel(false)
+            return true
+        }
         val match = matchFor(player) ?: return false
+        if (preparingPlayers.contains(player.uniqueId) && sessions[match.id] == null) {
+            runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
+            return true
+        }
         if (match.state !in setOf(MatchState.RESERVED, MatchState.COUNTDOWN, MatchState.ACTIVE)) return false
         val completion =
             runCatching { coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.FORFEIT) }
@@ -141,7 +272,7 @@ class DuelSessionManager(
         cause: PlayerTeleportEvent.TeleportCause,
     ): Boolean {
         if (internalTeleports.isAuthorized(player.uniqueId, destination)) return true
-        val match = matchFor(player) ?: return true
+        val match = matchFor(player) ?: return !isStateLocked(player)
         if (match.state != MatchState.ACTIVE || destination == null) return false
         return cause in PLAYER_COMBAT_TELEPORTS && arenas.get(match.arenaId).bounds.contains(destination)
     }
@@ -157,6 +288,11 @@ class DuelSessionManager(
     fun shutdown() {
         countdownTasks.values.forEach(BukkitTask::cancel)
         countdownTasks.clear()
+        pendingStarts.values.toSet().forEach { it.cancel(false) }
+        pendingStarts.clear()
+        coordinator.activeMatches()
+            .filter { !sessions.containsKey(it.id) }
+            .forEach { match -> runCatching { coordinator.cancel(match.id, MatchEndReason.SERVER_SHUTDOWN) } }
         for ((matchId, session) in sessions) {
             coordinator.find(matchId)?.let { match ->
                 if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
@@ -170,18 +306,18 @@ class DuelSessionManager(
         }
         sessions.clear()
         sessionByPlayer.clear()
+        preparingPlayers.clear()
     }
 
     private fun prepareNewSession(
         match: DuelMatch,
-        first: Player,
-        second: Player,
+        snapshots: Map<UUID, StoredPlayerSnapshot>,
     ): DuelMatch {
         check(plugin.server.isPrimaryThread) { "Paper duel setup must run on the main thread" }
         val session =
             PaperSession(
                 match.id,
-                snapshots = mapOf(first.uniqueId to PlayerSnapshot.capture(first), second.uniqueId to PlayerSnapshot.capture(second)),
+                snapshots = snapshots,
             )
         sessions[match.id] = session
         session.snapshots.keys.forEach { sessionByPlayer[it] = match.id }
@@ -213,11 +349,11 @@ class DuelSessionManager(
 
     private fun resetPlayer(
         player: Player,
-        snapshot: PlayerSnapshot,
+        snapshot: StoredPlayerSnapshot,
         mode: DuelMode,
         kitId: ru.ruscrafting.duels.domain.KitId?,
     ) {
-        snapshot.restoreState(player)
+        snapshot.snapshot.restoreState(player)
         player.gameMode = GameMode.SURVIVAL
         player.allowFlight = false
         player.isFlying = false
@@ -329,15 +465,18 @@ class DuelSessionManager(
                 1.0f,
             )
         }
-        try {
-            restore(session)
-            plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
-        } finally {
-            sessions.remove(match.id, session)
-            session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
-            runCatching { coordinator.releaseCompleted(match.id) }
-                .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
+        if (!restore(session)) {
+            session.finishing.set(false)
+            plugin.server.scheduler.runTaskLater(plugin, Runnable {
+                coordinator.find(match.id)?.let(::finish)
+            }, 20L)
+            return
         }
+        plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
+        sessions.remove(match.id, session)
+        session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
+        runCatching { coordinator.releaseCompleted(match.id) }
+            .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
     }
 
     private fun announcePersistenceFailure(
@@ -357,18 +496,63 @@ class DuelSessionManager(
         celebrationEffects.play(player)
     }
 
-    private fun restore(session: PaperSession) {
-        session.snapshots.forEach { (uuid, snapshot) -> plugin.server.getPlayer(uuid)?.let { restorePlayer(it, snapshot) } }
+    private fun restore(session: PaperSession): Boolean {
+        var restored = true
+        session.snapshots.forEach { (uuid, snapshot) ->
+            plugin.server.getPlayer(uuid)?.let { player ->
+                if (!restoreAndAcknowledge(player, snapshot)) restored = false
+            }
+        }
+        return restored
     }
 
-    private fun restorePlayer(
+    private fun restoreAndAcknowledge(
         player: Player,
-        snapshot: PlayerSnapshot,
-    ) {
-        runCatching { snapshot.restore(player, ::teleportInternally) }
+        stored: StoredPlayerSnapshot,
+    ): Boolean {
+        val restored = runCatching {
+            stored.snapshot.restore(player, ::teleportInternally)
+            player.saveData()
+        }
             .onFailure { failure ->
                 plugin.logger.severe("Could not fully restore duel player ${player.uniqueId}: ${failure.javaClass.simpleName}: ${failure.message}")
             }
+            .isSuccess
+        if (!restored) return false
+        playerStates.acknowledge(stored).whenComplete { _, failure ->
+            runSync {
+                if (failure == null) {
+                    preparingPlayers -= player.uniqueId
+                    if (player.isOnline) {
+                        player.sendActionBar(miniMessage.deserialize("<green>Инвентарь и состояние надёжно восстановлены.</green>"))
+                    }
+                } else {
+                    plugin.logger.severe(
+                        "Could not acknowledge restored duel state for ${player.uniqueId}; the durable snapshot remains retryable: ${unwrap(failure).message}",
+                    )
+                    if (player.isOnline) {
+                        player.sendMessage(miniMessage.deserialize("<yellow>Состояние восстановлено, но подтверждение MySQL будет повторено. Не выходи с сервера.</yellow>"))
+                    }
+                    plugin.server.scheduler.runTaskLater(plugin, Runnable { retryAcknowledgement(player, stored) }, 60L)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun retryAcknowledgement(
+        player: Player,
+        stored: StoredPlayerSnapshot,
+    ) {
+        playerStates.acknowledge(stored).whenComplete { _, failure ->
+            runSync {
+                if (failure == null) {
+                    preparingPlayers -= player.uniqueId
+                } else if (plugin.isEnabled) {
+                    plugin.logger.severe("Player state acknowledgement retry failed for ${player.uniqueId}: ${unwrap(failure).message}")
+                }
+            }
+        }
     }
 
     private fun teleportInternally(
@@ -394,7 +578,7 @@ class DuelSessionManager(
 
     private data class PaperSession(
         val matchId: MatchId,
-        val snapshots: Map<UUID, PlayerSnapshot>,
+        val snapshots: Map<UUID, StoredPlayerSnapshot>,
         val finishing: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(),
     )
 

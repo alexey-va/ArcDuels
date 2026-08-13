@@ -9,7 +9,6 @@ import ru.ruscrafting.duels.domain.ArenaReservation
 import ru.ruscrafting.duels.domain.DuelRules
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 
 data class ArenaBounds(
     val worldId: UUID,
@@ -54,24 +53,80 @@ data class PaperArena(
 )
 
 class PaperArenaCatalog private constructor(
-    private val arenas: Map<ArenaId, PaperArena>,
+    initialArenas: Map<ArenaId, PaperArena>,
 ) : ArenaAllocator {
-    private val reserved = ConcurrentHashMap.newKeySet<ArenaId>()
+    private val lock = Any()
+    @Volatile
+    private var arenas: Map<ArenaId, PaperArena> = initialArenas
+    private val reserved = mutableSetOf<ArenaId>()
+    private val waiting = ArrayDeque<CompletableFuture<ArenaReservation>>()
 
     override fun reserve(rules: DuelRules): CompletableFuture<ArenaReservation> {
-        val arena = arenas.values.firstOrNull { reserved.add(it.id) }
-            ?: return CompletableFuture.failedFuture(IllegalStateException("Нет свободных арен для дуэли"))
-        return CompletableFuture.completedFuture(ArenaReservation(arena.id) { reserved.remove(arena.id) })
+        val future = CompletableFuture<ArenaReservation>()
+        synchronized(lock) {
+            if (arenas.isEmpty()) return CompletableFuture.failedFuture(IllegalStateException("Нет настроенных арен для дуэли"))
+            val arena = arenas.values.firstOrNull { it.id !in reserved }
+            if (arena == null) {
+                waiting.addLast(future)
+            } else {
+                reserved += arena.id
+                future.complete(reservationFor(arena.id))
+            }
+        }
+        future.whenComplete { _, _ ->
+            if (future.isCancelled) synchronized(lock) { waiting.remove(future) }
+        }
+        return future
     }
 
     fun get(id: ArenaId): PaperArena = arenas[id] ?: error("Arena $id disappeared from the catalog")
 
     fun size(): Int = arenas.size
 
+    fun queueSize(): Int = synchronized(lock) { waiting.count { !it.isDone } }
+
+    fun reservedCount(): Int = synchronized(lock) { reserved.size }
+
+    fun reload(plugin: JavaPlugin): Int {
+        val loaded = parse(plugin)
+        synchronized(lock) {
+            check(reserved.isEmpty() && waiting.none { !it.isDone }) {
+                "Нельзя перезагрузить арены, пока идут бои или есть очередь"
+            }
+            arenas = loaded
+        }
+        return loaded.size
+    }
+
+    private fun reservationFor(id: ArenaId): ArenaReservation = ArenaReservation(id) { release(id) }
+
+    private fun release(id: ArenaId) {
+        var assignment: Pair<CompletableFuture<ArenaReservation>, ArenaReservation>? = null
+        synchronized(lock) {
+            if (!reserved.remove(id)) return
+            while (waiting.isNotEmpty()) {
+                val next = waiting.removeFirst()
+                if (next.isDone) continue
+                val arena = arenas.values.firstOrNull { it.id !in reserved } ?: run {
+                    waiting.addFirst(next)
+                    break
+                }
+                reserved += arena.id
+                assignment = next to reservationFor(arena.id)
+                break
+            }
+        }
+        assignment?.let { (future, reservation) ->
+            if (!future.complete(reservation)) reservation.close()
+        }
+    }
+
     companion object {
-        fun load(plugin: JavaPlugin): PaperArenaCatalog {
+        fun load(plugin: JavaPlugin): PaperArenaCatalog = PaperArenaCatalog(parse(plugin))
+
+        private fun parse(plugin: JavaPlugin): Map<ArenaId, PaperArena> {
             val root = plugin.config.getConfigurationSection("arenas")
-                ?: return PaperArenaCatalog(emptyMap())
+                ?: return emptyMap()
             val entries =
                 root.getKeys(false).mapNotNull { rawId ->
                     val section = root.getConfigurationSection(rawId) ?: return@mapNotNull null
@@ -88,8 +143,7 @@ class PaperArenaCatalog private constructor(
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
                 "Arena ids must be unique after lowercase normalization"
             }
-            val loaded = entries.toMap()
-            return PaperArenaCatalog(loaded)
+            return entries.toMap()
         }
 
         private fun ConfigurationSection.readBounds(worldId: UUID): ArenaBounds {

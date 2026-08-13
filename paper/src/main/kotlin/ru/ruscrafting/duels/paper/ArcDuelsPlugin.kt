@@ -16,12 +16,16 @@ import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
 import ru.ruscrafting.duels.domain.MatchCompletedEvent
 import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.NoOpDuelEventPublisher
+import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.PlayerStateEscrow
+import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 import java.time.Clock
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 open class ArcDuelsPlugin : JavaPlugin() {
@@ -48,10 +52,18 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val serverId = ServerId(config.getString("server-id", server.name)!!)
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
-        val statistics = createStatistics()
+        val persistence = createPersistence()
+        val statistics = persistence.statistics
         val publisher = createNetwork(serverId, statistics)
         val coordinator = MatchCoordinator(serverId, arenas, statistics, publisher, Clock.systemUTC())
-        val sessionManager = DuelSessionManager(this, coordinator, arenas, kits)
+        val playerStates = DurablePlayerStateService(this, serverId, persistence.playerStates)
+        if (persistence.durable) {
+            val recovered = playerStates.loadPending(config.getLong("mysql.pool.connection-timeout-ms", 10_000L) + 30_000L)
+            if (recovered > 0) logger.warning("Loaded $recovered pending player state snapshot(s) for crash recovery")
+        } else {
+            logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
+        }
+        val sessionManager = DuelSessionManager(this, coordinator, arenas, kits, playerStates)
         sessions = sessionManager
         val challenges =
             ChallengeRegistry(
@@ -60,7 +72,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
             )
         val controller = DuelController(this, challenges, sessionManager, statistics)
         val gui = DuelGuiService(this, kits, statistics, controller::challenge)
-        val command = DuelCommand(controller, gui)
+        val admin = DuelAdminCommand(this, arenas, sessionManager)
+        val command = DuelCommand(controller, gui, admin)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command
@@ -69,13 +82,16 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val identities = PlayerIdentityListener(this, statistics)
         server.pluginManager.registerEvents(identities, this)
         server.onlinePlayers.forEach(identities::remember)
+        server.onlinePlayers.forEach(sessionManager::handleJoin)
         logger.info("ArcDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
         if (arenas.size() == 0) logger.warning("No enabled duel arenas are configured; challenges cannot start yet")
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
     }
 
-    private fun createStatistics(): StatisticsRepository {
-        if (!config.getBoolean("mysql.enabled", false)) return InMemoryStatisticsRepository()
+    private fun createPersistence(): Persistence {
+        if (!config.getBoolean("mysql.enabled", false)) {
+            return Persistence(InMemoryStatisticsRepository(), UnavailablePlayerStateEscrowRepository, durable = false)
+        }
         val sslMode =
             runCatching { SqlSslMode.valueOf(config.getString("mysql.ssl-mode", "VERIFY_IDENTITY")!!.uppercase()) }
                 .getOrElse { error("Invalid mysql.ssl-mode") }
@@ -104,7 +120,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             throw IllegalStateException("MySQL is enabled but its schema could not be prepared", failure)
         }
         closeables += repository
-        return repository
+        return Persistence(repository, repository, durable = true)
     }
 
     private fun createNetwork(
@@ -168,5 +184,27 @@ open class ArcDuelsPlugin : JavaPlugin() {
             runCatching(resource::close).onFailure { logger.warning("Could not close ArcDuels resource: ${it.message}") }
         }
         closeables.clear()
+    }
+
+    private data class Persistence(
+        val statistics: StatisticsRepository,
+        val playerStates: PlayerStateEscrowRepository,
+        val durable: Boolean,
+    )
+
+    private object UnavailablePlayerStateEscrowRepository : PlayerStateEscrowRepository {
+        private fun <T> unavailable(): CompletableFuture<T> =
+            CompletableFuture.failedFuture(IllegalStateException("MySQL для надёжного хранения инвентарей не настроен"))
+
+        override fun savePair(
+            first: PlayerStateEscrow,
+            second: PlayerStateEscrow,
+        ): CompletableFuture<Unit> = unavailable()
+
+        override fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> = unavailable()
+
+        override fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>> = unavailable()
+
+        override fun acknowledgeRestored(snapshot: PlayerStateEscrow): CompletableFuture<Boolean> = unavailable()
     }
 }

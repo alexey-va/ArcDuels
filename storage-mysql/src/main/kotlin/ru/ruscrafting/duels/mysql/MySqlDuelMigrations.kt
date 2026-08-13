@@ -70,5 +70,26 @@ object MySqlDuelMigrations {
                         """.trimIndent(),
                     ),
             ),
+            SqlMigration(
+                version = 3,
+                description = "create crash-safe active player state escrow",
+                statements =
+                    listOf(
+                        """
+                        CREATE TABLE IF NOT EXISTS `arcduels_player_state_escrow` (
+                            `player_id` BINARY(16) NOT NULL,
+                            `match_id` BINARY(16) NOT NULL,
+                            `server_id` VARCHAR(48) NOT NULL,
+                            `format_version` INT UNSIGNED NOT NULL,
+                            `payload` MEDIUMBLOB NOT NULL,
+                            `payload_sha256` BINARY(32) NOT NULL,
+                            `created_at` DATETIME(3) NOT NULL,
+                            PRIMARY KEY (`player_id`),
+                            KEY `idx_arcduels_escrow_match` (`match_id`),
+                            KEY `idx_arcduels_escrow_server` (`server_id`, `created_at`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """.trimIndent(),
+                    ),
+            ),
         )
 }

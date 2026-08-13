@@ -9,9 +9,10 @@ import org.bukkit.entity.Player
 import ru.ruscrafting.duels.domain.ChallengeId
 import java.util.UUID
 
-class DuelCommand(
+class DuelCommand internal constructor(
     private val controller: DuelController,
     private val gui: DuelGuiService,
+    private val admin: DuelAdminCommand,
 ) : CommandExecutor, TabCompleter {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -21,6 +22,10 @@ class DuelCommand(
         label: String,
         args: Array<out String>,
     ): Boolean {
+        if (args.firstOrNull()?.equals("admin", ignoreCase = true) == true) {
+            admin.execute(sender, args.drop(1))
+            return true
+        }
         val player = sender as? Player
         if (player == null) {
             sender.sendMessage("ArcDuels player command")
@@ -72,9 +77,14 @@ class DuelCommand(
         alias: String,
         args: Array<out String>,
     ): List<String> {
+        if (args.firstOrNull()?.equals("admin", ignoreCase = true) == true) {
+            return admin.complete(sender, args.drop(1))
+        }
         if (args.size != 1) return emptyList()
         val prefix = args[0].lowercase()
-        return (listOf("accept", "deny", "cancel", "leave", "stats", "top") + sender.server.onlinePlayers.map(Player::getName))
+        val commands = mutableListOf("accept", "deny", "cancel", "leave", "stats", "top")
+        if (sender.hasPermission("arcduels.admin")) commands += "admin"
+        return (commands + sender.server.onlinePlayers.map(Player::getName))
             .filter { it.lowercase().startsWith(prefix) }
             .sorted()
     }
