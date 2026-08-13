@@ -1,5 +1,6 @@
 package ru.ruscrafting.duels.paper
 
+import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.entity.Player
 import org.bukkit.entity.Projectile
 import org.bukkit.event.EventHandler
@@ -9,9 +10,16 @@ import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDamageEvent
+import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.entity.FoodLevelChangeEvent
 import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.inventory.InventoryDragEvent
+import org.bukkit.event.inventory.InventoryOpenEvent
+import org.bukkit.event.inventory.InventoryType
+import org.bukkit.event.player.PlayerArmorStandManipulateEvent
+import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerDropItemEvent
+import org.bukkit.event.player.PlayerInteractEntityEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerTeleportEvent
@@ -19,9 +27,12 @@ import org.bukkit.projectiles.ProjectileSource
 import ru.ruscrafting.duels.domain.MatchState
 import ru.ruscrafting.duels.domain.PlayerId
 
-class DuelGameplayListener(
+internal class DuelGameplayListener(
     private val sessions: DuelSessionManager,
+    private val commandPolicy: DuelCommandPolicy = DuelCommandPolicy(),
 ) : Listener {
+    private val miniMessage = MiniMessage.miniMessage()
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     fun onPlayerDamage(event: EntityDamageByEntityEvent) {
         val victim = event.entity as? Player ?: return
@@ -57,13 +68,23 @@ class DuelGameplayListener(
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onMove(event: PlayerMoveEvent) {
         val match = sessions.matchFor(event.player) ?: return
-        if (match.state != MatchState.COUNTDOWN) return
         val destination = event.to
-        if (event.from.x != destination.x || event.from.y != destination.y || event.from.z != destination.z) {
-            event.to = event.from.clone().apply {
-                yaw = destination.yaw
-                pitch = destination.pitch
+        when (match.state) {
+            MatchState.COUNTDOWN -> {
+                if (event.from.x != destination.x || event.from.y != destination.y || event.from.z != destination.z) {
+                    event.to = event.from.clone().apply {
+                        yaw = destination.yaw
+                        pitch = destination.pitch
+                    }
+                }
             }
+            MatchState.ACTIVE -> {
+                if (!sessions.isInsideArena(event.player, destination)) {
+                    event.to = event.from
+                    sessions.handleElimination(event.player)
+                }
+            }
+            else -> Unit
         }
     }
 
@@ -72,7 +93,7 @@ class DuelGameplayListener(
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onTeleport(event: PlayerTeleportEvent) {
-        if (sessions.matchFor(event.player) != null && event.cause != PlayerTeleportEvent.TeleportCause.PLUGIN) {
+        if (!sessions.isTeleportAllowed(event.player, event.to, event.cause)) {
             event.isCancelled = true
         }
     }
@@ -85,7 +106,50 @@ class DuelGameplayListener(
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onInventoryClick(event: InventoryClickEvent) {
         val player = event.whoClicked as? Player ?: return
+        if (sessions.matchFor(player) != null && event.view.topInventory.type != InventoryType.CRAFTING) {
+            event.isCancelled = true
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onInventoryDrag(event: InventoryDragEvent) {
+        val player = event.whoClicked as? Player ?: return
+        if (sessions.matchFor(player) != null && event.view.topInventory.type != InventoryType.CRAFTING) {
+            event.isCancelled = true
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onInventoryOpen(event: InventoryOpenEvent) {
+        val player = event.player as? Player ?: return
+        if (sessions.matchFor(player) != null && event.inventory.type != InventoryType.CRAFTING) {
+            event.isCancelled = true
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onPickup(event: EntityPickupItemEvent) {
+        val player = event.entity as? Player ?: return
         if (sessions.matchFor(player) != null) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onArmorStandManipulate(event: PlayerArmorStandManipulateEvent) {
+        if (sessions.matchFor(event.player) != null) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onInteractEntity(event: PlayerInteractEntityEvent) {
+        if (sessions.matchFor(event.player) != null) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onCommand(event: PlayerCommandPreprocessEvent) {
+        if (sessions.matchFor(event.player) == null || commandPolicy.isAllowed(event.message)) return
+        event.isCancelled = true
+        event.player.sendMessage(
+            miniMessage.deserialize("<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>"),
+        )
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

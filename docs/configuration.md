@@ -42,10 +42,16 @@ arenas:
     enabled: true
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
     second-spawn: { world: duels, x: 8.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
+    bounds:
+      min: { x: -12, y: 60, z: -12 }
+      max: { x: 12, y: 85, z: 12 }
 ```
 
 Arena reservations are exclusive. If all arenas are occupied, challenge
-acceptance fails without touching either player's inventory.
+acceptance fails without touching either player's inventory. Both spawns must
+be inside the bounds and use the same loaded world. Leaving the bounds loses
+the round; only scoped RusDuels teleports and in-bounds combat teleports are
+accepted while a player owns an arena.
 
 ## Kits
 
@@ -56,7 +62,12 @@ through a match.
 
 Own-inventory mode snapshots both players and restores their original location,
 inventory, armor, off-hand, health, hunger, experience, game mode, flight state,
-and potion effects after completion, disconnect, cancellation, or shutdown.
+cursor item, selected slot, movement state, and potion effects after completion,
+disconnect, cancellation, or shutdown.
+
+Kit buttons use left click for BO1 and right click for BO3. Holding Shift makes
+the selected kit duel ranked, so it updates ELO. Own-inventory matches are
+always unranked.
 
 ## Commands
 
@@ -64,7 +75,12 @@ and potion effects after completion, disconnect, cancellation, or shutdown.
 - `/duel <player>` — open the mode and kit picker;
 - `/duel accept [challenge-id]`, `/duel deny [challenge-id]`;
 - `/duel cancel`;
+- `/duel leave` — forfeit the current match;
 - `/duel stats [online-player]`;
 - `/duel top` — open the global leaderboard.
 
 All commands require `rusduels.use`, granted by default.
+
+During a match, chat/reply commands plus `/duel leave` and `/duel stats`
+remain available. Other commands are blocked to prevent external
+teleport, inventory, and state plugins from breaking match isolation.

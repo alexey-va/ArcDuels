@@ -55,5 +55,20 @@ object MySqlDuelMigrations {
                         """.trimIndent(),
                     ),
             ),
+            SqlMigration(
+                version = 2,
+                description = "remember player names for global leaderboards",
+                statements =
+                    listOf(
+                        """
+                        CREATE TABLE IF NOT EXISTS `rusduels_player_names` (
+                            `player_id` BINARY(16) NOT NULL,
+                            `last_known_name` VARCHAR(32) NOT NULL,
+                            `updated_at` DATETIME(3) NOT NULL,
+                            PRIMARY KEY (`player_id`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """.trimIndent(),
+                    ),
+            ),
         )
 }

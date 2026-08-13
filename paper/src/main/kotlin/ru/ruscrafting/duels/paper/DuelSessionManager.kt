@@ -8,10 +8,12 @@ import org.bukkit.Particle
 import org.bukkit.Sound
 import org.bukkit.attribute.Attribute
 import org.bukkit.entity.Player
+import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitRunnable
 import org.bukkit.scheduler.BukkitTask
+import org.bukkit.util.Vector
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelMode
@@ -36,6 +38,7 @@ class DuelSessionManager(
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
     private val countdownTasks = ConcurrentHashMap<MatchId, BukkitTask>()
+    private val internalTeleports = InternalTeleportAuthorizer()
 
     fun start(challenge: DuelChallenge): CompletableFuture<DuelMatch> {
         check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
@@ -84,8 +87,11 @@ class DuelSessionManager(
                 } else if (updated.state == MatchState.COUNTDOWN) {
                     announceRound(updated, winner)
                     plugin.server.scheduler.runTaskLater(plugin, Runnable {
-                        prepareRound(updated)
-                        scheduleCountdown(updated.id)
+                        val current = coordinator.find(updated.id)
+                        if (current?.state == MatchState.COUNTDOWN) {
+                            prepareRound(current)
+                            scheduleCountdown(current.id)
+                        }
                     }, 30L)
                 } else {
                     finish(updated)
@@ -96,7 +102,7 @@ class DuelSessionManager(
 
     fun handleQuit(player: Player) {
         val match = matchFor(player) ?: return
-        sessions[match.id]?.snapshots?.get(player.uniqueId)?.restore(player)
+        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { restorePlayer(player, it) }
         if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
             coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.DISCONNECT)
                 .whenComplete { completed, failure ->
@@ -105,6 +111,39 @@ class DuelSessionManager(
                     }
                 }
         }
+    }
+
+    fun handleForfeit(player: Player): Boolean {
+        val match = matchFor(player) ?: return false
+        if (match.state !in setOf(MatchState.RESERVED, MatchState.COUNTDOWN, MatchState.ACTIVE)) return false
+        val completion =
+            runCatching { coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.FORFEIT) }
+                .getOrElse { return false }
+        completion.whenComplete { completed, failure ->
+            runSync {
+                if (failure != null) announcePersistenceFailure(match.id, unwrap(failure)) else finish(completed)
+            }
+        }
+        return true
+    }
+
+    fun isInsideArena(
+        player: Player,
+        destination: org.bukkit.Location,
+    ): Boolean {
+        val match = matchFor(player) ?: return true
+        return arenas.get(match.arenaId).bounds.contains(destination)
+    }
+
+    fun isTeleportAllowed(
+        player: Player,
+        destination: org.bukkit.Location?,
+        cause: PlayerTeleportEvent.TeleportCause,
+    ): Boolean {
+        if (internalTeleports.isAuthorized(player.uniqueId, destination)) return true
+        val match = matchFor(player) ?: return true
+        if (match.state != MatchState.ACTIVE || destination == null) return false
+        return cause in PLAYER_COMBAT_TELEPORTS && arenas.get(match.arenaId).bounds.contains(destination)
     }
 
     fun retryCompletion(matchId: MatchId) {
@@ -125,6 +164,9 @@ class DuelSessionManager(
                 }
             }
             restore(session)
+            coordinator.find(matchId)?.takeIf { it.state == MatchState.COMPLETED }?.let {
+                runCatching { coordinator.releaseCompleted(matchId) }
+            }
         }
         sessions.clear()
         sessionByPlayer.clear()
@@ -163,8 +205,8 @@ class DuelSessionManager(
         val second = requireOnline(match.secondPlayer)
         resetPlayer(first, session.snapshots.getValue(first.uniqueId), match.rules.mode, match.rules.kitId)
         resetPlayer(second, session.snapshots.getValue(second.uniqueId), match.rules.mode, match.rules.kitId)
-        first.teleport(arena.firstSpawn)
-        second.teleport(arena.secondSpawn)
+        check(teleportInternally(first, arena.firstSpawn)) { "Could not teleport the first player to the arena" }
+        check(teleportInternally(second, arena.secondSpawn)) { "Could not teleport the second player to the arena" }
         first.sendActionBar(scoreLine(match))
         second.sendActionBar(scoreLine(match))
     }
@@ -175,12 +217,16 @@ class DuelSessionManager(
         mode: DuelMode,
         kitId: ru.ruscrafting.duels.domain.KitId?,
     ) {
-        snapshot.restore(player)
+        snapshot.restoreState(player)
         player.gameMode = GameMode.SURVIVAL
         player.allowFlight = false
         player.isFlying = false
         player.fireTicks = 0
         player.fallDistance = 0f
+        player.noDamageTicks = 0
+        player.absorptionAmount = 0.0
+        player.velocity = Vector()
+        player.setItemOnCursor(ItemStack.empty())
         player.foodLevel = 20
         player.saturation = 5f
         player.activePotionEffects.forEach { player.removePotionEffect(it.type) }
@@ -258,7 +304,12 @@ class DuelSessionManager(
 
     private fun finish(match: DuelMatch) {
         if (match.state != MatchState.COMPLETED) return
-        val session = sessions[match.id] ?: return
+        val session = sessions[match.id]
+        if (session == null) {
+            runCatching { coordinator.releaseCompleted(match.id) }
+                .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
+            return
+        }
         if (!session.finishing.compareAndSet(false, true)) return
         countdownTasks.remove(match.id)?.cancel()
         val winnerId = requireNotNull(match.winner)
@@ -278,10 +329,15 @@ class DuelSessionManager(
                 1.0f,
             )
         }
-        restore(session)
-        plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
-        sessions.remove(match.id, session)
-        session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
+        try {
+            restore(session)
+            plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
+        } finally {
+            sessions.remove(match.id, session)
+            session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
+            runCatching { coordinator.releaseCompleted(match.id) }
+                .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
+        }
     }
 
     private fun announcePersistenceFailure(
@@ -307,8 +363,23 @@ class DuelSessionManager(
     }
 
     private fun restore(session: PaperSession) {
-        session.snapshots.forEach { (uuid, snapshot) -> plugin.server.getPlayer(uuid)?.let(snapshot::restore) }
+        session.snapshots.forEach { (uuid, snapshot) -> plugin.server.getPlayer(uuid)?.let { restorePlayer(it, snapshot) } }
     }
+
+    private fun restorePlayer(
+        player: Player,
+        snapshot: PlayerSnapshot,
+    ) {
+        runCatching { snapshot.restore(player, ::teleportInternally) }
+            .onFailure { failure ->
+                plugin.logger.severe("Could not fully restore duel player ${player.uniqueId}: ${failure.javaClass.simpleName}: ${failure.message}")
+            }
+    }
+
+    private fun teleportInternally(
+        player: Player,
+        destination: org.bukkit.Location,
+    ): Boolean = internalTeleports.authorize(player.uniqueId, destination) { player.teleport(destination) }
 
     private fun participants(match: DuelMatch): List<Player> =
         listOfNotNull(plugin.server.getPlayer(match.firstPlayer.value), plugin.server.getPlayer(match.secondPlayer.value))
@@ -331,4 +402,9 @@ class DuelSessionManager(
         val snapshots: Map<UUID, PlayerSnapshot>,
         val finishing: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(),
     )
+
+    private companion object {
+        val PLAYER_COMBAT_TELEPORTS =
+            setOf(PlayerTeleportEvent.TeleportCause.ENDER_PEARL, PlayerTeleportEvent.TeleportCause.CONSUMABLE_EFFECT)
+    }
 }

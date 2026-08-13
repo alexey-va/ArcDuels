@@ -120,11 +120,21 @@ class MatchCoordinator(
                     val current = getRequired(match.id)
                     if (current.state == MatchState.COMPLETED) current else current.markPersisted().also { matches[it.id] = it }
                 }
-            release(completed)
             publishCompletion(completed, persisted)
             completed
         }
     }
+
+    /**
+     * Releases player and arena ownership only after the platform restored both players.
+     * This prevents another match from entering an arena during presentation cleanup.
+     */
+    fun releaseCompleted(matchId: MatchId): Boolean =
+        synchronized(lock) {
+            val match = matches[matchId] ?: return@synchronized false
+            check(match.state == MatchState.COMPLETED) { "Only a completed match can release gameplay resources" }
+            releaseLocked(match)
+        }
 
     private fun publishCompletion(
         match: DuelMatch,
@@ -154,7 +164,8 @@ class MatchCoordinator(
                 ),
             )
         for (event in events) {
-            eventPublisher.publish(event).exceptionally { Unit }
+            runCatching { eventPublisher.publish(event) }
+                .onSuccess { publication -> publication.exceptionally { Unit } }
         }
     }
 
@@ -172,9 +183,19 @@ class MatchCoordinator(
 
     private fun release(match: DuelMatch) {
         synchronized(lock) {
-            matchByPlayer.remove(match.firstPlayer, match.id)
-            matchByPlayer.remove(match.secondPlayer, match.id)
-            reservations.remove(match.id)?.close()
+            releaseLocked(match)
         }
+    }
+
+    private fun releaseLocked(match: DuelMatch): Boolean {
+        val reservation = reservations.remove(match.id) ?: return false
+        matchByPlayer.remove(match.firstPlayer, match.id)
+        matchByPlayer.remove(match.secondPlayer, match.id)
+        try {
+            reservation.close()
+        } finally {
+            matches.remove(match.id, match)
+        }
+        return true
     }
 }

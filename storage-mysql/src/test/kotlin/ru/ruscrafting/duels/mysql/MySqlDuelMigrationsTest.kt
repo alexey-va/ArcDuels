@@ -6,12 +6,15 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 
 class MySqlDuelMigrationsTest : StringSpec({
-    "initial schema is versioned and idempotent" {
-        val migration = MySqlDuelMigrations.all.single()
+    "schema migrations are ordered and idempotent" {
+        val migrations = MySqlDuelMigrations.all
+        val initial = migrations.first()
+        val names = migrations.last()
 
-        migration.version shouldBe 1
-        migration.statements shouldHaveSize 4
-        migration.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
-        migration.statements[2] shouldContain "INSERT IGNORE"
+        migrations.map { it.version } shouldBe listOf(1, 2)
+        initial.statements shouldHaveSize 4
+        initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
+        initial.statements[2] shouldContain "INSERT IGNORE"
+        names.statements.single() shouldContain "CREATE TABLE IF NOT EXISTS `rusduels_player_names`"
     }
 })

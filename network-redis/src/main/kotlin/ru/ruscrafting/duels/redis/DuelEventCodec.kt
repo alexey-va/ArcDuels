@@ -45,6 +45,7 @@ internal class DuelEventCodec(
         )
 
     fun decode(json: String): DuelEvent {
+        require(json.length <= MAX_EVENT_CHARACTERS) { "RusDuels event exceeds $MAX_EVENT_CHARACTERS characters" }
         val wire =
             try {
                 gson.fromJson(json, WireEvent::class.java)
@@ -56,26 +57,39 @@ internal class DuelEventCodec(
         val occurredAt = Instant.parse(wire.occurredAt)
         val sourceServer = ServerId(wire.sourceServer)
         return when (wire.type) {
-            MATCH_COMPLETED ->
+            MATCH_COMPLETED -> {
+                val winner = PlayerId(UUID.fromString(requireNotNull(wire.winner)))
+                val loser = PlayerId(UUID.fromString(requireNotNull(wire.loser)))
+                val mode = DuelMode.valueOf(requireNotNull(wire.mode))
+                val kitId = wire.kitId?.let(::KitId)
+                val winnerRating = requireNotNull(wire.winnerRating)
+                require(winner != loser) { "Winner and loser must be different players" }
+                require((mode == DuelMode.KIT) == (kitId != null)) { "Event mode and kit do not agree" }
+                require(!requireNotNull(wire.ranked) || mode == DuelMode.KIT) { "Ranked event must use a kit" }
+                require(winnerRating in 0..MAX_RATING) { "Winner rating is outside the accepted range" }
                 MatchCompletedEvent(
                     eventId = wire.eventId,
                     occurredAt = occurredAt,
                     sourceServer = sourceServer,
                     matchId = MatchId(UUID.fromString(requireNotNull(wire.matchId))),
-                    winner = PlayerId(UUID.fromString(requireNotNull(wire.winner))),
-                    loser = PlayerId(UUID.fromString(requireNotNull(wire.loser))),
-                    mode = DuelMode.valueOf(requireNotNull(wire.mode)),
-                    kitId = wire.kitId?.let(::KitId),
-                    ranked = requireNotNull(wire.ranked),
-                    winnerRating = requireNotNull(wire.winnerRating),
+                    winner = winner,
+                    loser = loser,
+                    mode = mode,
+                    kitId = kitId,
+                    ranked = wire.ranked,
+                    winnerRating = winnerRating,
                 )
-            LEADERBOARD_INVALIDATED ->
+            }
+            LEADERBOARD_INVALIDATED -> {
+                val revision = requireNotNull(wire.revision)
+                require(revision >= 0) { "Leaderboard revision cannot be negative" }
                 LeaderboardInvalidatedEvent(
                     eventId = wire.eventId,
                     occurredAt = occurredAt,
                     sourceServer = sourceServer,
-                    revision = requireNotNull(wire.revision),
+                    revision = revision,
                 )
+            }
             else -> error("Unknown RusDuels event type ${wire.type}")
         }
     }
@@ -98,6 +112,8 @@ internal class DuelEventCodec(
 
     private companion object {
         const val WIRE_VERSION = 1
+        const val MAX_EVENT_CHARACTERS = 8_192
+        const val MAX_RATING = 10_000_000
         const val MATCH_COMPLETED = "match_completed"
         const val LEADERBOARD_INVALIDATED = "leaderboard_invalidated"
     }

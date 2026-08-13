@@ -40,6 +40,7 @@ class DuelCommand(
                 controller.deny(player, id)
             }
             "cancel", "отмена" -> controller.cancel(player)
+            "leave", "покинуть" -> controller.leave(player)
             "stats", "статы" -> {
                 val target =
                     if (args.size > 1) {
@@ -73,7 +74,7 @@ class DuelCommand(
     ): List<String> {
         if (args.size != 1) return emptyList()
         val prefix = args[0].lowercase()
-        return (listOf("accept", "deny", "cancel", "stats", "top") + sender.server.onlinePlayers.map(Player::getName))
+        return (listOf("accept", "deny", "cancel", "leave", "stats", "top") + sender.server.onlinePlayers.map(Player::getName))
             .filter { it.lowercase().startsWith(prefix) }
             .sorted()
     }

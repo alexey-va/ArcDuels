@@ -14,6 +14,7 @@ import ru.ruscrafting.duels.domain.PlayerStatistics
 import ru.ruscrafting.duels.domain.RatingCalculator
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
+import ru.ruscrafting.duels.domain.validatePlayerName
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.Timestamp
@@ -28,6 +29,31 @@ class MySqlStatisticsRepository(
             MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(MySqlDuelMigrations.all)
         }
 
+    override fun rememberPlayerName(
+        playerId: PlayerId,
+        playerName: String,
+    ): CompletableFuture<Unit> {
+        val safeName = validatePlayerName(playerName)
+        return runtime.executor.write { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO `rusduels_player_names` (`player_id`, `last_known_name`, `updated_at`)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE `last_known_name` = ?, `updated_at` = ?
+                """.trimIndent(),
+            ).use { statement ->
+                val now = Timestamp.from(Instant.now())
+                statement.setBytes(1, UuidBytes.encode(playerId.value))
+                statement.setString(2, safeName)
+                statement.setTimestamp(3, now)
+                statement.setString(4, safeName)
+                statement.setTimestamp(5, now)
+                statement.executeUpdate()
+            }
+            Unit
+        }
+    }
+
     override fun find(playerId: PlayerId): CompletableFuture<PlayerStatistics> =
         runtime.executor.read { connection ->
             connection.prepareStatement("SELECT $STAT_COLUMNS FROM `rusduels_player_stats` WHERE `player_id` = ?").use { statement ->
@@ -35,6 +61,16 @@ class MySqlStatisticsRepository(
                 statement.executeQuery().use { result ->
                     if (result.next()) result.toStatistics(playerId) else PlayerStatistics(playerId)
                 }
+            }
+        }
+
+    override fun findPlayerName(playerId: PlayerId): CompletableFuture<String?> =
+        runtime.executor.read { connection ->
+            connection.prepareStatement(
+                "SELECT `last_known_name` FROM `rusduels_player_names` WHERE `player_id` = ?",
+            ).use { statement ->
+                statement.setBytes(1, UuidBytes.encode(playerId.value))
+                statement.executeQuery().use { result -> if (result.next()) result.getString(1) else null }
             }
         }
 
@@ -46,9 +82,10 @@ class MySqlStatisticsRepository(
         return runtime.executor.read { connection ->
             connection.prepareStatement(
                 """
-                SELECT `player_id`, `rating`, `wins`, `losses`
-                FROM `rusduels_player_stats`
-                ORDER BY `rating` DESC, `wins` DESC, `player_id` ASC
+                SELECT s.`player_id`, n.`last_known_name`, s.`rating`, s.`wins`, s.`losses`
+                FROM `rusduels_player_stats` s
+                LEFT JOIN `rusduels_player_names` n ON n.`player_id` = s.`player_id`
+                ORDER BY s.`rating` DESC, s.`wins` DESC, s.`player_id` ASC
                 LIMIT ?
                 """.trimIndent(),
             ).use { statement ->
@@ -61,6 +98,7 @@ class MySqlStatisticsRepository(
                                 LeaderboardEntry(
                                     position = position++,
                                     playerId = PlayerId(UuidBytes.decode(result.getBytes("player_id"))),
+                                    playerName = result.getString("last_known_name"),
                                     rating = result.getInt("rating"),
                                     wins = result.getLong("wins"),
                                     losses = result.getLong("losses"),

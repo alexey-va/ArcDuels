@@ -49,8 +49,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     "rusduels-it",
                 )
             repository = MySqlStatisticsRepository(runtime)
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1)
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2)
         }
 
         afterSpec {
@@ -72,6 +72,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     serverId = ServerId("duels-it"),
                     completedAt = Instant.parse("2026-08-13T10:00:00Z"),
                 )
+            repository.rememberPlayerName(winner, "Winner").get()
+            repository.rememberPlayerName(loser, "Loser").get()
 
             val first = repository.record(outcome).get()
             val duplicate = repository.record(outcome).get()
@@ -82,7 +84,9 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             duplicate shouldBe first.copy(newlyRecorded = false)
             repository.find(winner).get().wins shouldBe 1
             repository.find(loser).get().losses shouldBe 1
+            repository.findPlayerName(winner).get() shouldBe "Winner"
             repository.leaderboard(10).get().map { it.playerId } shouldContainExactly listOf(winner, loser)
+            repository.leaderboard(10).get().map { it.playerName } shouldContainExactly listOf("Winner", "Loser")
         }
 
         "same match id with a different outcome is rejected" {

@@ -33,7 +33,7 @@ class MatchCoordinatorTest : StringSpec({
             clock = Clock.fixed(Instant.parse("2026-08-13T10:00:00Z"), ZoneOffset.UTC),
         )
 
-    "completion persists once, releases arena and publishes network events" {
+    "completion persists once and holds gameplay resources until platform cleanup" {
         val match =
             coordinator.reserve(first, second, DuelRules(DuelMode.KIT, KitId("classic"), ranked = true)).get()
         coordinator.beginCountdown(match.id)
@@ -41,11 +41,15 @@ class MatchCoordinatorTest : StringSpec({
         val completed = coordinator.recordRoundWinner(match.id, first).get()
 
         completed.state shouldBe MatchState.COMPLETED
-        releases.get() shouldBe 1
+        releases.get() shouldBe 0
         statistics.find(first).get().wins shouldBe 1
         statistics.find(first).get().rating shouldBe 1_016
         statistics.find(second).get().losses shouldBe 1
         events shouldHaveSize 2
+        coordinator.findByPlayer(first)?.id shouldBe match.id
+        coordinator.releaseCompleted(match.id) shouldBe true
+        coordinator.releaseCompleted(match.id) shouldBe false
+        releases.get() shouldBe 1
         coordinator.findByPlayer(first) shouldBe null
     }
 
@@ -70,7 +74,14 @@ class MatchCoordinatorTest : StringSpec({
         val releasesOnFailure = AtomicInteger()
         val failingRepository =
             object : StatisticsRepository {
+                override fun rememberPlayerName(
+                    playerId: PlayerId,
+                    playerName: String,
+                ) = CompletableFuture.completedFuture(Unit)
+
                 override fun find(playerId: PlayerId) = CompletableFuture.completedFuture(PlayerStatistics(playerId))
+
+                override fun findPlayerName(playerId: PlayerId) = CompletableFuture.completedFuture<String?>(null)
 
                 override fun record(outcome: MatchOutcome) =
                     CompletableFuture.failedFuture<PersistedMatchResult>(IllegalStateException("database unavailable"))
@@ -96,5 +107,30 @@ class MatchCoordinatorTest : StringSpec({
 
         failClosed.find(match.id)?.state shouldBe MatchState.COMPLETING
         releasesOnFailure.get() shouldBe 0
+    }
+
+    "synchronous presentation failure cannot strand a persisted match" {
+        val releasesOnPublicationFailure = AtomicInteger()
+        val failSoftPublisher =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator {
+                    CompletableFuture.completedFuture(
+                        ArenaReservation(ArenaId("arena-3"), releasesOnPublicationFailure::incrementAndGet),
+                    )
+                },
+                InMemoryStatisticsRepository(),
+                eventPublisher = DuelEventPublisher { error("redis unavailable") },
+                clock = Clock.fixed(Instant.parse("2026-08-13T10:00:00Z"), ZoneOffset.UTC),
+            )
+        val match = failSoftPublisher.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY)).get()
+        failSoftPublisher.beginCountdown(match.id)
+        failSoftPublisher.activate(match.id)
+
+        val completed = failSoftPublisher.recordRoundWinner(match.id, first).get()
+
+        completed.state shouldBe MatchState.COMPLETED
+        failSoftPublisher.releaseCompleted(match.id) shouldBe true
+        releasesOnPublicationFailure.get() shouldBe 1
     }
 })

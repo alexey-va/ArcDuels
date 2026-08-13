@@ -5,13 +5,26 @@ import java.util.concurrent.ConcurrentHashMap
 
 class InMemoryStatisticsRepository : StatisticsRepository {
     private val statistics = ConcurrentHashMap<PlayerId, PlayerStatistics>()
+    private val playerNames = ConcurrentHashMap<PlayerId, String>()
     private val recordedMatches = ConcurrentHashMap<MatchId, PersistedMatchResult>()
     private val writeLock = Any()
+    private var leaderboardRevision = 0L
+
+    override fun rememberPlayerName(
+        playerId: PlayerId,
+        playerName: String,
+    ): CompletableFuture<Unit> {
+        playerNames[playerId] = validatePlayerName(playerName)
+        return CompletableFuture.completedFuture(Unit)
+    }
 
     override fun find(playerId: PlayerId): CompletableFuture<PlayerStatistics> =
         CompletableFuture.completedFuture(
             synchronized(writeLock) { statistics[playerId] ?: PlayerStatistics(playerId) },
         )
+
+    override fun findPlayerName(playerId: PlayerId): CompletableFuture<String?> =
+        CompletableFuture.completedFuture(playerNames[playerId])
 
     override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> {
         val result =
@@ -46,11 +59,12 @@ class InMemoryStatisticsRepository : StatisticsRepository {
                     )
                 statistics[outcome.winner] = winnerAfter
                 statistics[outcome.loser] = loserAfter
+                val nextLeaderboardRevision = ++leaderboardRevision
                 PersistedMatchResult(
                     outcome = outcome,
                     winnerRatingAfter = winnerAfter.rating,
                     loserRatingAfter = loserAfter.rating,
-                    leaderboardRevision = maxOf(winnerAfter.revision, loserAfter.revision),
+                    leaderboardRevision = nextLeaderboardRevision,
                     newlyRecorded = true,
                 )
                     .also { recordedMatches[outcome.matchId] = it }
@@ -63,10 +77,21 @@ class InMemoryStatisticsRepository : StatisticsRepository {
         val entries =
             synchronized(writeLock) {
                 statistics.values
-                    .sortedWith(compareByDescending<PlayerStatistics> { it.rating }.thenByDescending { it.wins })
+                    .sortedWith(
+                        compareByDescending<PlayerStatistics> { it.rating }
+                            .thenByDescending { it.wins }
+                            .thenBy { it.playerId.toString() },
+                    )
                     .take(limit)
                     .mapIndexed { index, stats ->
-                        LeaderboardEntry(index + 1, stats.playerId, stats.rating, stats.wins, stats.losses)
+                        LeaderboardEntry(
+                            position = index + 1,
+                            playerId = stats.playerId,
+                            playerName = playerNames[stats.playerId],
+                            rating = stats.rating,
+                            wins = stats.wins,
+                            losses = stats.losses,
+                        )
                     }
             }
         return CompletableFuture.completedFuture(entries)

@@ -87,6 +87,14 @@ class DuelController(
             .onFailure { failure -> player.sendMessage(message("<red>${failure.message}</red>")) }
     }
 
+    fun leave(player: Player) {
+        if (sessions.handleForfeit(player)) {
+            player.sendMessage(message("<gray>Ты сдался. Результат дуэли сохраняется…</gray>"))
+        } else {
+            player.sendMessage(message("<red>Ты сейчас не участвуешь в активной дуэли.</red>"))
+        }
+    }
+
     fun showStatistics(
         viewer: Player,
         target: Player,

@@ -24,7 +24,9 @@ This repository is under active development. The first vertical slice targets:
 - validated challenges and one active match per player;
 - local and MySQL-backed statistics;
 - global leaderboard invalidation and cross-server announcements over Redis;
-- inventory GUI, countdown titles, particles, sounds and winner fireworks;
+- casual/ranked BO1 and BO3 selection in the inventory GUI;
+- countdown titles, action bars, sounds and winner particle effects;
+- bounded arenas, scoped internal teleports and protected player inventories;
 - extension points for future KOTH objectives.
 
 ## Build

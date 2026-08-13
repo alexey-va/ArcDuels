@@ -62,7 +62,14 @@ class DuelGuiService(
                 item(
                     kit.icon,
                     componentToMiniMessage(kit.displayName),
-                    listOf("<gray>Одинаковый набор для обоих</gray>", "", "<yellow>Нажми, чтобы вызвать</yellow>"),
+                    listOf(
+                        "<gray>Одинаковый набор для обоих</gray>",
+                        "",
+                        "<yellow>ЛКМ:</yellow> <white>обычная, BO1</white>",
+                        "<yellow>ПКМ:</yellow> <white>обычная, BO3</white>",
+                        "<aqua>Shift + ЛКМ:</aqua> <white>рейтинг, BO1</white>",
+                        "<aqua>Shift + ПКМ:</aqua> <white>рейтинг, BO3</white>",
+                    ),
                 ),
             )
         }
@@ -72,7 +79,14 @@ class DuelGuiService(
             item(
                 Material.ENDER_CHEST,
                 "<light_purple><bold>СВОЁ СНАРЯЖЕНИЕ</bold></light_purple>",
-                listOf("<gray>Каждый сражается своими вещами</gray>", "<dark_gray>Инвентарь восстановится после матча</dark_gray>", "", "<yellow>Нажми, чтобы вызвать</yellow>"),
+                listOf(
+                    "<gray>Каждый сражается своими вещами</gray>",
+                    "<dark_gray>Инвентарь восстановится после матча</dark_gray>",
+                    "",
+                    "<yellow>ЛКМ:</yellow> <white>BO1</white>",
+                    "<yellow>ПКМ:</yellow> <white>BO3</white>",
+                    "<dark_gray>Рейтинг для своего снаряжения выключен</dark_gray>",
+                ),
             ),
         )
         player.openInventory(inventory)
@@ -93,11 +107,14 @@ class DuelGuiService(
                 val slots = contentSlots()
                 entries.take(slots.size).forEachIndexed { index, entry ->
                     val slot = slots[index]
-                    val profileName = Bukkit.getOfflinePlayer(entry.playerId.value).name
+                    val profileName = entry.playerName ?: Bukkit.getOfflinePlayer(entry.playerId.value).name
                     val stack = ItemStack(Material.PLAYER_HEAD)
                     applyHeadProfile(stack, entry.playerId.value, profileName)
                     val meta = stack.itemMeta
-                    meta.displayName(miniMessage.deserialize("<gold><bold>#${entry.position}</bold></gold> <yellow>${profileName ?: entry.playerId}</yellow>"))
+                    meta.displayName(
+                        miniMessage.deserialize("<gold><bold>#${entry.position}</bold></gold> ")
+                            .append(Component.text(profileName ?: entry.playerId.toString())),
+                    )
                     meta.lore(
                         listOf(
                             miniMessage.deserialize("<gray>Рейтинг:</gray> <aqua><bold>${entry.rating}</bold></aqua>"),
@@ -133,7 +150,8 @@ class DuelGuiService(
             is ModeMenuHolder -> {
                 event.isCancelled = true
                 if (event.clickedInventory != event.view.topInventory) return
-                val rules = holder.rules[event.rawSlot] ?: return
+                val baseRules = holder.rules[event.rawSlot] ?: return
+                val rules = rulesForSelection(baseRules, event.isShiftClick, event.isRightClick)
                 val target = plugin.server.getPlayer(holder.target)
                 player.closeInventory()
                 if (target == null) {
@@ -228,3 +246,13 @@ class DuelGuiService(
 
     private class LeaderboardMenuHolder : MenuHolder()
 }
+
+internal fun rulesForSelection(
+    baseRules: DuelRules,
+    shiftClick: Boolean,
+    rightClick: Boolean,
+): DuelRules =
+    baseRules.copy(
+        ranked = shiftClick && baseRules.mode == DuelMode.KIT,
+        bestOf = if (rightClick) 3 else 1,
+    )

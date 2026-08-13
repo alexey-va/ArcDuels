@@ -1,5 +1,7 @@
 package ru.ruscrafting.duels.paper
 
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.minimessage.MiniMessage
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.redis.RedisConnection
@@ -22,7 +24,7 @@ import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
-class RusDuelsPlugin : JavaPlugin() {
+open class RusDuelsPlugin : JavaPlugin() {
     private val closeables = mutableListOf<AutoCloseable>()
     private var sessions: DuelSessionManager? = null
 
@@ -47,7 +49,7 @@ class RusDuelsPlugin : JavaPlugin() {
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
         val statistics = createStatistics()
-        val publisher = createNetwork(serverId)
+        val publisher = createNetwork(serverId, statistics)
         val coordinator = MatchCoordinator(serverId, arenas, statistics, publisher, Clock.systemUTC())
         val sessionManager = DuelSessionManager(this, coordinator, arenas, kits)
         sessions = sessionManager
@@ -64,6 +66,9 @@ class RusDuelsPlugin : JavaPlugin() {
         pluginCommand.tabCompleter = command
         server.pluginManager.registerEvents(gui, this)
         server.pluginManager.registerEvents(DuelGameplayListener(sessionManager), this)
+        val identities = PlayerIdentityListener(this, statistics)
+        server.pluginManager.registerEvents(identities, this)
+        server.onlinePlayers.forEach(identities::remember)
         logger.info("RusDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
         if (arenas.size() == 0) logger.warning("No enabled duel arenas are configured; challenges cannot start yet")
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
@@ -102,7 +107,10 @@ class RusDuelsPlugin : JavaPlugin() {
         return repository
     }
 
-    private fun createNetwork(serverId: ServerId): DuelEventPublisher {
+    private fun createNetwork(
+        serverId: ServerId,
+        statistics: StatisticsRepository,
+    ): DuelEventPublisher {
         if (!config.getBoolean("redis.enabled", false)) return NoOpDuelEventPublisher
         val username = config.getString("redis.username")?.takeIf(String::isNotBlank)
         val password = config.getString("redis.password")?.takeIf(String::isNotBlank)
@@ -121,16 +129,25 @@ class RusDuelsPlugin : JavaPlugin() {
             bus.subscribe { event ->
                 if (!isEnabled) return@subscribe
                 if (event is MatchCompletedEvent) {
-                    server.scheduler.runTask(this, Runnable {
-                        val winner = server.getOfflinePlayer(event.winner.value).name ?: event.winner.toString().take(8)
-                        val loser = server.getOfflinePlayer(event.loser.value).name ?: event.loser.toString().take(8)
-                        server.broadcast(
-                            MiniMessage.miniMessage().deserialize(
-                                "<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>ДУЭЛИ</bold></gradient><dark_gray>]</dark_gray> " +
-                                    "<aqua>$winner</aqua> <gray>победил</gray> <red>$loser</red> <dark_gray>(${event.winnerRating})</dark_gray>",
-                            ),
-                        )
-                    })
+                    statistics.findPlayerName(event.winner).thenCombine(statistics.findPlayerName(event.loser), ::Pair)
+                        .whenComplete { names, _ ->
+                            if (!isEnabled) return@whenComplete
+                            server.scheduler.runTask(this, Runnable {
+                                val winner = names?.first ?: server.getOfflinePlayer(event.winner.value).name ?: event.winner.toString().take(8)
+                                val loser = names?.second ?: server.getOfflinePlayer(event.loser.value).name ?: event.loser.toString().take(8)
+                                val prefix =
+                                    MiniMessage.miniMessage().deserialize(
+                                        "<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>ДУЭЛИ</bold></gradient><dark_gray>]</dark_gray> ",
+                                    )
+                                server.broadcast(
+                                    prefix
+                                        .append(Component.text(winner, NamedTextColor.AQUA))
+                                        .append(Component.text(" победил ", NamedTextColor.GRAY))
+                                        .append(Component.text(loser, NamedTextColor.RED))
+                                        .append(Component.text(" (${event.winnerRating})", NamedTextColor.DARK_GRAY)),
+                                )
+                            })
+                        }
                 }
             }
         }

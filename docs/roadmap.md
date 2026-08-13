@@ -9,7 +9,9 @@
 - local statistics plus optional MySQL persistence;
 - optional Redis result broadcasts and leaderboard invalidation;
 - duel browser, kit picker and leaderboard inventories;
-- titles, action bars, sounds, particles and configurable fireworks.
+- casual/ranked BO1 and BO3 selection;
+- titles, action bars, sounds, particles and winner effects;
+- bounded arenas, command isolation and exact player-state restoration.
 
 ## 0.2 — competitive operations
 

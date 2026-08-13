@@ -24,6 +24,14 @@ Paper commands/events -> domain services -> domain events -> Paper presentation
 Optional infrastructure is fail-soft for presentation and cache invalidation,
 but match-result persistence is fail-closed when durable statistics are enabled.
 This avoids showing a win that was silently lost from the global ranking.
+The MySQL adapter uses the shared `arc-core-sql` runtime for Hikari pooling,
+TLS policy, bounded asynchronous execution, transactions, and checksum-locked
+migrations. Last-known player names are stored separately from statistics so a
+leaderboard rendered on another Paper node does not fall back to UUIDs.
+
+Completed matches retain player and arena ownership until Paper has restored
+both snapshots. Only then does the coordinator release the reservation. This
+prevents another pair from entering an arena during end-of-match cleanup.
 
 ## Match modes
 

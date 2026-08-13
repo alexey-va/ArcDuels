@@ -7,7 +7,7 @@ author: RusCrafting
 commands:
   duel:
     description: Open duels or manage a challenge
-    usage: /duel [player|accept|deny|cancel|stats|top]
+    usage: /duel [player|accept|deny|cancel|leave|stats|top]
     aliases: [duels, дуэль]
     permission: rusduels.use
 permissions:
