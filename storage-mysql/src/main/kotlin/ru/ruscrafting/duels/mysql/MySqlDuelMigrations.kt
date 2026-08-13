@@ -97,8 +97,28 @@ object MySqlDuelMigrations {
                 statements =
                     listOf(
                         """
-                        ALTER TABLE `arcduels_matches`
-                        ADD COLUMN `objective` VARCHAR(32) NOT NULL DEFAULT 'ELIMINATION' AFTER `mode`
+                        SET @arcduels_migration_4 = (
+                            SELECT IF(
+                                EXISTS(
+                                    SELECT 1
+                                    FROM `information_schema`.`COLUMNS`
+                                    WHERE `TABLE_SCHEMA` = DATABASE()
+                                      AND `TABLE_NAME` = 'arcduels_matches'
+                                      AND `COLUMN_NAME` = 'objective'
+                                ),
+                                'ALTER TABLE `arcduels_matches` MODIFY COLUMN `objective` VARCHAR(32) NOT NULL DEFAULT ''ELIMINATION'' AFTER `mode`',
+                                'ALTER TABLE `arcduels_matches` ADD COLUMN `objective` VARCHAR(32) NOT NULL DEFAULT ''ELIMINATION'' AFTER `mode`'
+                            )
+                        )
+                        """.trimIndent(),
+                        """
+                        PREPARE arcduels_migration_4_statement FROM @arcduels_migration_4
+                        """.trimIndent(),
+                        """
+                        EXECUTE arcduels_migration_4_statement
+                        """.trimIndent(),
+                        """
+                        DEALLOCATE PREPARE arcduels_migration_4_statement
                         """.trimIndent(),
                     ),
             ),

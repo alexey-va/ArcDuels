@@ -35,7 +35,9 @@ ranked and unranked persistence, name lookup, leaderboards, match-id collision
 protection, timestamp precision, 32 concurrent copies of one result, and 24
 concurrent unique matches sharing the same player rows, atomic two-player
 escrow, idempotent acknowledgement, checksum matching, and rollback on a
-participant conflict. It is intentionally not part of a fake JDBC test double.
+participant conflict. It also deletes a committed migration-history row and
+proves that replay converges when MySQL DDL committed before its journal write.
+It is intentionally not part of a fake JDBC test double.
 
 ## Artifact gate
 

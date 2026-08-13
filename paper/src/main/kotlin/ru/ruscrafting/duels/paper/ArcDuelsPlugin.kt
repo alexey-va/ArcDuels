@@ -97,7 +97,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             SqlConnectionConfig(
                 host = config.getString("mysql.host", "127.0.0.1")!!,
                 port = config.getInt("mysql.port", 3306),
-                database = config.getString("mysql.database", "arcduels")!!,
+                database = config.getString("mysql.database", "common")!!,
                 username = config.getString("mysql.username", "arcduels")!!,
                 password = config.getString("mysql.password", "")!!,
                 sslMode = sslMode,

@@ -14,6 +14,11 @@ Startup is fail-closed when MySQL is enabled but the pool or checksum-protected
 schema migrations cannot be prepared. Match result writes are also fail-closed
 and retry by match id, so an unknown network outcome cannot double-count a win.
 
+RusCrafting uses the shared `common` database. ArcDuels owns only namespaced
+`arcduels_*` tables, including `arcduels_schema_history`. Operators provision
+the database and account; plugin startup creates and migrates every table
+automatically. No administrator should run ArcDuels table DDL by hand.
+
 Enable `redis.enabled` independently for cross-server win announcements and
 leaderboard invalidation events. Redis transport is presentation-only and
 fail-soft; MySQL remains the durable source of truth. If Redis is unavailable

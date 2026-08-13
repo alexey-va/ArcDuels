@@ -243,6 +243,17 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             repository.acknowledgeRestored(conflictPlayer).get() shouldBe true
             repository.acknowledgeRestored(occupiedPeer).get() shouldBe true
         }
+
+        "migration rerun converges after ddl committed before history record" {
+            mysql.createConnection("").use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate("DELETE FROM `arcduels_schema_history` WHERE `version` = 4")
+                }
+            }
+
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(4)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4)
+        }
     }
 
     private fun escrow(
