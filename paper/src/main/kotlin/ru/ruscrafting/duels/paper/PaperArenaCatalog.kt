@@ -50,6 +50,12 @@ data class ArenaBounds(
         return contains(worldId, hill.center.x - hill.radius, hill.center.y, hill.center.z - hill.radius) &&
             contains(worldId, hill.center.x + hill.radius, hill.center.y + hill.height, hill.center.z + hill.radius)
     }
+
+    fun overlaps(other: ArenaBounds): Boolean =
+        worldId == other.worldId &&
+            minX <= other.maxX && maxX >= other.minX &&
+            minY <= other.maxY && maxY >= other.minY &&
+            minZ <= other.maxZ && maxZ >= other.minZ
 }
 
 data class PaperArena(
@@ -184,6 +190,13 @@ class PaperArenaCatalog private constructor(
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
                 "Arena ids must be unique after lowercase normalization"
+            }
+            entries.forEachIndexed { index, (id, arena) ->
+                entries.drop(index + 1).forEach { (otherId, otherArena) ->
+                    require(!arena.bounds.overlaps(otherArena.bounds)) {
+                        "Arena $id bounds overlap arena $otherId"
+                    }
+                }
             }
             return entries.toMap()
         }

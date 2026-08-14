@@ -43,7 +43,7 @@ double.
 
 ## Artifact gate
 
-The deployable artifact is `paper/build/libs/ArcDuels-0.2.1.jar`.
+The deployable artifact is `paper/build/libs/ArcDuels-0.2.2.jar`.
 Before distribution, verify it is a valid shadow JAR containing ArcDuels,
 Kotlin, `arc-core-sql`, `arc-core-redis`, HikariCP, Connector/J, and Jedis while
 excluding Paper and MockBukkit classes.

@@ -83,6 +83,15 @@ class PaperArenaQueueTest : StringSpec({
         plugin.config.set("$path.radius", 20.0)
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
     }
+
+    "enabled arenas cannot own overlapping physical space" {
+        plugin.config.set("arenas.queue.hill.radius", 3.5)
+        configureArena(plugin, "overlap", "queue-world")
+
+        val failure = shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+
+        failure.message shouldBe "Arena queue bounds overlap arena overlap"
+    }
 })
 
 private fun configureArena(

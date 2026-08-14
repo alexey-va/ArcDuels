@@ -14,7 +14,19 @@
 - bounded arenas, command isolation and exact player-state restoration.
 - objective frames wired through the match state machine for future KOTH.
 
-## 0.2 — competitive operations
+## 0.2 — arena modes and operations
+
+- Lands-inspired main hub and focused challenge, mode, kit, queue/status,
+  statistics, leaderboard, help, and administration branches;
+- Russian and English client-locale bundles with strict key parity;
+- six bundled starter kits plus own-inventory matches;
+- elimination, king-of-the-hill, and sumo objectives;
+- BO1/BO3/BO5, ranked kit matches, sudden death, and combat modifiers;
+- bounded KOTH zones, non-overlapping arena validation, FIFO arena handoff,
+  and in-game arena setup commands;
+- crash-safe MySQL player-state escrow with retained restore history.
+
+## Next — competitive operations
 
 - ranked queues and ELO seasons;
 - rematches, spectators and match history;
@@ -24,6 +36,6 @@
 
 ## Later
 
-- KOTH objectives and team formats;
+- team formats;
 - Velocity-aware matchmaking and server transfer handoff;
 - web/API read model for leaderboards and match history.
