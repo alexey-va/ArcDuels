@@ -55,8 +55,7 @@ data class PlayerSnapshot(
         player.absorptionAmount = absorptionAmount
         player.activePotionEffects.forEach { player.removePotionEffect(it.type) }
         player.addPotionEffects(potionEffects)
-        val maximumHealth = player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
-        player.health = health.coerceIn(0.1, maximumHealth)
+        restoreHealth(player)
         player.updateInventory()
     }
 
@@ -66,6 +65,10 @@ data class PlayerSnapshot(
     ) {
         restoreState(player)
         check(teleport(player, location.clone())) { "Could not restore ${player.uniqueId} to their saved location" }
+        // Teleport listeners may update max-health modifiers or normalize current
+        // health for the destination. Re-apply health against the post-teleport
+        // attribute value before verifying the durable snapshot.
+        restoreHealth(player)
         player.velocity = velocity.clone()
         verifyRestored(player)
     }
@@ -90,12 +93,21 @@ data class PlayerSnapshot(
         check(player.noDamageTicks == noDamageTicks && player.absorptionAmount == absorptionAmount) {
             "Damage state verification failed"
         }
-        check(player.health == health.coerceAtMost(player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0)) {
+        check(player.health == restoredHealth(player)) {
             "Health verification failed"
         }
         check(player.activePotionEffects.toSet() == potionEffects.toSet()) { "Potion effect verification failed" }
         check(player.location.sameLocation(location)) { "Location verification failed" }
         check(player.velocity == velocity) { "Velocity verification failed" }
+    }
+
+    private fun restoreHealth(player: Player) {
+        player.health = restoredHealth(player)
+    }
+
+    private fun restoredHealth(player: Player): Double {
+        val maximumHealth = player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
+        return health.coerceIn(0.1, maximumHealth)
     }
 
     companion object {

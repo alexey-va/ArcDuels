@@ -7,6 +7,8 @@ import io.mockk.verify
 import org.bukkit.entity.Player
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.EntityDamageByEntityEvent
+import org.bukkit.event.player.PlayerCommandPreprocessEvent
+import net.kyori.adventure.text.Component
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
@@ -112,5 +114,37 @@ class DuelGameplayListenerTest : StringSpec({
 
         verify(exactly = 1) { event.damage = 0.0 }
         verify(exactly = 1) { sessions.recordMeleeHit(attacker, victim) }
+    }
+
+    "command bypass permission skips duel command restrictions while state is locked" {
+        val player = mockk<Player>(relaxed = true)
+        every { player.hasPermission("arcduels.bypass") } returns true
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.isStateLocked(player) } returns true
+        val event = mockk<PlayerCommandPreprocessEvent>(relaxed = true)
+        every { event.player } returns player
+        every { event.message } returns "/spawn"
+        val listener = DuelGameplayListener(sessions, mockk(relaxed = true))
+
+        listener.onCommand(event)
+
+        verify(exactly = 0) { event.isCancelled = true }
+    }
+
+    "ordinary commands stay blocked without the bypass permission while state is locked" {
+        val player = mockk<Player>(relaxed = true)
+        every { player.hasPermission("arcduels.bypass") } returns false
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.isStateLocked(player) } returns true
+        val locales = mockk<LocaleService>()
+        every { locales.component(player, "session.command-blocked") } returns Component.empty()
+        val event = mockk<PlayerCommandPreprocessEvent>(relaxed = true)
+        every { event.player } returns player
+        every { event.message } returns "/spawn"
+        val listener = DuelGameplayListener(sessions, locales)
+
+        listener.onCommand(event)
+
+        verify(exactly = 1) { event.isCancelled = true }
     }
 })

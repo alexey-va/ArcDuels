@@ -3,6 +3,7 @@ package ru.ruscrafting.duels.paper
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.mockk.mockk
 import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.MockBukkit
@@ -48,7 +49,7 @@ class DurablePlayerStateServiceTest : StringSpec({
         first.inventory.setItem(0, ItemStack(Material.NETHERITE_SWORD))
         second.inventory.setItem(4, ItemStack(Material.TOTEM_OF_UNDYING))
 
-        val storedFuture = service.storePair(MatchId.random(), first, second)
+        val storedFuture = service.storePair(MatchId.random(), first, second, inventoryReplaced = true)
 
         storedFuture.isDone shouldBe false
         service.isPending(first.uniqueId) shouldBe false
@@ -65,6 +66,7 @@ class DurablePlayerStateServiceTest : StringSpec({
         service.retain(stored.getValue(first.uniqueId)).get()
         service.isPending(first.uniqueId) shouldBe false
         repository.retained shouldBe first.uniqueId
+        service.latestRetained(first.uniqueId).get()?.inventoryReplaced shouldBe true
         repository.retentionCalls shouldBe 1
         repository.restoredAt shouldBe restoredAt
         repository.purgeAfter shouldBe restoredAt.plus(Duration.ofDays(7))
@@ -77,7 +79,7 @@ class DurablePlayerStateServiceTest : StringSpec({
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
         val first = server.addPlayer()
         val second = server.addPlayer()
-        val storedFuture = service.storePair(MatchId.random(), first, second)
+        val storedFuture = service.storePair(MatchId.random(), first, second, inventoryReplaced = true)
         repository.commit.complete(Unit)
         val stored = storedFuture.get().getValue(first.uniqueId)
 
@@ -91,6 +93,58 @@ class DurablePlayerStateServiceTest : StringSpec({
         firstAttempt.get()
         secondAttempt.get()
         service.isPending(first.uniqueId) shouldBe false
+    }
+
+    "own-inventory snapshots are marked so routine restoration stays quiet" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val first = server.addPlayer()
+        val second = server.addPlayer()
+
+        val stored = service.storePair(MatchId.random(), first, second, inventoryReplaced = false).get()
+
+        stored.getValue(first.uniqueId).escrow.inventoryReplaced shouldBe false
+        stored.getValue(second.uniqueId).escrow.inventoryReplaced shouldBe false
+    }
+
+    "join recovery waits for player-data readiness and the configured settle window" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val player = server.addPlayer()
+        val peer = server.addPlayer()
+        player.inventory.setItem(0, ItemStack(Material.DIAMOND_SWORD))
+        service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
+        player.inventory.setItem(0, ItemStack(Material.STONE))
+        var playerDataReady = false
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataReady = { playerDataReady },
+                recoveryApplyDelayTicks = 40L,
+                playerDataSaver = {},
+            )
+
+        sessions.handleJoin(player)
+        server.scheduler.performTicks(20)
+        player.inventory.getItem(0)?.type shouldBe Material.STONE
+
+        playerDataReady = true
+        server.scheduler.performTicks(5)
+        server.scheduler.performTicks(39)
+        player.inventory.getItem(0)?.type shouldBe Material.STONE
+
+        server.scheduler.performTicks(1)
+        player.inventory.getItem(0)?.type shouldBe Material.DIAMOND_SWORD
+        service.isPending(player.uniqueId) shouldBe false
+        sessions.shutdown()
     }
 
     "overlapping archive cleanup runs are coalesced" {
@@ -121,7 +175,7 @@ class DurablePlayerStateServiceTest : StringSpec({
             )
         val first = server.addPlayer()
         val second = server.addPlayer()
-        val future = service.storePair(MatchId.random(), first, second)
+        val future = service.storePair(MatchId.random(), first, second, inventoryReplaced = true)
 
         repository.commit.completeExceptionally(IllegalStateException("lost commit response"))
 
@@ -143,7 +197,7 @@ class DurablePlayerStateServiceTest : StringSpec({
             )
         val first = server.addPlayer()
         val second = server.addPlayer()
-        val future = service.storePair(MatchId.random(), first, second)
+        val future = service.storePair(MatchId.random(), first, second, inventoryReplaced = true)
 
         repository.commit.completeExceptionally(IllegalStateException("lost commit response"))
 
@@ -182,6 +236,9 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
 
     override fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>> =
         CompletableFuture.completedFuture(saved.orEmpty().filter { it.serverId == serverId })
+
+    override fun findLatestRetained(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> =
+        CompletableFuture.completedFuture(saved?.firstOrNull { it.playerId == playerId && it.playerId.value == retained })
 
     override fun retainRestored(
         snapshot: PlayerStateEscrow,

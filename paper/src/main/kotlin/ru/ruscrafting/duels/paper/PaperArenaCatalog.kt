@@ -168,7 +168,7 @@ class PaperArenaCatalog private constructor(
         }
 
     fun reload(plugin: JavaPlugin): Int {
-        val loaded = parse(plugin)
+        val loaded = parse(plugin, ArenaEnvironmentInspector.create(plugin))
         synchronized(lock) {
             check(reserved.isEmpty() && waiting.none { !it.future.isDone }) {
                 "Arenas cannot be reloaded while matches or queue entries are active"
@@ -200,9 +200,18 @@ class PaperArenaCatalog private constructor(
     }
 
     companion object {
-        fun load(plugin: JavaPlugin): PaperArenaCatalog = PaperArenaCatalog(parse(plugin))
+        fun load(plugin: JavaPlugin): PaperArenaCatalog =
+            PaperArenaCatalog(parse(plugin, ArenaEnvironmentInspector.create(plugin)))
 
-        private fun parse(plugin: JavaPlugin): Map<ArenaId, PaperArena> {
+        internal fun load(
+            plugin: JavaPlugin,
+            inspector: ArenaEnvironmentInspector,
+        ): PaperArenaCatalog = PaperArenaCatalog(parse(plugin, inspector))
+
+        private fun parse(
+            plugin: JavaPlugin,
+            inspector: ArenaEnvironmentInspector,
+        ): Map<ArenaId, PaperArena> {
             val root = plugin.config.getConfigurationSection("arenas")
                 ?: return emptyMap()
             val entries =
@@ -239,6 +248,7 @@ class PaperArenaCatalog private constructor(
                     }
                 }
             }
+            entries.forEach { (_, arena) -> inspector.inspect(arena) }
             return entries.toMap()
         }
 

@@ -145,5 +145,37 @@ object MySqlDuelMigrations {
                         """.trimIndent(),
                     ),
             ),
+            SqlMigration(
+                version = 6,
+                description = "record whether duel recovery replaced the player inventory",
+                statements =
+                    listOf(
+                        migration6Column("arcduels_player_state_escrow", "escrow"),
+                        "PREPARE arcduels_migration_6_escrow_statement FROM @arcduels_migration_6_escrow",
+                        "EXECUTE arcduels_migration_6_escrow_statement",
+                        "DEALLOCATE PREPARE arcduels_migration_6_escrow_statement",
+                        migration6Column("arcduels_player_state_archive", "archive"),
+                        "PREPARE arcduels_migration_6_archive_statement FROM @arcduels_migration_6_archive",
+                        "EXECUTE arcduels_migration_6_archive_statement",
+                        "DEALLOCATE PREPARE arcduels_migration_6_archive_statement",
+                    ),
+            ),
         )
+
+    private fun migration6Column(table: String, variable: String): String =
+        """
+        SET @arcduels_migration_6_$variable = (
+            SELECT IF(
+                EXISTS(
+                    SELECT 1
+                    FROM `information_schema`.`COLUMNS`
+                    WHERE `TABLE_SCHEMA` = DATABASE()
+                      AND `TABLE_NAME` = '$table'
+                      AND `COLUMN_NAME` = 'inventory_replaced'
+                ),
+                'SELECT 1',
+                'ALTER TABLE `$table` ADD COLUMN `inventory_replaced` BOOLEAN NOT NULL DEFAULT FALSE AFTER `format_version`'
+            )
+        )
+        """.trimIndent()
 }

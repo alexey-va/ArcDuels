@@ -289,8 +289,8 @@ class DuelController(
             ChallengeContext(
                 challengerName = existing?.challengerName ?: resolveName(challenge.challenger),
                 targetName = existing?.targetName ?: resolveName(challenge.target),
-                challengerServer = targets.find(challenge.challenger.value)?.server ?: existing?.challengerServer ?: localServer,
-                targetServer = targets.find(challenge.target.value)?.server ?: existing?.targetServer ?: localServer,
+                challengerServer = selectOriginServer(existing?.challengerServer, targets.find(challenge.challenger.value)?.server, localServer),
+                targetServer = selectOriginServer(existing?.targetServer, targets.find(challenge.target.value)?.server, localServer),
                 expiresAtMillis = challenge.expiresAt.toEpochMilli(),
             )
         bus.publish(
@@ -401,8 +401,11 @@ class DuelController(
                     } else if (networkMessage != null) {
                         returnRoutes[requireNotNull(match).id] =
                             ReturnRoutes(
-                                challenger = networkMessage.challengerServer,
-                                target = networkMessage.targetServer,
+                                byPlayer =
+                                    mapOf(
+                                        networkMessage.challenge.challenger to networkMessage.challengerServer,
+                                        networkMessage.challenge.target to networkMessage.targetServer,
+                                    ),
                             )
                     }
                 }
@@ -429,8 +432,8 @@ class DuelController(
         }
         val destinations =
             mapOf(
-                match.firstPlayer to routes.forPlayer(match.firstPlayer, match),
-                match.secondPlayer to routes.forPlayer(match.secondPlayer, match),
+                match.firstPlayer to routes.forPlayer(match.firstPlayer),
+                match.secondPlayer to routes.forPlayer(match.secondPlayer),
             )
         destinations.forEach { (playerId, destination) ->
             if (destination == localServer) {
@@ -571,11 +574,13 @@ class DuelController(
     )
 
     private data class ReturnRoutes(
-        val challenger: ServerId,
-        val target: ServerId,
+        val byPlayer: Map<PlayerId, ServerId>,
     ) {
-        fun forPlayer(player: PlayerId, match: DuelMatch): ServerId =
-            if (player == match.firstPlayer) challenger else target
+        init {
+            require(byPlayer.size == 2) { "Return routes require exactly two players" }
+        }
+
+        fun forPlayer(player: PlayerId): ServerId = requireNotNull(byPlayer[player]) { "Missing return route for $player" }
     }
 
     private companion object {
@@ -586,6 +591,12 @@ class DuelController(
         val CONTEXT_RETENTION: Duration = Duration.ofMinutes(10)
     }
 }
+
+internal fun selectOriginServer(
+    recorded: ServerId?,
+    observed: ServerId?,
+    fallback: ServerId,
+): ServerId = recorded ?: observed ?: fallback
 
 internal data class AcceptedParticipantReadiness(
     val stateLocked: Boolean,

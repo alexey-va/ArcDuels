@@ -54,12 +54,15 @@ fail-closed.
 If HuskSync is present, accepted matches remain in the pre-start state until
 both players have emitted its successful synchronization-complete event.
 ArcDuels does not capture or mutate player state while that barrier is closed.
+Join-time recovery also waits for that event and a configured post-sync delay,
+preventing a late player-data load from replacing the restored kit inventory.
 
 Completed matches retain player and arena ownership until Paper has applied and
 verified and saved both online snapshots. Only then does the coordinator release
 the reservation. MySQL atomically moves the exact match-id/checksum snapshot from
 active escrow into retained history. The archive is never auto-applied and is
-purged only after its configured deadline. An unknown archival outcome is
+available for explicit administrator replay only; it is purged after its
+configured deadline. An unknown archival outcome is
 idempotent: retry observes either the still-active snapshot or the exact retained
 copy.
 

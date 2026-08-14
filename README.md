@@ -37,7 +37,10 @@ This repository is under active development. The first vertical slice targets:
 - FIFO waiting for a free arena and in-game `/duels admin` GUI and commands;
 - a HuskSync completion barrier before any duel snapshot or inventory mutation;
 - crash-safe, versioned MySQL player-state escrow before any duel mutation,
-  with restored snapshots retained in a non-replayable archive for configurable N days;
+  a player recovery entry for unclaimed snapshots, and administrator-only replay
+  of claimed snapshots retained for configurable N days;
+- arena-scoped WorldGuard PvP compatibility with startup warnings instead of
+  broad changes to a world's region policy;
 - real KOTH capture zones with contested progress, particles, action bars, and
   objective-compatible arena allocation;
 - resource-pack-neutral GUI roles with optional production ItemsAdder

@@ -56,10 +56,11 @@ internal class DurablePlayerStateService(
         matchId: MatchId,
         first: Player,
         second: Player,
+        inventoryReplaced: Boolean,
     ): CompletableFuture<Map<UUID, StoredPlayerSnapshot>> {
         check(plugin.server.isPrimaryThread) { "Player state must be captured on the Paper primary thread" }
-        val firstStored = capture(matchId, first)
-        val secondStored = capture(matchId, second)
+        val firstStored = capture(matchId, first, inventoryReplaced)
+        val secondStored = capture(matchId, second, inventoryReplaced)
         return repository.savePair(firstStored.escrow, secondStored.escrow)
             .handle { _, failure ->
                 if (failure == null) {
@@ -94,6 +95,11 @@ internal class DurablePlayerStateService(
     }
 
     fun isLocal(escrow: PlayerStateEscrow): Boolean = escrow.serverId == serverId
+
+    fun latestRetained(playerId: UUID): CompletableFuture<PlayerStateEscrow?> =
+        repository.findLatestRetained(PlayerId(playerId)).thenApply { escrow ->
+            escrow?.also(::verifyChecksum)
+        }
 
     fun decode(escrow: PlayerStateEscrow): StoredPlayerSnapshot {
         verifyChecksum(escrow)
@@ -194,6 +200,7 @@ internal class DurablePlayerStateService(
     private fun capture(
         matchId: MatchId,
         player: Player,
+        inventoryReplaced: Boolean,
     ): StoredPlayerSnapshot {
         check(!isPending(player.uniqueId)) { "Player ${player.uniqueId} already has pending recovery state" }
         val snapshot = PlayerSnapshot.capture(player)
@@ -204,6 +211,7 @@ internal class DurablePlayerStateService(
                 matchId = matchId,
                 serverId = serverId,
                 formatVersion = PlayerSnapshotCodec.FORMAT_VERSION,
+                inventoryReplaced = inventoryReplaced,
                 payload = payload,
                 checksum = sha256(payload),
                 createdAt = clock.instant(),

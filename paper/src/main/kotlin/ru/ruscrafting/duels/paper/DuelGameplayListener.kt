@@ -249,7 +249,12 @@ internal class DuelGameplayListener(
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onCommand(event: PlayerCommandPreprocessEvent) {
-        if (!sessions.isStateLocked(event.player) || commandPolicy.isAllowed(event.message)) return
+        if (!sessions.isStateLocked(event.player) ||
+            event.player.hasPermission(COMMAND_BYPASS_PERMISSION) ||
+            commandPolicy.isAllowed(event.message)
+        ) {
+            return
+        }
         event.isCancelled = true
         event.player.sendMessage(locales.component(event.player, "session.command-blocked"))
     }
@@ -289,4 +294,8 @@ internal class DuelGameplayListener(
 
     private fun requiresFullFreeze(player: Player): Boolean =
         sessions.isPreparing(player) || (sessions.isStateLocked(player) && sessions.matchFor(player) == null)
+
+    private companion object {
+        const val COMMAND_BYPASS_PERMISSION = "arcduels.bypass"
+    }
 }

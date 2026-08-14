@@ -21,7 +21,7 @@ internal class CelebrationEffects(
     fun play(player: Player) {
         val center = player.location.add(0.0, 1.0, 0.0)
         player.world.spawnParticle(Particle.FIREWORK, center, 120, 1.2, 1.5, 1.2, 0.2)
-        player.world.spawnParticle(Particle.FLASH, center, 8, 0.7, 0.8, 0.7, 0.0)
+        player.world.spawnParticle(Particle.FLASH, center, 8, 0.7, 0.8, 0.7, 0.0, Color.WHITE)
         player.world.spawnParticle(Particle.TOTEM_OF_UNDYING, center, 80, 0.8, 1.0, 0.8, 0.15)
         player.world.playSound(center, Sound.ENTITY_FIREWORK_ROCKET_LARGE_BLAST, 0.8f, 1.0f)
         player.world.playSound(center, Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 0.6f, 1.2f)

@@ -64,6 +64,9 @@ class DuelGuiService internal constructor(
         inventory.setItem(31, item(player, Material.ENDER_CHEST, "menu.main.kits", "menu.main.kits-lore"))
         inventory.setItem(33, playerHead(player, locales.component(player, "menu.main.stats"), locales.lines(player, "menu.main.stats-lore")))
         inventory.setItem(40, item(player, Material.WRITABLE_BOOK, "menu.main.help", "menu.main.help-lore"))
+        if (sessions.hasPendingRecovery(player)) {
+            inventory.setItem(42, item(player, Material.RECOVERY_COMPASS, "menu.main.recovery", "menu.main.recovery-lore"))
+        }
         if (player.hasPermission(ADMIN_PERMISSION)) {
             inventory.setItem(44, item(player, Material.COMPARATOR, "menu.main.admin", "menu.main.admin-lore"))
         }
@@ -418,6 +421,12 @@ class DuelGuiService internal constructor(
                 31 -> openKits(player)
                 33 -> statisticsAction(player, targets.local(player))
                 40 -> showHelp(player)
+                42 -> if (sessions.hasPendingRecovery(player)) {
+                    player.closeInventory()
+                    if (sessions.requestRecovery(player)) {
+                        player.sendMessage(locales.component(player, "session.recovery-requested"))
+                    }
+                }
                 44 -> if (player.hasPermission(ADMIN_PERMISSION)) openAdmin(player)
             }
             is TargetMenuHolder -> when (slot) {

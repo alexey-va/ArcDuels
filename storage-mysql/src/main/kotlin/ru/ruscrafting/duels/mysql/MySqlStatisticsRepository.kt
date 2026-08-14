@@ -138,7 +138,7 @@ class MySqlStatisticsRepository(
         runtime.executor.read { connection ->
             connection.prepareStatement(
                 """
-                SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+                SELECT `player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`
                 FROM `arcduels_player_state_escrow`
                 WHERE `server_id` = ?
                 ORDER BY `created_at`, `player_id`
@@ -146,6 +146,22 @@ class MySqlStatisticsRepository(
             ).use { statement ->
                 statement.setString(1, serverId.value)
                 statement.executeQuery().use { result -> buildList { while (result.next()) add(result.toEscrow()) } }
+            }
+        }
+
+    override fun findLatestRetained(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> =
+        runtime.executor.read { connection ->
+            connection.prepareStatement(
+                """
+                SELECT `player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`
+                FROM `arcduels_player_state_archive`
+                WHERE `player_id` = ?
+                ORDER BY `restored_at` DESC
+                LIMIT 1
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setBytes(1, UuidBytes.encode(playerId.value))
+                statement.executeQuery().use { result -> if (result.next()) result.toEscrow() else null }
             }
         }
 
@@ -229,7 +245,7 @@ class MySqlStatisticsRepository(
         val existing =
             connection.prepareStatement(
                 """
-                SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+                SELECT `player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`
                 FROM `arcduels_player_state_escrow`
                 WHERE `player_id` IN (?, ?)
                 ORDER BY `player_id`
@@ -268,17 +284,18 @@ class MySqlStatisticsRepository(
         connection.prepareStatement(
             """
             INSERT INTO `arcduels_player_state_escrow`
-                (`player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (`player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
         ).use { statement ->
             statement.setBytes(1, UuidBytes.encode(snapshot.playerId.value))
             statement.setBytes(2, UuidBytes.encode(snapshot.matchId.value))
             statement.setString(3, snapshot.serverId.value)
             statement.setInt(4, snapshot.formatVersion)
-            statement.setBytes(5, snapshot.payload)
-            statement.setBytes(6, snapshot.checksum)
-            statement.setTimestamp(7, Timestamp.from(snapshot.createdAt))
+            statement.setBoolean(5, snapshot.inventoryReplaced)
+            statement.setBytes(6, snapshot.payload)
+            statement.setBytes(7, snapshot.checksum)
+            statement.setTimestamp(8, Timestamp.from(snapshot.createdAt))
             check(statement.executeUpdate() == 1) { "Could not insert player state escrow" }
         }
     }
@@ -292,19 +309,20 @@ class MySqlStatisticsRepository(
         connection.prepareStatement(
             """
             INSERT INTO `arcduels_player_state_archive`
-                (`player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`, `restored_at`, `purge_after`)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (`player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`, `restored_at`, `purge_after`)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
         ).use { statement ->
             statement.setBytes(1, UuidBytes.encode(snapshot.playerId.value))
             statement.setBytes(2, UuidBytes.encode(snapshot.matchId.value))
             statement.setString(3, snapshot.serverId.value)
             statement.setInt(4, snapshot.formatVersion)
-            statement.setBytes(5, snapshot.payload)
-            statement.setBytes(6, snapshot.checksum)
-            statement.setTimestamp(7, Timestamp.from(snapshot.createdAt))
-            statement.setTimestamp(8, Timestamp.from(restoredAt))
-            statement.setTimestamp(9, Timestamp.from(purgeAfter))
+            statement.setBoolean(5, snapshot.inventoryReplaced)
+            statement.setBytes(6, snapshot.payload)
+            statement.setBytes(7, snapshot.checksum)
+            statement.setTimestamp(8, Timestamp.from(snapshot.createdAt))
+            statement.setTimestamp(9, Timestamp.from(restoredAt))
+            statement.setTimestamp(10, Timestamp.from(purgeAfter))
             check(statement.executeUpdate() == 1) { "Could not retain restored player state escrow" }
         }
     }
@@ -316,7 +334,7 @@ class MySqlStatisticsRepository(
     ): PlayerStateEscrow? =
         connection.prepareStatement(
             """
-            SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+            SELECT `player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`
             FROM `arcduels_player_state_escrow`
             WHERE `player_id` = ?${if (lock) " FOR UPDATE" else ""}
             """.trimIndent(),
@@ -333,7 +351,7 @@ class MySqlStatisticsRepository(
     ): PlayerStateEscrow? =
         connection.prepareStatement(
             """
-            SELECT `player_id`, `match_id`, `server_id`, `format_version`, `payload`, `payload_sha256`, `created_at`
+            SELECT `player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`
             FROM `arcduels_player_state_archive`
             WHERE `player_id` = ? AND `match_id` = ?${if (lock) " FOR UPDATE" else ""}
             """.trimIndent(),
@@ -349,6 +367,7 @@ class MySqlStatisticsRepository(
             matchId = MatchId(UuidBytes.decode(getBytes("match_id"))),
             serverId = ServerId(getString("server_id")),
             formatVersion = getInt("format_version"),
+            inventoryReplaced = getBoolean("inventory_replaced"),
             payload = getBytes("payload"),
             checksum = getBytes("payload_sha256"),
             createdAt = getTimestamp("created_at").toInstant(),

@@ -170,10 +170,31 @@ retention cannot rewind or duplicate a player's later inventory. A crash before
 that transaction commits leaves the active row and causes the same idempotent
 restore on the next join.
 
+The active row is an unclaimed recovery and appears in the player's `/duel`
+menu when no live match owns it. Applying and verifying the exact state, saving
+playerdata, and moving the row to the archive claims it. Players cannot replay
+claimed rows. `/duels admin recover <online-player>` first claims an active row,
+or explicitly replays the newest retained row when no active recovery remains.
+Retained replay must run on the snapshot's owning backend so its saved world and
+location can be resolved safely.
+
 When HuskSync is installed, ArcDuels also waits for its successful login-sync
 completion event for both participants before it asks the durable snapshot
 service to capture anything. A transfer or fresh login therefore cannot race
 duel inventory capture against network player-data application.
+
+Join-time recovery waits for the same HuskSync completion signal and then an
+additional configurable stabilization window before applying an unclaimed
+snapshot. This prevents a late network inventory load from replacing the
+restored state:
+
+```yaml
+recovery:
+  apply-delay-ticks: 40
+```
+
+The value is bounded to `0..1200` ticks. Recovery remains locked and unclaimed
+until application, exact verification, playerdata save, and archival succeed.
 
 Restored snapshots are retained for seven days by default and expired archive
 rows are purged in bounded batches once per hour. Both values are configurable:
@@ -224,11 +245,19 @@ hard-codes resource-pack numbers. Standard roles include `background`, `back`,
 - `/duel stats [network-online-player]`;
 - `/duel top` — open the global leaderboard.
 - `/duels admin status` — active arenas and FIFO waiters;
-- `/duels admin recover <online-player>` — retry an exact pending recovery.
+- `/duels admin recover <online-player>` — claim an exact pending recovery, or
+  replay the newest claimed snapshot as an administrator.
 
 Player commands require `arcduels.use`, granted by default. Administrative
 commands require `arcduels.admin`, granted to operators by default.
+`arcduels.bypass` lets trusted staff use otherwise blocked commands while their
+duel state is locked; it is granted to operators by default.
 
-During a match, chat/reply commands plus `/duel leave` and `/duel stats`
+During a match, chat/reply commands plus `/duel`, `/duel leave`, and `/duel stats`
 remain available. Other commands are blocked to prevent external
 teleport, inventory, and state plugins from breaking match isolation.
+
+When WorldGuard is installed, enabled arenas are sampled at load time and a
+warning names points covered by a PvP denial. ArcDuels cancels WorldGuard's
+denial event only when both players belong to the same active duel and remain
+inside that arena. Spawn protection and unrelated combat remain unchanged.

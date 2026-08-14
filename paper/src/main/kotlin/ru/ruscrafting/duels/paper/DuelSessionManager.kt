@@ -29,6 +29,8 @@ import ru.ruscrafting.duels.domain.MatchState
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ObjectiveFrame
 import ru.ruscrafting.duels.domain.ScoreRaceObjective
+import ru.ruscrafting.duels.domain.ServerId
+import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -43,6 +45,10 @@ class DuelSessionManager internal constructor(
     private val playerStates: DurablePlayerStateService,
     private val locales: LocaleService,
     private val countdownSeconds: Int,
+    private val remoteRecoveryTransfer: ((Player, ServerId) -> Unit)? = null,
+    private val playerDataReady: (Player) -> Boolean = { true },
+    private val recoveryApplyDelayTicks: Long = 40L,
+    private val playerDataSaver: (Player) -> Unit = Player::saveData,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
@@ -51,9 +57,15 @@ class DuelSessionManager internal constructor(
     private val objectiveTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val pendingStarts = ConcurrentHashMap<UUID, CompletableFuture<DuelMatch>>()
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
+    private val recoveryTokens = ConcurrentHashMap<UUID, UUID>()
+    private val restoringPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val internalTeleports = InternalTeleportAuthorizer()
     private val celebrationEffects = CelebrationEffects(plugin)
     private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
+
+    init {
+        require(recoveryApplyDelayTicks in 0L..1_200L) { "Recovery apply delay must be between 0 and 1200 ticks" }
+    }
 
     fun onCompleted(listener: (DuelMatch) -> Unit): AutoCloseable {
         completionListeners += listener
@@ -102,7 +114,14 @@ class DuelSessionManager internal constructor(
                     preparingPlayers += currentFirst.uniqueId
                     preparingPlayers += currentSecond.uniqueId
                     val durableWrite =
-                        runCatching { playerStates.storePair(reservedMatch.id, currentFirst, currentSecond) }
+                        runCatching {
+                            playerStates.storePair(
+                                reservedMatch.id,
+                                currentFirst,
+                                currentSecond,
+                                inventoryReplaced = reservedMatch.rules.mode == DuelMode.KIT,
+                            )
+                        }
                             .getOrElse { CompletableFuture.failedFuture(it) }
                     durableWrite.whenComplete { stored, storageFailure ->
                         runSync {
@@ -166,6 +185,9 @@ class DuelSessionManager internal constructor(
 
     fun activeArenaCount(): Int = arenas.reservedCount()
 
+    fun hasPendingRecovery(player: Player): Boolean =
+        matchFor(player) == null && !pendingStarts.containsKey(player.uniqueId) && playerStates.isPending(player.uniqueId)
+
     fun handleJoin(player: Player) {
         preparingPlayers += player.uniqueId
         discoverPendingState(player, notifyFailure = true)
@@ -199,29 +221,174 @@ class DuelSessionManager internal constructor(
                 }
                 if (!player.isOnline) return@runSync
                 if (!playerStates.isLocal(escrow)) {
-                    player.sendMessage(locales.component(player, "session.remote-recovery", LocaleService.text("server", escrow.serverId.value)))
+                    routeRemoteRecovery(player, escrow)
                     return@runSync
                 }
-                player.sendMessage(locales.component(player, "session.recovering"))
-                runCatching { playerStates.decode(escrow) }
-                    .onSuccess { restoreAndRetain(player, it) }
-                    .onFailure { failure ->
-                        plugin.logger.severe("Could not decode pending duel state for ${player.uniqueId}: ${failure.message}")
-                        player.sendMessage(locales.component(player, "session.recovery-failed"))
-                    }
+                schedulePendingRecovery(player, escrow)
             }
         }
     }
 
-    fun recover(player: Player): Boolean {
+    fun requestRecovery(player: Player): Boolean {
         if (matchFor(player) != null || pendingStarts.containsKey(player.uniqueId)) return false
         val escrow = playerStates.pending(player.uniqueId) ?: return false
         preparingPlayers += player.uniqueId
-        runCatching { playerStates.decode(escrow) }
-            .onSuccess { restoreAndRetain(player, it) }
-            .onFailure { failure ->
-                plugin.logger.severe("Manual duel recovery failed for ${player.uniqueId}: ${failure.message}")
+        if (!playerStates.isLocal(escrow)) {
+            routeRemoteRecovery(player, escrow)
+        } else {
+            schedulePendingRecovery(player, escrow)
+        }
+        return true
+    }
+
+    internal fun adminRecover(player: Player): CompletableFuture<AdminRecoveryResult> {
+        if (matchFor(player) != null || pendingStarts.containsKey(player.uniqueId)) {
+            return CompletableFuture.completedFuture(AdminRecoveryResult(AdminRecoveryStatus.BUSY))
+        }
+        val pending = playerStates.pending(player.uniqueId)
+        if (pending != null) {
+            requestRecovery(player)
+            return CompletableFuture.completedFuture(
+                AdminRecoveryResult(
+                    when {
+                        playerStates.isLocal(pending) -> AdminRecoveryStatus.STARTED
+                        remoteRecoveryTransfer != null -> AdminRecoveryStatus.TRANSFERRED
+                        else -> AdminRecoveryStatus.WRONG_SERVER
+                    },
+                    pending.serverId,
+                ),
+            )
+        }
+        val result = CompletableFuture<AdminRecoveryResult>()
+        playerStates.latestRetained(player.uniqueId).whenComplete { retained, failure ->
+            runSync {
+                if (failure != null) {
+                    result.completeExceptionally(unwrap(failure))
+                    return@runSync
+                }
+                if (retained == null) {
+                    result.complete(AdminRecoveryResult(AdminRecoveryStatus.NO_SNAPSHOT))
+                    return@runSync
+                }
+                if (!playerStates.isLocal(retained)) {
+                    result.complete(AdminRecoveryResult(AdminRecoveryStatus.WRONG_SERVER, retained.serverId))
+                    return@runSync
+                }
+                preparingPlayers += player.uniqueId
+                if (!scheduleRecoveryWindow(player) { replayRetained(player, retained, result) }) {
+                    result.complete(AdminRecoveryResult(AdminRecoveryStatus.BUSY))
+                }
             }
+        }
+        return result
+    }
+
+    private fun schedulePendingRecovery(
+        player: Player,
+        escrow: PlayerStateEscrow,
+    ) {
+        scheduleRecoveryWindow(player) {
+            if (playerStates.pending(player.uniqueId) != escrow) {
+                preparingPlayers -= player.uniqueId
+                return@scheduleRecoveryWindow
+            }
+            if (escrow.inventoryReplaced) player.sendMessage(locales.component(player, "session.recovering"))
+            runCatching { playerStates.decode(escrow) }
+                .onSuccess { stored ->
+                    if (restoreAndRetain(player, stored)) {
+                        markRestored(escrow.matchId, player.uniqueId)
+                    } else {
+                        retryPendingRecovery(player, escrow)
+                    }
+                }
+                .onFailure { failure ->
+                    plugin.logger.severe("Could not decode pending duel state for ${player.uniqueId}: ${failure.message}")
+                    if (escrow.inventoryReplaced) player.sendMessage(locales.component(player, "session.recovery-failed"))
+                    retryPendingRecovery(player, escrow)
+                }
+        }
+    }
+
+    private fun scheduleRecoveryWindow(
+        player: Player,
+        action: () -> Unit,
+    ): Boolean {
+        val token = UUID.randomUUID()
+        if (recoveryTokens.putIfAbsent(player.uniqueId, token) != null) return false
+        awaitPlayerData(player, token, action)
+        return true
+    }
+
+    private fun awaitPlayerData(
+        player: Player,
+        token: UUID,
+        action: () -> Unit,
+    ) {
+        if (!player.isOnline || recoveryTokens[player.uniqueId] != token) {
+            recoveryTokens.remove(player.uniqueId, token)
+            return
+        }
+        if (!playerDataReady(player)) {
+            plugin.server.scheduler.runTaskLater(plugin, Runnable { awaitPlayerData(player, token, action) }, RECOVERY_READY_POLL_TICKS)
+            return
+        }
+        plugin.server.scheduler.runTaskLater(
+            plugin,
+            Runnable {
+                if (!player.isOnline || !recoveryTokens.remove(player.uniqueId, token)) return@Runnable
+                action()
+            },
+            recoveryApplyDelayTicks,
+        )
+    }
+
+    private fun retryPendingRecovery(
+        player: Player,
+        escrow: PlayerStateEscrow,
+    ) {
+        plugin.server.scheduler.runTaskLater(
+            plugin,
+            Runnable {
+                if (player.isOnline && playerStates.pending(player.uniqueId) == escrow) {
+                    schedulePendingRecovery(player, escrow)
+                }
+            },
+            RECOVERY_RETRY_TICKS,
+        )
+    }
+
+    private fun replayRetained(
+        player: Player,
+        escrow: PlayerStateEscrow,
+        result: CompletableFuture<AdminRecoveryResult>,
+    ) {
+        val replayed =
+            runCatching {
+                val stored = playerStates.decode(escrow)
+                stored.snapshot.restore(player, ::teleportInternally)
+                playerDataSaver(player)
+            }
+        preparingPlayers -= player.uniqueId
+        replayed.onSuccess {
+            if (escrow.inventoryReplaced) player.sendMessage(locales.component(player, "session.admin-restored"))
+            result.complete(AdminRecoveryResult(AdminRecoveryStatus.REPLAYED, escrow.serverId))
+        }.onFailure { failure ->
+            plugin.logger.severe("Administrator replay failed for ${player.uniqueId}: ${failure.message}")
+            result.completeExceptionally(failure)
+        }
+    }
+
+    private fun routeRemoteRecovery(
+        player: Player,
+        escrow: PlayerStateEscrow,
+    ): Boolean {
+        val transfer = remoteRecoveryTransfer
+        if (transfer == null) {
+            player.sendMessage(locales.component(player, "session.remote-recovery-unavailable", LocaleService.text("server", escrow.serverId.value)))
+            return false
+        }
+        player.sendMessage(locales.component(player, "session.remote-recovery", LocaleService.text("server", escrow.serverId.value)))
+        transfer(player, escrow.serverId)
         return true
     }
 
@@ -277,6 +444,7 @@ class DuelSessionManager internal constructor(
     }
 
     fun handleQuit(player: Player) {
+        recoveryTokens.remove(player.uniqueId)
         pendingStarts[player.uniqueId]?.cancel(false)
         val match = matchFor(player)
         if (match == null) {
@@ -287,7 +455,9 @@ class DuelSessionManager internal constructor(
             runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
             return
         }
-        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { restoreAndRetain(player, it) }
+        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { stored ->
+            if (restoreAndRetain(player, stored)) markRestored(match.id, player.uniqueId)
+        }
         if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
             coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.DISCONNECT)
                 .whenComplete { completed, failure ->
@@ -371,6 +541,8 @@ class DuelSessionManager internal constructor(
         }
         sessions.clear()
         sessionByPlayer.clear()
+        recoveryTokens.clear()
+        restoringPlayers.clear()
         preparingPlayers.clear()
     }
 
@@ -723,38 +895,57 @@ class DuelSessionManager internal constructor(
     private fun restore(session: PaperSession): Boolean {
         var restored = true
         session.snapshots.forEach { (uuid, snapshot) ->
-            plugin.server.getPlayer(uuid)?.let { player ->
-                if (!restoreAndRetain(player, snapshot)) restored = false
+            if (uuid !in session.restoredPlayers) {
+                val player = plugin.server.getPlayer(uuid)
+                if (player == null || !restoreAndRetain(player, snapshot)) {
+                    restored = false
+                } else {
+                    session.restoredPlayers += uuid
+                }
             }
         }
-        return restored
+        return restored && session.restoredPlayers.containsAll(session.snapshots.keys)
+    }
+
+    private fun markRestored(
+        matchId: MatchId,
+        playerId: UUID,
+    ) {
+        val session = sessions[matchId] ?: return
+        session.restoredPlayers += playerId
+        coordinator.find(matchId)?.takeIf { it.state == MatchState.COMPLETED }?.let(::finish)
     }
 
     private fun restoreAndRetain(
         player: Player,
         stored: StoredPlayerSnapshot,
     ): Boolean {
+        if (!restoringPlayers.add(player.uniqueId)) return true
         val restored = runCatching {
             stored.snapshot.restore(player, ::teleportInternally)
-            player.saveData()
+            playerDataSaver(player)
         }
             .onFailure { failure ->
                 plugin.logger.severe("Could not fully restore duel player ${player.uniqueId}: ${failure.javaClass.simpleName}: ${failure.message}")
             }
             .isSuccess
-        if (!restored) return false
+        if (!restored) {
+            restoringPlayers -= player.uniqueId
+            return false
+        }
         playerStates.retain(stored).whenComplete { _, failure ->
             runSync {
                 if (failure == null) {
                     preparingPlayers -= player.uniqueId
-                    if (player.isOnline) {
+                    restoringPlayers -= player.uniqueId
+                    if (player.isOnline && stored.escrow.inventoryReplaced) {
                         player.sendActionBar(locales.component(player, "session.restored"))
                     }
                 } else {
                     plugin.logger.severe(
                         "Could not archive restored duel state for ${player.uniqueId}; the active snapshot remains retryable: ${unwrap(failure).message}",
                     )
-                    if (player.isOnline) {
+                    if (player.isOnline && stored.escrow.inventoryReplaced) {
                         player.sendMessage(locales.component(player, "session.ack-retry"))
                     }
                     plugin.server.scheduler.runTaskLater(
@@ -776,6 +967,7 @@ class DuelSessionManager internal constructor(
             runSync {
                 if (failure == null) {
                     preparingPlayers -= player.uniqueId
+                    restoringPlayers -= player.uniqueId
                 } else if (plugin.isEnabled) {
                     plugin.logger.severe("Player state archival retry failed for ${player.uniqueId}: ${unwrap(failure).message}")
                     if (player.isOnline) {
@@ -784,6 +976,8 @@ class DuelSessionManager internal constructor(
                             Runnable { retryRetention(player, stored) },
                             RECOVERY_RETRY_TICKS,
                         )
+                    } else {
+                        restoringPlayers -= player.uniqueId
                     }
                 }
             }
@@ -814,6 +1008,7 @@ class DuelSessionManager internal constructor(
     private data class PaperSession(
         val matchId: MatchId,
         val snapshots: Map<UUID, StoredPlayerSnapshot>,
+        val restoredPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val hillCapture: HillCaptureTracker = HillCaptureTracker(),
         val hitRace: HitRaceTracker = HitRaceTracker(),
         var roundElapsedTicks: Long = 0L,
@@ -827,5 +1022,20 @@ class DuelSessionManager internal constructor(
         const val OBJECTIVE_PERIOD_TICKS = 10L
         const val HILL_PARTICLES = 16
         const val RECOVERY_RETRY_TICKS = 60L
+        const val RECOVERY_READY_POLL_TICKS = 5L
     }
 }
+
+internal enum class AdminRecoveryStatus {
+    STARTED,
+    TRANSFERRED,
+    REPLAYED,
+    NO_SNAPSHOT,
+    BUSY,
+    WRONG_SERVER,
+}
+
+internal data class AdminRecoveryResult(
+    val status: AdminRecoveryStatus,
+    val server: ServerId? = null,
+)

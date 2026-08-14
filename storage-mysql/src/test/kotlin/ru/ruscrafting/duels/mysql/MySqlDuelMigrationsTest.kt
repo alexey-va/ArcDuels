@@ -13,8 +13,9 @@ class MySqlDuelMigrationsTest : StringSpec({
         val escrow = migrations[2]
         val objective = migrations[3]
         val archive = migrations[4]
+        val inventoryMode = migrations[5]
 
-        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5)
+        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5, 6)
         initial.statements shouldHaveSize 4
         initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
         initial.statements[2] shouldContain "INSERT IGNORE"
@@ -34,5 +35,9 @@ class MySqlDuelMigrationsTest : StringSpec({
         archive.statements.single() shouldContain "`restored_at` DATETIME(3) NOT NULL"
         archive.statements.single() shouldContain "`purge_after` DATETIME(3) NOT NULL"
         archive.statements.single() shouldContain "PRIMARY KEY (`player_id`, `match_id`)"
+        inventoryMode.statements shouldHaveSize 8
+        inventoryMode.statements[0] shouldContain "`arcduels_player_state_escrow`"
+        inventoryMode.statements[0] shouldContain "ADD COLUMN `inventory_replaced`"
+        inventoryMode.statements[4] shouldContain "`arcduels_player_state_archive`"
     }
 })

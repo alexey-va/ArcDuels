@@ -10,6 +10,7 @@ dependencyResolutionManagement {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/")
         maven("https://repo.william278.net/releases")
+        maven("https://maven.enginehub.org/repo/")
     }
 }
 

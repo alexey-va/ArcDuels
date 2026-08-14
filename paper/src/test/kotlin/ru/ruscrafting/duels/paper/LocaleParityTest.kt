@@ -27,14 +27,14 @@ class LocaleParityTest : StringSpec({
         }
     }
 
-    "inventory GUI copy stays calm without gradients italic tags or shouting" {
+    "all player-facing copy stays calm without gradients emphasis tags or shouting" {
         for (language in listOf("ru", "en")) {
-            val guiLeaves = leaves(loadBundle(language)).filterKeys { key -> key.startsWith("menu.") || key.startsWith("objective.") || key.startsWith("kit.") }
-            for ((key, values) in guiLeaves) {
+            for ((key, values) in leaves(loadBundle(language))) {
                 values.forEach { value ->
                     withClue("$language:$key") {
                         ("<gradient" in value) shouldBe false
                         ("<italic" in value) shouldBe false
+                        ("<bold" in value) shouldBe false
                         Regex("\\b[\\p{Lu}]{4,}\\b").containsMatchIn(value.replace(Regex("<[^>]+>"), " ")) shouldBe false
                     }
                 }
@@ -53,6 +53,19 @@ class LocaleParityTest : StringSpec({
                 }
             }
         }
+    }
+
+    "fallback kit names use the same calm style" {
+        val stream = requireNotNull(LocaleParityTest::class.java.getResourceAsStream("/config.yml"))
+        val configuration = stream.use { YamlConfiguration.loadConfiguration(InputStreamReader(it, Charsets.UTF_8)) }
+        configuration.getKeys(true)
+            .filter { it.startsWith("kits.") && it.endsWith(".display-name") }
+            .mapNotNull(configuration::getString)
+            .forEach { value ->
+                ("<gradient" in value) shouldBe false
+                ("<italic" in value) shouldBe false
+                ("<bold" in value) shouldBe false
+            }
     }
 })
 

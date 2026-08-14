@@ -265,11 +265,36 @@ internal class DuelAdminCommand(
             sender.sendMessage(message(sender, "admin.player-offline"))
             return
         }
-        if (sessions.recover(player)) {
-            sender.sendMessage(message(sender, "admin.recovery-started", LocaleService.text("player", player.name)))
-        } else {
-            sender.sendMessage(message(sender, "admin.no-snapshot", LocaleService.text("player", player.name)))
+        sessions.adminRecover(player).whenComplete { result, failure ->
+            runSync {
+                if (failure != null) {
+                    sender.sendMessage(message(sender, "admin.recovery-failed", LocaleService.text("player", player.name)))
+                    return@runSync
+                }
+                val key =
+                    when (requireNotNull(result).status) {
+                        AdminRecoveryStatus.STARTED -> "admin.recovery-started"
+                        AdminRecoveryStatus.TRANSFERRED -> "admin.recovery-transferred"
+                        AdminRecoveryStatus.REPLAYED -> "admin.recovery-replayed"
+                        AdminRecoveryStatus.NO_SNAPSHOT -> "admin.no-snapshot"
+                        AdminRecoveryStatus.BUSY -> "admin.recovery-busy"
+                        AdminRecoveryStatus.WRONG_SERVER -> "admin.recovery-wrong-server"
+                    }
+                sender.sendMessage(
+                    message(
+                        sender,
+                        key,
+                        LocaleService.text("player", player.name),
+                        LocaleService.text("server", result.server?.value ?: "—"),
+                    ),
+                )
+            }
         }
+    }
+
+    private fun runSync(block: () -> Unit) {
+        if (!plugin.isEnabled) return
+        if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable(block))
     }
 
     private fun disableWhileEditing(

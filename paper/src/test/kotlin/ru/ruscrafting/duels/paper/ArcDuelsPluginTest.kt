@@ -40,6 +40,7 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.isEnabled shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
         plugin.config.getInt("countdown-seconds") shouldBe 0
+        plugin.config.getLong("recovery.apply-delay-ticks") shouldBe 40L
         plugin.getCommand("duel")?.executor?.javaClass shouldBe DuelCommand::class.java
         KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "boxing", "classic", "sumo", "tank", "uhc")
         java.io.File(plugin.dataFolder, "lang/ru.yml").isFile shouldBe true
@@ -96,6 +97,7 @@ class ArcDuelsPluginTest : StringSpec({
         player.gameMode = GameMode.CREATIVE
         player.allowFlight = true
         player.isFlying = true
+        player.health = 18.0
         player.velocity = Vector(0.2, 0.3, -0.1)
         val snapshot = PlayerSnapshot.capture(player)
 
@@ -109,7 +111,12 @@ class ArcDuelsPluginTest : StringSpec({
         player.allowFlight = false
         player.teleport(Location(world, 0.0, 64.0, 0.0))
 
-        snapshot.restore(player) { restored, destination -> restored.teleport(destination) }
+        snapshot.restore(player) { restored, destination ->
+            val teleported = restored.teleport(destination)
+            // Mirrors destination plugins that normalize health during teleport.
+            restored.health = 1.0
+            teleported
+        }
 
         player.inventory.getItem(0)?.type shouldBe Material.DIAMOND_SWORD
         player.itemOnCursor.type shouldBe Material.GOLD_INGOT
@@ -120,6 +127,7 @@ class ArcDuelsPluginTest : StringSpec({
         player.exp shouldBe 0.4f
         player.gameMode shouldBe GameMode.CREATIVE
         player.isFlying shouldBe true
+        player.health shouldBe 18.0
         player.location.x shouldBe savedLocation.x
         player.location.z shouldBe savedLocation.z
         player.velocity shouldBe Vector(0.2, 0.3, -0.1)
@@ -162,6 +170,17 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.set("arenas.example.bounds.min.x", 20.0)
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
         plugin.config.set("arenas.example.bounds.min.x", -15.0)
+        plugin.config.set("arenas.example.enabled", false)
+    }
+
+    "arena loading runs the environment inspector for every enabled arena" {
+        plugin.config.set("arenas.example.enabled", true)
+        var inspected: PaperArena? = null
+
+        val catalog = PaperArenaCatalog.load(plugin, ArenaEnvironmentInspector { inspected = it })
+
+        catalog.size() shouldBe 1
+        inspected?.id?.value shouldBe "example"
         plugin.config.set("arenas.example.enabled", false)
     }
 

@@ -7,6 +7,7 @@ internal class DuelCommandPolicy {
         val root = parts.first().substringAfter(':').lowercase()
         if (root in CHAT_COMMANDS) return true
         if (root !in DUEL_COMMANDS) return false
+        if (parts.size == 1) return true
         return parts.getOrNull(1)?.lowercase() in SAFE_DUEL_SUBCOMMANDS
     }
 

@@ -1,10 +1,10 @@
-prefix: '<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>DUELS</bold></gradient><dark_gray>]</dark_gray> '
+prefix: '<dark_gray>[</dark_gray><gold>Duels</gold><dark_gray>]</dark_gray> '
 
 menu:
   common:
-    back: '<gold><bold>Back</bold></gold>'
-    previous: '<gold><bold>Previous page</bold></gold>'
-    next: '<gold><bold>Next page</bold></gold>'
+    back: '<gold>Back</gold>'
+    previous: '<gold>Previous page</gold>'
+    next: '<gold>Next page</gold>'
     page: '<gray>Page <yellow><page></yellow> of <yellow><pages></yellow></gray>'
     enabled: '<green>Enabled</green>'
     disabled: '<red>Disabled</red>'
@@ -13,21 +13,23 @@ menu:
     missing: '<red>Missing</red>'
   main:
     title: '<dark_gray>Duels</dark_gray>'
-    challenge: '<gold><bold>Challenge a player</bold></gold>'
+    challenge: '<gold>Challenge a player</gold>'
     challenge-lore: ['<dark_gray>✖</dark_gray> <white>Choose an opponent, objective,</white>', '   <white>loadout, and match rules.</white>', '', '<aqua>Left click</aqua> <gray>Start configuring</gray>']
-    queue: '<gold><bold>Arenas and queue</bold></gold>'
+    queue: '<gold>Arenas and queue</gold>'
     queue-lore: ['<gray>Busy arenas:</gray> <yellow><active></yellow>', '<gray>Waiting pairs:</gray> <yellow><waiting></yellow>', '', '<aqua>Left click</aqua> <gray>Open status</gray>']
-    leaderboard: '<gold><bold>Leaderboard</bold></gold>'
+    leaderboard: '<gold>Leaderboard</gold>'
     leaderboard-lore: ['<dark_gray>✖</dark_gray> <white>Network-wide player ranking</white>', '   <white>across all servers.</white>', '', '<aqua>Left click</aqua> <gray>Open leaderboard</gray>']
-    modes: '<gold><bold>Game modes</bold></gold>'
+    modes: '<gold>Game modes</gold>'
     modes-lore: ['<dark_gray>✖</dark_gray> <white>Classic, king of the hill, sumo,</white>', '   <white>boxing, and combo.</white>', '', '<aqua>Left click</aqua> <gray>Browse modes</gray>']
-    kits: '<gold><bold>Loadout kits</bold></gold>'
+    kits: '<gold>Loadout kits</gold>'
     kits-lore: ['<dark_gray>✖</dark_gray> <white>Ready-made equipment for a match.</white>', '', '<aqua>Left click</aqua> <gray>Browse kits</gray>']
-    stats: '<gold><bold>My statistics</bold></gold>'
+    stats: '<gold>My statistics</gold>'
     stats-lore: ['<dark_gray>✖</dark_gray> <white>Rating, wins, and streaks.</white>', '', '<aqua>Left click</aqua> <gray>View statistics</gray>']
-    help: '<gold><bold>How duels work</bold></gold>'
+    help: '<gold>How duels work</gold>'
     help-lore: ['<dark_gray>✖</dark_gray> <white>Rules and inventory protection.</white>', '', '<aqua>Left click</aqua> <gray>Open help</gray>']
-    admin: '<gold><bold>Manage duels</bold></gold>'
+    recovery: '<gold>Retrieve your items</gold>'
+    recovery-lore: ['<gray>An unfinished recovery is available.</gray>', '<gray>It will be applied after player data</gray>', '<gray>has finished loading.</gray>', '', '<aqua>Left click</aqua> <gray>Start recovery</gray>']
+    admin: '<gold>Manage duels</gold>'
     admin-lore: ['<dark_gray>✖</dark_gray> <white>Arenas, locations, bounds,</white>', '   <white>and player recovery.</white>', '', '<aqua>Left click</aqua> <gray>Open admin menu</gray>']
   targets:
     title: '<dark_gray>Opponent · <page>/<pages></dark_gray>'
@@ -38,31 +40,31 @@ menu:
     title: '<dark_gray>Objective · <player></dark_gray>'
   loadouts:
     title: '<dark_gray>Loadout</dark_gray>'
-    own: '<gold><bold>Own inventory</bold></gold>'
+    own: '<gold>Own inventory</gold>'
     own-lore: ['<dark_gray>✖</dark_gray> <white>Each player uses their own items.</white>', '<gray>Your state is protected before teleport</gray>', '<gray>and restored after the match.</gray>', '', '<aqua>Left click</aqua> <gray>Select</gray>']
     controlled-missing: '<red>The required <kit> kit is not configured</red>'
     kit-hint: ['', '<aqua>Left click</aqua> <gray>Select this kit</gray>']
   rules:
     title: '<dark_gray>Rules · <player></dark_gray>'
-    ranked: '<gold><bold>Ranked match</bold></gold>'
+    ranked: '<gold>Ranked match</gold>'
     ranked-lore: ['<gray>State:</gray> <state>', '<gray>Available only with an identical kit.</gray>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
-    best-of: '<gold><bold>Format: BO<value></bold></gold>'
+    best-of: '<gold>Format: BO<value></gold>'
     best-of-lore: ['<gray>First to one, two, or three round wins.</gray>', '', '<aqua>Left click</aqua> <gray>BO1 → BO3 → BO5</gray>']
-    sudden-death: '<gold><bold>Sudden death: <seconds>s</bold></gold>'
+    sudden-death: '<gold>Sudden death: <seconds>s</gold>'
     sudden-death-lore: ['<gray>Both players receive Wither after the timer.</gray>', '', '<aqua>Left click</aqua> <gray>Change the timer</gray>']
-    projectiles: '<gold><bold>Projectiles</bold></gold>'
+    projectiles: '<gold>Projectiles</gold>'
     projectiles-lore: ['<gray>State:</gray> <state>', '<gray>Bows, crossbows, and tridents.</gray>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
-    consumables: '<gold><bold>Consumables</bold></gold>'
+    consumables: '<gold>Consumables</gold>'
     consumables-lore: ['<gray>State:</gray> <state>', '<gray>Food, potions, and golden apples.</gray>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
-    pearls: '<gold><bold>Ender pearls</bold></gold>'
+    pearls: '<gold>Ender pearls</gold>'
     pearls-lore: ['<gray>State:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
-    regeneration: '<gold><bold>Natural regeneration</bold></gold>'
+    regeneration: '<gold>Natural regeneration</gold>'
     regeneration-lore: ['<gray>State:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
-    capture: '<gold><bold>Hill capture: <seconds>s</bold></gold>'
+    capture: '<gold>Hill capture: <seconds>s</gold>'
     capture-lore: ['<gray>Required uncontested hold time.</gray>', '<gray>Progress pauses while contested.</gray>', '', '<aqua>Left click</aqua> <gray>Change the timer</gray>']
-    hit-target: '<gold><bold>Target: <hits> hits</bold></gold>'
+    hit-target: '<gold>Target: <hits> hits</gold>'
     hit-target-lore: ['<gray>The round ends when a player is first</gray>', '<gray>to reach the selected hit target.</gray>', '', '<aqua>Left click</aqua> <gray>Change target</gray>']
-    confirm: '<green><bold>Send challenge</bold></green>'
+    confirm: '<green>Send challenge</green>'
     confirm-lore: ['<dark_gray>✖</dark_gray> <white>All match options are ready.</white>', '', '<aqua>Left click</aqua> <gray>Confirm</gray>']
   leaderboard:
     loading: '<gray>Loading the global leaderboard…</gray>'
@@ -76,21 +78,21 @@ menu:
     title: '<dark_gray>Loadout kits</dark_gray>'
   queue:
     title: '<dark_gray>Arenas and queue</dark_gray>'
-    active: '<gold><bold>Busy arenas: <active></bold></gold>'
+    active: '<gold>Busy arenas: <active></gold>'
     active-lore: ['<gray>Number of arenas currently reserved.</gray>']
-    waiting: '<gold><bold>Waiting pairs: <waiting></bold></gold>'
+    waiting: '<gold>Waiting pairs: <waiting></gold>'
     waiting-lore: ['<gray>Pairs receive compatible arenas in queue order.</gray>']
   admin:
     title: '<dark_gray>Manage duels</dark_gray>'
-    arenas: '<gold><bold>Arenas</bold></gold>'
+    arenas: '<gold>Arenas</gold>'
     arenas-lore: ['<gray>Created:</gray> <yellow><arenas></yellow>', '', '<aqua>Left click</aqua> <gray>Open arena list</gray>']
-    status: '<gold><bold>Status</bold></gold>'
+    status: '<gold>Status</gold>'
     status-lore: ['<gray>Enabled arenas:</gray> <yellow><arenas></yellow>', '<gray>Active matches:</gray> <yellow><active></yellow>', '<gray>Waiting pairs:</gray> <yellow><waiting></yellow>']
-    recovery: '<gold><bold>Player recovery</bold></gold>'
+    recovery: '<gold>Player recovery</gold>'
     recovery-lore: ['<gray>Online players:</gray> <yellow><players></yellow>', '<gray>Check for a retained snapshot</gray>', '<gray>and restore the player safely.</gray>', '', '<aqua>Left click</aqua> <gray>Choose a player</gray>']
-    create: '<gold><bold>Create arena</bold></gold>'
+    create: '<gold>Create arena</gold>'
     create-lore: ['<dark_gray>✖</dark_gray> <white>Enter the arena id in chat.</white>', '', '<aqua>Left click</aqua> <gray>Start creation</gray>']
-    reload: '<gold><bold>Reload configuration</bold></gold>'
+    reload: '<gold>Reload configuration</gold>'
     reload-lore: ['<dark_gray>✖</dark_gray> <white>Validate and apply every arena.</white>', '', '<aqua>Left click</aqua> <gray>Reload</gray>']
     create-prompt: '<gray>Type the new arena id in chat.</gray> <yellow>Use letters, numbers, _ or -.</yellow> <gray>Type</gray> <white>cancel</white> <gray>to stop.</gray>'
     create-cancelled: '<gray>Arena creation cancelled.</gray>'
@@ -99,29 +101,29 @@ menu:
     title: '<dark_gray>Arenas · <page>/<pages></dark_gray>'
     entry: '<gold><arena></gold>'
     entry-lore: ['<gray>State:</gray> <state>', '<gray>Spawn 1:</gray> <spawn1>  <gray>Spawn 2:</gray> <spawn2>', '<gray>Corner 1:</gray> <corner1>  <gray>Corner 2:</gray> <corner2>', '<gray>Hill:</gray> <hill>', '', '<aqua>Left click</aqua> <gray>Open editor</gray>']
-    empty: '<gold><bold>No arenas created</bold></gold>'
+    empty: '<gold>No arenas created</gold>'
     empty-lore: ['<gray>Go back and create the first arena.</gray>']
   admin-arena:
     title: '<dark_gray>Arena · <arena></dark_gray>'
-    overview: '<gold><bold><arena></bold></gold>'
+    overview: '<gold><arena></gold>'
     overview-lore: ['<gray>State:</gray> <state>', '<gray>Changing any point disables the arena</gray>', '<gray>until it passes validation again.</gray>']
-    spawn1: '<gold><bold>Spawn point 1</bold></gold>'
-    spawn2: '<gold><bold>Spawn point 2</bold></gold>'
-    corner1: '<gold><bold>Bounds corner 1</bold></gold>'
-    corner2: '<gold><bold>Bounds corner 2</bold></gold>'
+    spawn1: '<gold>Spawn point 1</gold>'
+    spawn2: '<gold>Spawn point 2</gold>'
+    corner1: '<gold>Bounds corner 1</gold>'
+    corner2: '<gold>Bounds corner 2</gold>'
     point-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '', '<aqua>Left click</aqua> <gray>Save current position</gray>']
-    hill: '<gold><bold>Hill objective</bold></gold>'
+    hill: '<gold>Hill objective</gold>'
     hill-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '<gray>Radius 3.5, height 3 blocks.</gray>', '', '<aqua>Left click</aqua> <gray>Save current position</gray>']
-    loadouts: '<gold><bold>Arena loadouts</bold></gold>'
+    loadouts: '<gold>Arena loadouts</gold>'
     loadouts-lore: ['<gray>Allowed:</gray> <loadout>', '', '<aqua>Left click</aqua> <gray>Cycle policy</gray>']
     loadouts-all: '<white>own inventory and kits</white>'
     loadouts-own_inventory: '<white>own inventory only</white>'
     loadouts-kit: '<white>kits only</white>'
-    objectives: '<gold><bold>Combat modes</bold></gold>'
+    objectives: '<gold>Combat modes</gold>'
     objectives-lore: ['<gray>Allow only modes that fit this</gray>', '<gray>arena’s geometry and purpose.</gray>', '', '<aqua>Left click</aqua> <gray>Configure modes</gray>']
-    enable: '<green><bold>Validate and enable</bold></green>'
+    enable: '<green>Validate and enable</green>'
     enable-lore: ['<gray>Validate the world, points, bounds, hill,</gray>', '<gray>and separation from every other arena.</gray>', '', '<aqua>Left click</aqua> <gray>Enable arena</gray>']
-    disable: '<red><bold>Disable arena</bold></red>'
+    disable: '<red>Disable arena</red>'
     disable-lore: ['<gray>New matches will no longer use this arena.</gray>', '', '<aqua>Left click</aqua> <gray>Disable</gray>']
   admin-objectives:
     title: '<dark_gray>Modes · <arena></dark_gray>'
@@ -135,42 +137,42 @@ menu:
 
 objective:
   elimination:
-    name: '<gold><bold>Elimination</bold></gold>'
+    name: '<gold>Elimination</gold>'
     description: ['<gray>Defeat your opponent in direct combat.</gray>', '<gray>Leaving arena bounds is a loss.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
   koth:
-    name: '<gold><bold>King of the hill</bold></gold>'
+    name: '<gold>King of the hill</gold>'
     description: ['<gray>Hold the marked arena objective.</gray>', '<gray>Capture pauses while both players contest it.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
   sumo:
-    name: '<gold><bold>Sumo</bold></gold>'
+    name: '<gold>Sumo</gold>'
     description: ['<gray>Damage is disabled: knock your opponent</gray>', '<gray>outside the safe arena bounds.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
   boxing:
-    name: '<gold><bold>Boxing</bold></gold>'
+    name: '<gold>Boxing</gold>'
     description: ['<gray>Be first to land the selected number of hits.</gray>', '<gray>Damage is disabled and only direct</gray>', '<gray>melee hits count.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
   combo:
-    name: '<gold><bold>Combo</bold></gold>'
+    name: '<gold>Combo</gold>'
     description: ['<gray>Build an unanswered hit streak.</gray>', '<gray>An opponent’s return hit resets</gray>', '<gray>your current streak.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
 
 kit:
   classic:
-    name: '<gold><bold>Classic</bold></gold>'
+    name: '<gold>Classic</gold>'
     description: ['<gray>Diamond sword, bow, armor, and apples.</gray>']
   axe:
-    name: '<gold><bold>Axe and shield</bold></gold>'
+    name: '<gold>Axe and shield</gold>'
     description: ['<gray>Tactical axe combat against a shield.</gray>']
   archer:
-    name: '<gold><bold>Archer</bold></gold>'
+    name: '<gold>Archer</gold>'
     description: ['<gray>Ranged combat with limited arrows.</gray>']
   uhc:
-    name: '<gold><bold>UHC</bold></gold>'
+    name: '<gold>UHC</gold>'
     description: ['<gray>Strong equipment without natural regeneration.</gray>']
   tank:
-    name: '<gold><bold>Tank</bold></gold>'
+    name: '<gold>Tank</gold>'
     description: ['<gray>Heavy armor, shield, and prolonged melee.</gray>']
   sumo:
-    name: '<gold><bold>Sumo</bold></gold>'
+    name: '<gold>Sumo</gold>'
     description: ['<gray>Empty hands and perfectly equal conditions.</gray>']
   boxing:
-    name: '<gold><bold>Boxing</bold></gold>'
+    name: '<gold>Boxing</gold>'
     description: ['<gray>Equal light equipment for hit-race modes.</gray>']
 
 error:
@@ -198,8 +200,8 @@ controller:
   not-fighting: '<red>You are not in an active duel.</red>'
   stats-failed: '<red>Could not load statistics.</red>'
   stats: |-
-    <dark_gray>────────</dark_gray> <gradient:#55ffff:#5555ff><bold><player></bold></gradient> <dark_gray>────────</dark_gray>
-    <gray>Rating:</gray> <aqua><bold><rating></bold></aqua>
+    <dark_gray>────────</dark_gray> <gold><player></gold> <dark_gray>────────</dark_gray>
+    <gray>Rating:</gray> <aqua><rating></aqua>
     <gray>Wins:</gray> <green><wins></green>  <gray>Losses:</gray> <red><losses></red>
     <gray>Win rate:</gray> <yellow><winrate>%</yellow>
     <gray>Streak:</gray> <gold><streak></gold>  <gray>Best:</gray> <gold><best></gold>
@@ -217,18 +219,20 @@ controller:
     <gray>Pearls:</gray> <pearls> <dark_gray>•</dark_gray> <gray>Regeneration:</gray> <regeneration>
   hit-race-summary: '<gray>Target:</gray> <white><hits> hits</white> <dark_gray>•</dark_gray> <gray>Damage is disabled and direct melee hits count.</gray>'
 
-  accept: '<newline><green><bold>[ACCEPT]</bold></green>'
+  accept: '<newline><green>[Accept]</green>'
   accept-hover: '<green>Start the duel</green>'
-  deny: ' <red><bold>[DECLINE]</bold></red>'
+  deny: ' <red>[Decline]</red>'
   deny-hover: '<red>Decline the challenge</red>'
 
 session:
   queued: '<yellow>All compatible arenas are busy. Your pair is queue position <white>#<position></white>.</yellow>'
   recovery-check-retry: '<red>The recovery check is temporarily unavailable.</red> <yellow>Your state is locked safely; ArcDuels will retry automatically.</yellow>'
-  remote-recovery: '<red>You have an unfinished ArcDuels recovery on server <white><server></white>.</red> <yellow>Return there or contact an administrator; a protected copy remains available.</yellow>'
+  remote-recovery: '<gray>Your unfinished recovery belongs to server <white><server></white>. Moving you there…</gray>'
+  remote-recovery-unavailable: '<yellow>Recovery is available on server <white><server></white>, but automatic transfer is currently unavailable.</yellow>'
+  recovery-requested: '<gray>Recovery is prepared. Wait for player data to finish loading.</gray>'
   recovering: '<yellow>Restoring your saved state from an unfinished duel…</yellow>'
   recovery-failed: '<red>State recovery failed. Contact an administrator; a protected copy of your inventory remains available.</red>'
-  fight-title: '<red><bold>FIGHT!</bold></red>'
+  fight-title: '<red>Fight!</red>'
   fight-subtitle: '<gray>Good luck — you may need it</gray>'
   hill-contested: '<yellow>Hill contested</yellow>'
   hill-capturing: '<green>Capturing</green>'
@@ -236,19 +240,20 @@ session:
   hill-enemy: '<red>Opponent is capturing</red>'
   hill-progress: '<state> <dark_gray>•</dark_gray> <aqua><percent>%</aqua>'
   hit-progress: '<gray>You:</gray> <aqua><score></aqua><dark_gray>/</dark_gray><white><target></white> <dark_gray>•</dark_gray> <gray>Opponent:</gray> <red><opponent></red>'
-  sudden-death: '<red><bold>SUDDEN DEATH!</bold></red> <gray>Both players now lose health continuously.</gray>'
-  round-win: '<green><bold>ROUND WON</bold></green>'
-  round-loss: '<red><bold>ROUND LOST</bold></red>'
-  match-win: '<gradient:#55ff55:#00aa00><bold>VICTORY</bold></gradient>'
-  match-loss: '<gradient:#ff5555:#aa0000><bold>DEFEAT</bold></gradient>'
+  sudden-death: '<red>Sudden death</red> <gray>Both players now lose health continuously.</gray>'
+  round-win: '<green>Round won</green>'
+  round-loss: '<red>Round lost</red>'
+  match-win: '<green>Victory</green>'
+  match-loss: '<red>Defeat</red>'
   persistence-retry: '<red>Could not save the result. Retrying in 3 seconds…</red>'
   restored: '<green>Your inventory and state were safely restored.</green>'
+  admin-restored: '<green>An administrator replayed your retained inventory snapshot.</green>'
   ack-retry: '<yellow>Your state is restored, but the final safety check will retry. Do not leave the server.</yellow>'
   score: '<gray>Score:</gray> <aqua><first></aqua> <dark_gray>—</dark_gray> <red><second></red>'
   command-blocked: '<red>This command is unavailable during a duel.</red> <gray>Forfeit with <white>/duel leave</white></gray>'
 
 network:
-  win: '<dark_gray>[</dark_gray><gradient:#55ffff:#5555ff><bold>DUELS</bold></gradient><dark_gray>]</dark_gray> <aqua><winner></aqua> <gray>defeated</gray> <red><loser></red> <dark_gray>(<rating>)</dark_gray>'
+  win: '<dark_gray>[</dark_gray><gold>Duels</gold><dark_gray>]</dark_gray> <aqua><winner></aqua> <gray>defeated</gray> <red><loser></red> <dark_gray>(<rating>)</dark_gray>'
 
 admin:
   no-permission: '<red>Missing permission <permission>.</red>'
@@ -282,7 +287,12 @@ admin:
   recover-usage: '<red>Usage: /duels admin recover (online-player)</red>'
   player-offline: '<red>The player must be online.</red>'
   recovery-started: '<green>Safe recovery started for <player>.</green>'
-  no-snapshot: '<gray><player> has no pending snapshot.</gray>'
+  recovery-transferred: '<green><player> was sent to recovery server <server>.</green>'
+  recovery-replayed: '<green>The retained snapshot for <player> was replayed.</green>'
+  recovery-busy: '<yellow><player> is fighting or already recovering.</yellow>'
+  recovery-wrong-server: '<yellow>The retained snapshot for <player> belongs to server <server>. Replay it there.</yellow>'
+  recovery-failed: '<red>Could not start recovery for <player>. The snapshot remains safe.</red>'
+  no-snapshot: '<gray><player> has no available snapshot.</gray>'
   busy: '<red>Arenas cannot be edited while a match or queue is active.</red>'
   arena-not-found: '<red>Arena <white><arena></white> was not found.</red>'
   arena-id-required: '<red>Specify an arena id.</red>'
@@ -290,7 +300,7 @@ admin:
   point-invalid: '<red>The point number must be 1 or 2.</red>'
   player-required: '<red>This command requires a player position.</red>'
   help:
-    - '<aqua><bold>ArcDuels admin</bold></aqua>'
+    - '<aqua>ArcDuels admin</aqua>'
     - '<white>/duels admin arena create (id)</white>'
     - '<white>/duels admin arena setspawn (id) (1|2)</white>'
     - '<white>/duels admin arena setcorner (id) (1|2)</white>'
@@ -304,7 +314,7 @@ admin:
 
 help:
   lines:
-    - '<dark_gray>────────</dark_gray> <gradient:#55ffff:#5555ff><bold>ArcDuels</bold></gradient> <dark_gray>────────</dark_gray>'
+    - '<dark_gray>────────</dark_gray> <gold>ArcDuels</gold> <dark_gray>────────</dark_gray>'
     - '<white>/duel</white> <gray>— open the main menu</gray>'
     - '<white>/duel (player)</white> <gray>— configure a challenge</gray>'
     - '<white>/duel accept|deny</white> <gray>— accept or reject</gray>'

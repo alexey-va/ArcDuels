@@ -54,8 +54,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     "arcduels-it",
                 )
             repository = MySqlStatisticsRepository(runtime)
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5)
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
         }
 
         afterSpec {
@@ -224,6 +224,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             repository.retainRestored(first, restoredAt, purgeAfter).get() shouldBe true
             repository.retainRestored(first, restoredAt.plusSeconds(30), purgeAfter.plusSeconds(30)).get() shouldBe true
             repository.findPending(first.playerId).get() shouldBe null
+            repository.findLatestRetained(first.playerId).get()?.sameContent(first) shouldBe true
             repository.findPending(second.playerId).get()?.sameContent(second) shouldBe true
             retainedCount(first) shouldBe 1
             repository.purgeRetained(purgeAfter.minusMillis(1)).get() shouldBe 0
@@ -264,7 +265,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             }
 
             repository.migrate().get().appliedVersions shouldContainExactly listOf(4)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
         }
     }
 
@@ -276,13 +277,14 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
     ): PlayerStateEscrow {
         val payload = content.toByteArray()
         return PlayerStateEscrow(
-            PlayerId(UUID.fromString(playerUuid)),
-            matchId,
-            serverId,
-            1,
-            payload,
-            MessageDigest.getInstance("SHA-256").digest(payload),
-            Instant.parse("2026-08-13T11:00:00Z"),
+            playerId = PlayerId(UUID.fromString(playerUuid)),
+            matchId = matchId,
+            serverId = serverId,
+            formatVersion = 1,
+            inventoryReplaced = true,
+            payload = payload,
+            checksum = MessageDigest.getInstance("SHA-256").digest(payload),
+            createdAt = Instant.parse("2026-08-13T11:00:00Z"),
         )
     }
 

@@ -4,6 +4,11 @@ challenge-timeout-seconds: 45
 # Zero starts immediately after both players are safely prepared and teleported.
 countdown-seconds: 0
 
+recovery:
+  # After HuskSync reports player data ready, wait this many ticks before an
+  # unclaimed snapshot is applied. This prevents a late sync from replacing it.
+  apply-delay-ticks: 40
+
 locale:
   # ru or en. When enabled, Russian Minecraft clients get ru and all others en.
   default: ru
@@ -76,7 +81,7 @@ gui:
 
 kits:
   classic:
-    display-name: '<gold><bold>Классика</bold></gold>'
+    display-name: '<gold>Классика</gold>'
     icon: DIAMOND_SWORD
     items:
       '0': DIAMOND_SWORD
@@ -89,7 +94,7 @@ kits:
       leggings: DIAMOND_LEGGINGS
       boots: DIAMOND_BOOTS
   axe:
-    display-name: '<gold><bold>Топор и щит</bold></gold>'
+    display-name: '<gold>Топор и щит</gold>'
     icon: DIAMOND_AXE
     items:
       '0': DIAMOND_AXE
@@ -101,7 +106,7 @@ kits:
       leggings: IRON_LEGGINGS
       boots: IRON_BOOTS
   archer:
-    display-name: '<gold><bold>Лучник</bold></gold>'
+    display-name: '<gold>Лучник</gold>'
     icon: BOW
     items:
       '0': BOW
@@ -114,7 +119,7 @@ kits:
       leggings: CHAINMAIL_LEGGINGS
       boots: LEATHER_BOOTS
   uhc:
-    display-name: '<gold><bold>UHC</bold></gold>'
+    display-name: '<gold>UHC</gold>'
     icon: GOLDEN_APPLE
     items:
       '0': DIAMOND_SWORD
@@ -129,7 +134,7 @@ kits:
       leggings: IRON_LEGGINGS
       boots: DIAMOND_BOOTS
   tank:
-    display-name: '<gold><bold>Танк</bold></gold>'
+    display-name: '<gold>Танк</gold>'
     icon: NETHERITE_CHESTPLATE
     items:
       '0': IRON_SWORD
@@ -141,7 +146,7 @@ kits:
       leggings: DIAMOND_LEGGINGS
       boots: DIAMOND_BOOTS
   sumo:
-    display-name: '<gold><bold>Сумо</bold></gold>'
+    display-name: '<gold>Сумо</gold>'
     icon: SLIME_BALL
     items: {}
     armor: {}

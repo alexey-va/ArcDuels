@@ -23,9 +23,10 @@ The suite covers:
   backend handling, schema-version rejection, and dynamic objective/loadout-compatible
   arena-node selection;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
-  arena and kit validation, HuskSync readiness gating, pagination matrices,
-  modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization, and
-  damage-free celebration entities, default-kit presence, and strict Russian /
+  arena and kit validation, HuskSync readiness and recovery-delay gating, pagination matrices,
+  modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization,
+  WorldGuard participant-only PvP overrides, immutable return routing, command
+  bypass behavior, damage-free celebration entities, default-kit presence, and strict Russian /
   English locale-key and MiniMessage parity.
 
 ## MySQL integration suite
@@ -40,7 +41,7 @@ protection, timestamp precision, 32 concurrent copies of one result, and 24
 concurrent unique matches sharing the same player rows, atomic two-player
 escrow, exact active-to-archive transfer, idempotent replay after an unknown
 archival outcome, retention deadlines, bounded expiry cleanup, checksum
-matching, and rollback on a participant conflict. It also deletes a committed
+matching, claimed-snapshot lookup, recovery metadata, and rollback on a participant conflict. It also deletes a committed
 migration-history row and proves that replay converges when MySQL DDL committed
 before its journal write. It is intentionally not part of a fake JDBC test
 double.

@@ -16,6 +16,7 @@ class PlayerStateEscrow(
     val matchId: MatchId,
     val serverId: ServerId,
     val formatVersion: Int,
+    val inventoryReplaced: Boolean = false,
     payload: ByteArray,
     checksum: ByteArray,
     val createdAt: Instant,
@@ -34,6 +35,7 @@ class PlayerStateEscrow(
             matchId == other.matchId &&
             serverId == other.serverId &&
             formatVersion == other.formatVersion &&
+            inventoryReplaced == other.inventoryReplaced &&
             payload.contentEquals(other.payload) &&
             checksum.contentEquals(other.checksum)
 
@@ -46,6 +48,7 @@ class PlayerStateEscrow(
                 matchId,
                 serverId,
                 formatVersion,
+                inventoryReplaced,
                 payload.contentHashCode(),
                 checksum.contentHashCode(),
                 createdAt,
@@ -67,6 +70,9 @@ interface PlayerStateEscrowRepository {
     fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?>
 
     fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>>
+
+    /** Returns the most recently claimed snapshot, for explicit administrator replay only. */
+    fun findLatestRetained(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?>
 
     /**
      * Atomically moves the exact applied snapshot out of active recovery and

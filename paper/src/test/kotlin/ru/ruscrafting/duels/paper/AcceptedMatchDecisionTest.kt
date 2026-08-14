@@ -2,6 +2,7 @@ package ru.ruscrafting.duels.paper
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import ru.ruscrafting.duels.domain.ServerId
 
 class AcceptedMatchDecisionTest : StringSpec({
     val ready = AcceptedParticipantReadiness(stateLocked = false, playerDataReady = true, engaged = false)
@@ -22,5 +23,12 @@ class AcceptedMatchDecisionTest : StringSpec({
 
     "accepted match is cancelled if either player became engaged elsewhere" {
         acceptedMatchDecision(listOf(ready, ready.copy(engaged = true))) shouldBe AcceptedMatchDecision.CANCEL_BUSY
+    }
+
+    "recorded challenge origin wins over mutable network presence" {
+        val recorded = ServerId("survival")
+
+        selectOriginServer(recorded, ServerId("arena-host"), ServerId("fallback")) shouldBe recorded
+        selectOriginServer(null, ServerId("observed"), ServerId("fallback")) shouldBe ServerId("observed")
     }
 })
