@@ -8,7 +8,7 @@ softdepend: [HuskSync, WorldGuard]
 commands:
   duel:
     description: Open duels or manage a challenge
-    usage: /duel [player|accept|deny|cancel|leave|stats|top|admin]
+    usage: /duel [player|accept|deny|cancel|leave|return|stats|top|admin]
     aliases: [duels, дуэль]
     permission: arcduels.use
 permissions:

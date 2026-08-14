@@ -4,10 +4,21 @@ challenge-timeout-seconds: 45
 # Zero starts immediately after both players are safely prepared and teleported.
 countdown-seconds: 0
 
-recovery:
-  # After HuskSync reports player data ready, wait this many ticks before an
-  # unclaimed snapshot is applied. This prevents a late sync from replacing it.
-  apply-delay-ticks: 40
+player-data-sync:
+  # AUTO detects HuskSync. Use HUSKSYNC or NONE to declare the node contract
+  # explicitly. NONE nodes can host kit arenas but are not advertised for
+  # cross-server own-inventory fights.
+  provider: AUTO
+  # After synchronized data is ready, wait before comparing the live inventory
+  # with the origin snapshot. The snapshot is applied only when they differ.
+  settle-delay-ticks: 40
+
+post-match:
+  # PROMPT leaves the player in the arena lobby and offers a safe return button.
+  # AUTOMATIC keeps the legacy delayed proxy return.
+  return-policy: PROMPT
+  # If an arena has no explicit lobby, use this backend's primary world spawn.
+  server-spawn-fallback: true
 
 locale:
   # ru or en. When enabled, Russian Minecraft clients get ru and all others en.
@@ -183,6 +194,15 @@ arenas:
       x: 0.5
       y: 80.0
       z: 10.5
+      yaw: 180.0
+      pitch: 0.0
+    # Safe post-match waiting point. Set it from the admin arena GUI or with
+    # /duels admin arena setlobby <id>. The primary world spawn is the fallback.
+    lobby:
+      world: world
+      x: 0.5
+      y: 80.0
+      z: 24.5
       yaw: 180.0
       pitch: 0.0
     bounds:

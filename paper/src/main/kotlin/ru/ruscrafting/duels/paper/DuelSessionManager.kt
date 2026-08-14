@@ -49,6 +49,8 @@ class DuelSessionManager internal constructor(
     private val playerDataReady: (Player) -> Boolean = { true },
     private val recoveryApplyDelayTicks: Long = 40L,
     private val playerDataSaver: (Player) -> Unit = Player::saveData,
+    private val syncProvider: PlayerDataSyncProvider = PlayerDataSyncProvider.NONE,
+    private val serverSpawnLobbyFallback: Boolean = true,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
@@ -59,12 +61,14 @@ class DuelSessionManager internal constructor(
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val recoveryTokens = ConcurrentHashMap<UUID, UUID>()
     private val restoringPlayers = ConcurrentHashMap.newKeySet<UUID>()
+    private val expectedNetworkPlayers = ConcurrentHashMap.newKeySet<UUID>()
+    private val networkLobbyPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val internalTeleports = InternalTeleportAuthorizer()
     private val celebrationEffects = CelebrationEffects(plugin)
     private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
 
     init {
-        require(recoveryApplyDelayTicks in 0L..1_200L) { "Recovery apply delay must be between 0 and 1200 ticks" }
+        require(recoveryApplyDelayTicks in 0L..1_200L) { "Player data settle delay must be between 0 and 1200 ticks" }
     }
 
     fun onCompleted(listener: (DuelMatch) -> Unit): AutoCloseable {
@@ -169,6 +173,107 @@ class DuelSessionManager internal constructor(
         return result
     }
 
+    fun expectNetworkMatch(challenge: DuelChallenge) {
+        expectedNetworkPlayers += challenge.challenger.value
+        expectedNetworkPlayers += challenge.target.value
+    }
+
+    fun stopExpectingNetworkMatch(challenge: DuelChallenge) {
+        expectedNetworkPlayers -= challenge.challenger.value
+        expectedNetworkPlayers -= challenge.target.value
+    }
+
+    internal fun storeOriginSnapshot(
+        challenge: DuelChallenge,
+        player: Player,
+    ): CompletableFuture<StoredPlayerSnapshot> =
+        playerStates.store(
+            MatchId(challenge.id.value),
+            player,
+            inventoryReplaced = challenge.rules.mode == DuelMode.KIT,
+        )
+
+    fun hasOriginSnapshot(
+        player: Player,
+        challenge: DuelChallenge,
+    ): Boolean = playerStates.pending(player.uniqueId)?.matchId == MatchId(challenge.id.value)
+
+    fun startNetwork(
+        challenge: DuelChallenge,
+        origins: Map<PlayerId, ServerId>,
+    ): CompletableFuture<DuelMatch> {
+        check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
+        val first = plugin.server.getPlayer(challenge.challenger.value)
+            ?: return CompletableFuture.failedFuture(IllegalStateException("The first player left the arena server"))
+        val second = plugin.server.getPlayer(challenge.target.value)
+            ?: return CompletableFuture.failedFuture(IllegalStateException("The second player left the arena server"))
+        val matchId = MatchId(challenge.id.value)
+        val result = CompletableFuture<DuelMatch>()
+        val snapshotsFuture = playerStates.findMatchSnapshots(matchId, origins)
+        val reservation =
+            runCatching {
+                coordinator.reserve(PlayerId(first.uniqueId), PlayerId(second.uniqueId), challenge.rules, matchId)
+            }.getOrElse { failure ->
+                result.completeExceptionally(failure)
+                return result
+            }
+        pendingStarts[first.uniqueId] = result
+        pendingStarts[second.uniqueId] = result
+        reservation.thenCombine(snapshotsFuture) { match, escrows -> match to escrows }
+            .whenComplete { prepared, failure ->
+                runSync {
+                    if (failure != null) {
+                        reservation.thenAccept { match -> runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) } }
+                        stopExpectingNetworkMatch(challenge)
+                        result.completeExceptionally(unwrap(failure))
+                        return@runSync
+                    }
+                    val (match, escrows) = requireNotNull(prepared)
+                    if (result.isCancelled || !first.isOnline || !second.isOnline) {
+                        runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
+                        stopExpectingNetworkMatch(challenge)
+                        result.completeExceptionally(IllegalStateException("A player left before the network match started"))
+                        return@runSync
+                    }
+                    val stored =
+                        mapOf(
+                            first.uniqueId to playerStates.decodeForArena(escrows.getValue(PlayerId(first.uniqueId)), first),
+                            second.uniqueId to playerStates.decodeForArena(escrows.getValue(PlayerId(second.uniqueId)), second),
+                        )
+                    val arenaBaselines =
+                        mapOf(
+                            first.uniqueId to PlayerSnapshot.capture(first),
+                            second.uniqueId to PlayerSnapshot.capture(second),
+                        )
+                    runCatching {
+                        prepareNewSession(
+                            match,
+                            stored,
+                            recoveryOwner = RecoveryOwner.ORIGIN_SERVERS,
+                            arenaBaselines = arenaBaselines,
+                        )
+                    }.onSuccess {
+                        stopExpectingNetworkMatch(challenge)
+                        result.complete(it)
+                    }.onFailure { setupFailure ->
+                        runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
+                        stopExpectingNetworkMatch(challenge)
+                        result.completeExceptionally(setupFailure)
+                    }
+                }
+            }
+        result.whenComplete { _, _ ->
+            pendingStarts.remove(first.uniqueId, result)
+            pendingStarts.remove(second.uniqueId, result)
+            if (result.isCancelled) {
+                reservation.cancel(false)
+                snapshotsFuture.cancel(false)
+                stopExpectingNetworkMatch(challenge)
+            }
+        }
+        return result
+    }
+
     fun matchFor(player: Player): DuelMatch? =
         coordinator.findByPlayer(PlayerId(player.uniqueId))
             ?: sessionByPlayer[player.uniqueId]?.let(coordinator::find)
@@ -177,7 +282,9 @@ class DuelSessionManager internal constructor(
         coordinator.isQueuedOrMatched(PlayerId(player.uniqueId)) || pendingStarts.containsKey(player.uniqueId)
 
     fun isStateLocked(player: Player): Boolean =
-        preparingPlayers.contains(player.uniqueId) || playerStates.isPending(player.uniqueId) || matchFor(player) != null
+        preparingPlayers.contains(player.uniqueId) ||
+            (playerStates.isPending(player.uniqueId) && player.uniqueId !in networkLobbyPlayers) ||
+            matchFor(player) != null
 
     fun isPreparing(player: Player): Boolean = preparingPlayers.contains(player.uniqueId)
 
@@ -189,6 +296,8 @@ class DuelSessionManager internal constructor(
         matchFor(player) == null && !pendingStarts.containsKey(player.uniqueId) && playerStates.isPending(player.uniqueId)
 
     fun handleJoin(player: Player) {
+        if (player.uniqueId in expectedNetworkPlayers) return
+        networkLobbyPlayers -= player.uniqueId
         preparingPlayers += player.uniqueId
         discoverPendingState(player, notifyFailure = true)
     }
@@ -231,6 +340,7 @@ class DuelSessionManager internal constructor(
 
     fun requestRecovery(player: Player): Boolean {
         if (matchFor(player) != null || pendingStarts.containsKey(player.uniqueId)) return false
+        networkLobbyPlayers -= player.uniqueId
         val escrow = playerStates.pending(player.uniqueId) ?: return false
         preparingPlayers += player.uniqueId
         if (!playerStates.isLocal(escrow)) {
@@ -292,10 +402,12 @@ class DuelSessionManager internal constructor(
                 preparingPlayers -= player.uniqueId
                 return@scheduleRecoveryWindow
             }
-            if (escrow.inventoryReplaced) player.sendMessage(locales.component(player, "session.recovering"))
             runCatching { playerStates.decode(escrow) }
                 .onSuccess { stored ->
-                    if (restoreAndRetain(player, stored)) {
+                    if (escrow.inventoryReplaced && !stored.state.inventoryMatches(player)) {
+                        player.sendMessage(locales.component(player, "session.recovering"))
+                    }
+                    if (restoreAndRetain(player, stored, skipApplyWhenInventoryMatches = true)) {
                         markRestored(escrow.matchId, player.uniqueId)
                     } else {
                         retryPendingRecovery(player, escrow)
@@ -365,7 +477,7 @@ class DuelSessionManager internal constructor(
         val replayed =
             runCatching {
                 val stored = playerStates.decode(escrow)
-                stored.snapshot.restore(player, ::teleportInternally)
+                stored.state.restore(player, ::teleportInternally)
                 playerDataSaver(player)
             }
         preparingPlayers -= player.uniqueId
@@ -445,6 +557,7 @@ class DuelSessionManager internal constructor(
 
     fun handleQuit(player: Player) {
         recoveryTokens.remove(player.uniqueId)
+        networkLobbyPlayers -= player.uniqueId
         pendingStarts[player.uniqueId]?.cancel(false)
         val match = matchFor(player)
         if (match == null) {
@@ -455,9 +568,10 @@ class DuelSessionManager internal constructor(
             runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
             return
         }
-        sessions[match.id]?.snapshots?.get(player.uniqueId)?.let { stored ->
-            if (restoreAndRetain(player, stored)) markRestored(match.id, player.uniqueId)
-        }
+        sessions[match.id]?.takeIf { it.recoveryOwner == RecoveryOwner.ARENA_SERVER }
+            ?.snapshots?.get(player.uniqueId)?.let { stored ->
+                if (restoreAndRetain(player, stored)) markRestored(match.id, player.uniqueId)
+            }
         if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
             coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.DISCONNECT)
                 .whenComplete { completed, failure ->
@@ -534,7 +648,7 @@ class DuelSessionManager internal constructor(
                     runCatching { coordinator.cancel(matchId, MatchEndReason.SERVER_SHUTDOWN) }
                 }
             }
-            restore(session)
+            if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) restore(session)
             coordinator.find(matchId)?.takeIf { it.state == MatchState.COMPLETED }?.let {
                 runCatching { coordinator.releaseCompleted(matchId) }
             }
@@ -543,18 +657,24 @@ class DuelSessionManager internal constructor(
         sessionByPlayer.clear()
         recoveryTokens.clear()
         restoringPlayers.clear()
+        expectedNetworkPlayers.clear()
+        networkLobbyPlayers.clear()
         preparingPlayers.clear()
     }
 
     private fun prepareNewSession(
         match: DuelMatch,
         snapshots: Map<UUID, StoredPlayerSnapshot>,
+        recoveryOwner: RecoveryOwner = RecoveryOwner.ARENA_SERVER,
+        arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
     ): DuelMatch {
         check(plugin.server.isPrimaryThread) { "Paper duel setup must run on the main thread" }
         val session =
             PaperSession(
                 match.id,
                 snapshots = snapshots,
+                recoveryOwner = recoveryOwner,
+                arenaBaselines = arenaBaselines,
             )
         sessions[match.id] = session
         session.snapshots.keys.forEach { sessionByPlayer[it] = match.id }
@@ -566,7 +686,7 @@ class DuelSessionManager internal constructor(
         } catch (failure: Throwable) {
             sessions.remove(match.id)
             session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
-            restore(session)
+            if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) restore(session)
             throw failure
         }
     }
@@ -591,11 +711,11 @@ class DuelSessionManager internal constructor(
 
     private fun resetPlayer(
         player: Player,
-        snapshot: StoredPlayerSnapshot,
+        stored: StoredPlayerSnapshot,
         mode: DuelMode,
         kitId: ru.ruscrafting.duels.domain.KitId?,
     ) {
-        snapshot.snapshot.restoreState(player)
+        if (mode == DuelMode.OWN_INVENTORY) stored.state.restoreState(player)
         player.gameMode = GameMode.SURVIVAL
         player.allowFlight = false
         player.isFlying = false
@@ -853,12 +973,23 @@ class DuelSessionManager internal constructor(
                 1.0f,
             )
         }
-        if (!restore(session)) {
-            session.finishing.set(false)
-            plugin.server.scheduler.runTaskLater(plugin, Runnable {
-                coordinator.find(match.id)?.let(::finish)
-            }, 20L)
-            return
+        if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) {
+            if (!restore(session)) {
+                session.finishing.set(false)
+                plugin.server.scheduler.runTaskLater(plugin, Runnable {
+                    coordinator.find(match.id)?.let(::finish)
+                }, 20L)
+                return
+            }
+        }
+        if (session.recoveryOwner == RecoveryOwner.ORIGIN_SERVERS) {
+            if (!moveNetworkPlayersToLobby(match, session)) {
+                session.finishing.set(false)
+                plugin.server.scheduler.runTaskLater(plugin, Runnable {
+                    coordinator.find(match.id)?.let(::finish)
+                }, 20L)
+                return
+            }
         }
         plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
         sessions.remove(match.id, session)
@@ -892,6 +1023,41 @@ class DuelSessionManager internal constructor(
         celebrationEffects.play(player)
     }
 
+    private fun moveNetworkPlayersToLobby(
+        match: DuelMatch,
+        session: PaperSession,
+    ): Boolean {
+        var moved = true
+        val arena = arenas.get(match.arenaId)
+        val lobby =
+            arena.lobby ?: if (serverSpawnLobbyFallback) {
+                plugin.server.worlds.first().spawnLocation
+            } else {
+                plugin.logger.severe("Arena ${arena.id} has no post-match lobby and the server-spawn fallback is disabled")
+                return false
+            }
+        if (arena.lobby == null) {
+            plugin.logger.warning("Arena ${arena.id} has no lobby; using the primary world spawn after this match")
+        }
+        session.snapshots.forEach { (playerId, origin) ->
+            val player = plugin.server.getPlayer(playerId) ?: return@forEach
+            runCatching {
+                if (syncProvider.sharesInventoryBetweenServers) {
+                    origin.state.restoreInventory(player)
+                } else {
+                    session.arenaBaselines.getValue(playerId).restoreState(player)
+                }
+                playerDataSaver(player)
+                check(teleportInternally(player, lobby.clone())) { "Could not move ${player.uniqueId} to the arena lobby" }
+                networkLobbyPlayers += player.uniqueId
+            }.onFailure { failure ->
+                moved = false
+                plugin.logger.severe("Could not safely move ${player.uniqueId} to the post-match lobby: ${failure.message}")
+            }
+        }
+        return moved
+    }
+
     private fun restore(session: PaperSession): Boolean {
         var restored = true
         session.snapshots.forEach { (uuid, snapshot) ->
@@ -919,11 +1085,22 @@ class DuelSessionManager internal constructor(
     private fun restoreAndRetain(
         player: Player,
         stored: StoredPlayerSnapshot,
+        skipApplyWhenInventoryMatches: Boolean = false,
     ): Boolean {
         if (!restoringPlayers.add(player.uniqueId)) return true
+        val alreadyMatches = skipApplyWhenInventoryMatches && stored.state.inventoryMatches(player)
         val restored = runCatching {
-            stored.snapshot.restore(player, ::teleportInternally)
-            playerDataSaver(player)
+            if (alreadyMatches) {
+                val stateChanged = !stored.state.nonInventoryStateMatches(player)
+                val locationChanged = !stored.state.locationMatches(player)
+                if (stateChanged || locationChanged) {
+                    stored.state.restoreWithoutInventory(player, ::teleportInternally)
+                    playerDataSaver(player)
+                }
+            } else {
+                stored.state.restore(player, ::teleportInternally)
+                playerDataSaver(player)
+            }
         }
             .onFailure { failure ->
                 plugin.logger.severe("Could not fully restore duel player ${player.uniqueId}: ${failure.javaClass.simpleName}: ${failure.message}")
@@ -938,7 +1115,7 @@ class DuelSessionManager internal constructor(
                 if (failure == null) {
                     preparingPlayers -= player.uniqueId
                     restoringPlayers -= player.uniqueId
-                    if (player.isOnline && stored.escrow.inventoryReplaced) {
+                    if (player.isOnline && stored.escrow.inventoryReplaced && !alreadyMatches) {
                         player.sendActionBar(locales.component(player, "session.restored"))
                     }
                 } else {
@@ -1008,6 +1185,8 @@ class DuelSessionManager internal constructor(
     private data class PaperSession(
         val matchId: MatchId,
         val snapshots: Map<UUID, StoredPlayerSnapshot>,
+        val recoveryOwner: RecoveryOwner,
+        val arenaBaselines: Map<UUID, PlayerSnapshot>,
         val restoredPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val hillCapture: HillCaptureTracker = HillCaptureTracker(),
         val hitRace: HitRaceTracker = HitRaceTracker(),
@@ -1015,6 +1194,11 @@ class DuelSessionManager internal constructor(
         var suddenDeathStarted: Boolean = false,
         val finishing: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(),
     )
+
+    private enum class RecoveryOwner {
+        ARENA_SERVER,
+        ORIGIN_SERVERS,
+    }
 
     private companion object {
         val PLAYER_COMBAT_TELEPORTS =

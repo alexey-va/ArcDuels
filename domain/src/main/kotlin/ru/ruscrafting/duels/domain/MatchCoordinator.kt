@@ -22,6 +22,7 @@ class MatchCoordinator(
         firstPlayer: PlayerId,
         secondPlayer: PlayerId,
         rules: DuelRules,
+        matchId: MatchId = MatchId.random(),
     ): CompletableFuture<DuelMatch> {
         require(firstPlayer != secondPlayer) { "A player cannot duel themselves" }
         val arenaFuture =
@@ -60,6 +61,7 @@ class MatchCoordinator(
                     check(matchByPlayer[secondPlayer] == null) { "Second player joined another match" }
                     val match =
                         DuelMatch.reserve(
+                            id = matchId,
                             firstPlayer = firstPlayer,
                             secondPlayer = secondPlayer,
                             arenaId = reservation.arenaId,

@@ -6,10 +6,12 @@ The plugin boots with MySQL disabled by default so a fresh installation cannot
 write to an unintended database. Commands and configuration remain available,
 but matches are fail-closed until `mysql.enabled` is true.
 
-MySQL is mandatory for gameplay. Before the first teleport, inventory clear,
-kit issue, or state normalization, ArcDuels stores both complete player
-snapshots in one InnoDB transaction, reads the committed bytes back, and checks
-SHA-256. If any step fails, the arena is released and the duel never starts.
+MySQL is mandatory for gameplay. Before a player leaves their origin backend,
+ArcDuels captures that backend's complete state on the Paper thread, commits an
+origin-owned row, reads the committed bytes back, and checks SHA-256. The proxy
+transfer is not requested until that exact row is durable. Same-server matches
+still commit both snapshots atomically before the first arena teleport. If any
+step fails, the arena is released and the duel never starts.
 Startup is fail-closed when MySQL is enabled but the pool or checksum-protected
 schema migrations cannot be prepared. Match result writes are also fail-closed
 and retry by match id, so an unknown network outcome cannot double-count a win.
@@ -26,9 +28,11 @@ directory; entries expire locally when the proxy heartbeat becomes stale.
 Every ArcDuels node also publishes its objective- and loadout-compatible arena
 capacity, free slots, and queue depth. When a challenge is accepted, the plugin
 chooses a live compatible node by free capacity and load, then transfers both
-players there through the proxy. No fixed arena server is configured or assumed. Once
-the match result is durable and both inventory snapshots have been restored
-and released, each participant is returned to the backend they came from.
+players there through the proxy. No fixed arena server is configured or assumed.
+After a network match, players are moved to the configured lobby on the arena
+backend and offered a clickable return. The origin row remains unclaimed until
+the player returns, the origin synchronizer settles, and the live inventory is
+compared with the saved bytes.
 
 Redis remains fail-soft and MySQL remains the durable source of truth. If Redis
 is unavailable at startup, ArcDuels closes every partial network resource,
@@ -39,6 +43,22 @@ or the legacy `plugins/ARC/config.yml`; the secret is never logged.
 
 Every network node needs a unique `server-id` containing only letters, digits,
 dot, underscore, or hyphen.
+
+Declare how each node synchronizes player data instead of encoding server names
+in plugin logic:
+
+```yaml
+player-data-sync:
+  provider: HUSKSYNC # AUTO, HUSKSYNC, or NONE
+  settle-delay-ticks: 40
+post-match:
+  return-policy: PROMPT # or AUTOMATIC
+  server-spawn-fallback: true
+```
+
+`HUSKSYNC` fails startup when HuskSync is absent. `AUTO` detects it. `NONE`
+means inventories are isolated on that backend; such a node can advertise kit
+arenas but ArcDuels suppresses its cross-server own-inventory capacity.
 
 ## Localization
 
@@ -96,6 +116,7 @@ arenas:
     allowed-objectives: [ELIMINATION, KING_OF_THE_HILL, SUMO, BOXING, COMBO]
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
     second-spawn: { world: duels, x: 8.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
+    lobby: { world: duels, x: 0.5, y: 65, z: 20.5, yaw: 180, pitch: 0 }
     bounds:
       min: { x: -12, y: 60, z: -12 }
       max: { x: 12, y: 85, z: 12 }
@@ -135,6 +156,7 @@ match owns an arena or a pair is waiting.
 ```text
 /duels admin arena create <id>
 /duels admin arena setspawn <id> <1|2>
+/duels admin arena setlobby <id>
 /duels admin arena setcorner <id> <1|2>
 /duels admin arena sethill <id> [radius] [height]
 /duels admin arena setloadouts <id> <all|own|kit>
@@ -157,7 +179,7 @@ dedicated helmet, chestplate, leggings, and boots keys. Invalid materials,
 oversized stacks, and unknown kits stop startup instead of failing halfway
 through a match.
 
-Both own-inventory and kit modes snapshot both players and restore their
+Both own-inventory and kit modes snapshot both players on their origin backend and restore their
 original location, inventory, armor, off-hand, health, hunger, experience, game
 mode, flight state, cursor item, selected slot, movement state, and potion
 effects after completion, disconnect, cancellation, or shutdown. Items use
@@ -178,20 +200,22 @@ or explicitly replays the newest retained row when no active recovery remains.
 Retained replay must run on the snapshot's owning backend so its saved world and
 location can be resolved safely.
 
-When HuskSync is installed, ArcDuels also waits for its successful login-sync
-completion event for both participants before it asks the durable snapshot
-service to capture anything. A transfer or fresh login therefore cannot race
-duel inventory capture against network player-data application.
+With `player-data-sync.provider: HUSKSYNC`, ArcDuels waits for the successful
+login-sync completion event before capture, arena preparation, comparison, or
+recovery. A transfer or fresh login therefore cannot race duel inventory logic
+against network player-data application. A `NONE` arena backend never claims
+or applies an origin snapshot.
 
 Join-time recovery waits for the same HuskSync completion signal and then an
 additional configurable stabilization window before applying an unclaimed
 snapshot. This prevents a late network inventory load from replacing the
 restored state:
 
-```yaml
-recovery:
-  apply-delay-ticks: 40
-```
+On return, ArcDuels compares storage, armor, off-hand, cursor, and selected slot
+after the configured settle delay. If they already match, it performs no
+inventory setter, restores only the remaining player state and origin location
+when needed, and then claims the exact row. If they differ, it applies, verifies,
+and saves the origin snapshot before claiming it.
 
 The value is bounded to `0..1200` ticks. Recovery remains locked and unclaimed
 until application, exact verification, playerdata save, and archival succeed.
@@ -242,6 +266,7 @@ hard-codes resource-pack numbers. Standard roles include `background`, `back`,
 - `/duel accept [challenge-id]`, `/duel deny [challenge-id]`;
 - `/duel cancel`;
 - `/duel leave` — forfeit the current match;
+- `/duel return` — accept the pending post-match return to the origin backend;
 - `/duel stats [network-online-player]`;
 - `/duel top` — open the global leaderboard.
 - `/duels admin status` — active arenas and FIFO waiters;

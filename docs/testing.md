@@ -23,7 +23,8 @@ The suite covers:
   backend handling, schema-version rejection, and dynamic objective/loadout-compatible
   arena-node selection;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
-  arena and kit validation, HuskSync readiness and recovery-delay gating, pagination matrices,
+  arena and kit validation, explicit sync-provider detection, origin-before-transfer
+  single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
   modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization,
   WorldGuard participant-only PvP overrides, immutable return routing, command
   bypass behavior, damage-free celebration entities, default-kit presence, and strict Russian /

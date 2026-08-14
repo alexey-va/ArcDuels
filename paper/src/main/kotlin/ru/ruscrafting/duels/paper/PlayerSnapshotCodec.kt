@@ -5,6 +5,7 @@ import org.bukkit.Location
 import org.bukkit.NamespacedKey
 import org.bukkit.Registry
 import org.bukkit.Server
+import org.bukkit.World
 import org.bukkit.inventory.ItemStack
 import org.bukkit.potion.PotionEffect
 import org.bukkit.util.Vector
@@ -62,14 +63,17 @@ internal class PlayerSnapshotCodec(
         }
     }
 
-    fun decode(payload: ByteArray): PlayerSnapshot {
+    fun decode(
+        payload: ByteArray,
+        fallbackWorld: World? = null,
+    ): PlayerSnapshot {
         require(payload.isNotEmpty() && payload.size <= MAX_PAYLOAD_BYTES) { "Invalid player snapshot size" }
         return DataInputStream(ByteArrayInputStream(payload)).use { data ->
             require(data.readInt() == MAGIC) { "Invalid player snapshot magic" }
             require(data.readInt() == FORMAT_VERSION) { "Unsupported player snapshot format" }
             val worldId = java.util.UUID(data.readLong(), data.readLong())
             val worldName = data.readUTF()
-            val world = server.getWorld(worldId) ?: server.getWorld(worldName)
+            val world = server.getWorld(worldId) ?: server.getWorld(worldName) ?: fallbackWorld
             requireNotNull(world) { "Snapshot world '$worldName' ($worldId) is not loaded" }
             val location = Location(world, data.readDouble(), data.readDouble(), data.readDouble(), data.readFloat(), data.readFloat())
             require(listOf(location.x, location.y, location.z).all(Double::isFinite)) { "Snapshot location is not finite" }

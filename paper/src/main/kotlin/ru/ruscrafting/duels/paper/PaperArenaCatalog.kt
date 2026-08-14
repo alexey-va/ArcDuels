@@ -67,6 +67,7 @@ data class PaperArena(
     val hill: HillZone? = null,
     val allowedLoadouts: Set<DuelMode> = DuelMode.entries.toSet(),
     val allowedObjectives: Set<DuelObjectiveType> = DuelObjectiveType.entries.toSet(),
+    val lobby: Location? = null,
 ) {
     init {
         require(allowedLoadouts.isNotEmpty()) { "Arena must support at least one loadout mode" }
@@ -226,6 +227,7 @@ class PaperArenaCatalog private constructor(
                     val bounds = section.readBounds(firstWorld.uid)
                     require(bounds.contains(first) && bounds.contains(second)) { "Arena $id spawns must be inside its bounds" }
                     val hill = section.getConfigurationSection("hill")?.readHill(plugin)
+                    val lobby = section.getConfigurationSection("lobby")?.let { section.readLocation(plugin, "lobby") }
                     require(hill == null || bounds.contains(hill)) { "Arena $id hill zone must be fully inside its bounds" }
                     id to
                         PaperArena(
@@ -236,6 +238,7 @@ class PaperArenaCatalog private constructor(
                             hill,
                             readArenaAllowedLoadouts(section),
                             readArenaAllowedObjectives(section),
+                            lobby,
                         )
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {

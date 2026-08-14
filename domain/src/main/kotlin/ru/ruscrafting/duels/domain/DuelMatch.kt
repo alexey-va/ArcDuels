@@ -159,9 +159,10 @@ data class DuelMatch(
             serverId: ServerId,
             rules: DuelRules,
             now: Instant,
+            id: MatchId = MatchId.random(),
         ): DuelMatch =
             DuelMatch(
-                id = MatchId.random(),
+                id = id,
                 firstPlayer = firstPlayer,
                 secondPlayer = secondPlayer,
                 arenaId = arenaId,

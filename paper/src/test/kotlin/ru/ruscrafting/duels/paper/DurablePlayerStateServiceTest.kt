@@ -59,8 +59,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val stored = storedFuture.get()
 
         service.isPending(first.uniqueId) shouldBe true
-        service.decode(stored.getValue(first.uniqueId).escrow).snapshot.storage[0]?.type shouldBe Material.NETHERITE_SWORD
-        service.decode(stored.getValue(second.uniqueId).escrow).snapshot.storage[4]?.type shouldBe Material.TOTEM_OF_UNDYING
+        service.decode(stored.getValue(first.uniqueId).escrow).state.storage[0]?.type shouldBe Material.NETHERITE_SWORD
+        service.decode(stored.getValue(second.uniqueId).escrow).state.storage[4]?.type shouldBe Material.TOTEM_OF_UNDYING
 
         service.retain(stored.getValue(first.uniqueId)).get()
         service.retain(stored.getValue(first.uniqueId)).get()
@@ -70,6 +70,25 @@ class DurablePlayerStateServiceTest : StringSpec({
         repository.retentionCalls shouldBe 1
         repository.restoredAt shouldBe restoredAt
         repository.purgeAfter shouldBe restoredAt.plus(Duration.ofDays(7))
+    }
+
+    "one origin snapshot is captured before transfer and becomes visible only after commit" {
+        val repository = GatedEscrowRepository()
+        val service = DurablePlayerStateService(plugin, ServerId("origin"), repository)
+        val player = server.addPlayer()
+        player.inventory.setItem(0, ItemStack(Material.DIAMOND_SWORD))
+        val matchId = MatchId.random()
+
+        val storedFuture = service.store(matchId, player, inventoryReplaced = true)
+        player.inventory.setItem(0, ItemStack(Material.DIRT))
+
+        service.isPending(player.uniqueId) shouldBe false
+        repository.commit.complete(Unit)
+        val stored = storedFuture.get()
+        stored.escrow.matchId shouldBe matchId
+        stored.escrow.serverId shouldBe ServerId("origin")
+        stored.state.storage[0]?.type shouldBe Material.DIAMOND_SWORD
+        service.isPending(player.uniqueId) shouldBe true
     }
 
     "concurrent restoration paths share one database archival" {
@@ -147,6 +166,115 @@ class DurablePlayerStateServiceTest : StringSpec({
         sessions.shutdown()
     }
 
+    "matching inventory is claimed after the settle window without applying or saving it again" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val player = server.addPlayer()
+        val peer = server.addPlayer()
+        player.inventory.setItem(0, ItemStack(Material.EMERALD))
+        service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
+        var saveCalls = 0
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataReady = { true },
+                recoveryApplyDelayTicks = 0L,
+                playerDataSaver = { saveCalls++ },
+            )
+
+        sessions.handleJoin(player)
+        server.scheduler.performTicks(2)
+
+        player.inventory.getItem(0)?.type shouldBe Material.EMERALD
+        saveCalls shouldBe 0
+        service.isPending(player.uniqueId) shouldBe false
+        sessions.shutdown()
+    }
+
+    "matching inventory still returns the player to the captured origin location" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val player = server.addPlayer()
+        val peer = server.addPlayer()
+        val origin = player.location.clone()
+        service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
+        player.teleport(origin.clone().add(12.0, 0.0, 0.0))
+        var saveCalls = 0
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataReady = { true },
+                recoveryApplyDelayTicks = 0L,
+                playerDataSaver = { saveCalls++ },
+            )
+
+        sessions.handleJoin(player)
+        server.scheduler.performTicks(2)
+
+        player.location.x shouldBe origin.x
+        player.location.y shouldBe origin.y
+        player.location.z shouldBe origin.z
+        saveCalls shouldBe 1
+        service.isPending(player.uniqueId) shouldBe false
+        sessions.shutdown()
+    }
+
+    "matching inventory restores non-inventory state without replacing the items" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val player = server.addPlayer()
+        val peer = server.addPlayer()
+        player.inventory.setItem(0, ItemStack(Material.EMERALD))
+        player.gameMode = org.bukkit.GameMode.ADVENTURE
+        player.foodLevel = 13
+        player.level = 7
+        service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
+        val liveItem = player.inventory.getItem(0)
+        player.gameMode = org.bukkit.GameMode.SURVIVAL
+        player.foodLevel = 20
+        player.level = 0
+        var saveCalls = 0
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataReady = { true },
+                recoveryApplyDelayTicks = 0L,
+                playerDataSaver = { saveCalls++ },
+            )
+
+        sessions.handleJoin(player)
+        server.scheduler.performTicks(2)
+
+        player.inventory.getItem(0) shouldBe liveItem
+        player.gameMode shouldBe org.bukkit.GameMode.ADVENTURE
+        player.foodLevel shouldBe 13
+        player.level shouldBe 7
+        saveCalls shouldBe 1
+        service.isPending(player.uniqueId) shouldBe false
+        sessions.shutdown()
+    }
+
     "overlapping archive cleanup runs are coalesced" {
         val repository = GatedEscrowRepository()
         val firstPurge = CompletableFuture<Int>()
@@ -185,6 +313,25 @@ class DurablePlayerStateServiceTest : StringSpec({
         repository.lookupCalls shouldBe 2
     }
 
+    "lost response for one origin snapshot is reconciled against its exact committed bytes" {
+        val repository = GatedEscrowRepository()
+        val service =
+            DurablePlayerStateService(
+                plugin,
+                ServerId("origin"),
+                repository,
+                reconciliationDelay = Duration.ZERO,
+            )
+        val player = server.addPlayer()
+        val future = service.store(MatchId.random(), player, inventoryReplaced = true)
+
+        repository.commit.completeExceptionally(IllegalStateException("lost commit response"))
+
+        future.get()
+        service.isPending(player.uniqueId) shouldBe true
+        repository.lookupCalls shouldBe 1
+    }
+
     "unknown save outcome fails only after repeated confirmation that both rows are absent" {
         val repository = GatedEscrowRepository()
         repository.exposeSavedRows = false
@@ -220,6 +367,11 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
     var lookupCalls: Int = 0
     var purgeCalls: Int = 0
     var purgeResult: CompletableFuture<Int> = CompletableFuture.completedFuture(0)
+
+    override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> {
+        saved = listOf(snapshot)
+        return commit
+    }
 
     override fun savePair(
         first: PlayerStateEscrow,

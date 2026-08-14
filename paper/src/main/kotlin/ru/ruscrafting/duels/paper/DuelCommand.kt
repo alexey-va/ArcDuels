@@ -49,6 +49,7 @@ class DuelCommand internal constructor(
             }
             "cancel", "отмена" -> controller.cancel(player)
             "leave", "покинуть" -> controller.leave(player)
+            "return", "вернуться" -> controller.returnToOrigin(player)
             "stats", "статы" -> {
                 val target =
                     if (args.size > 1) {
@@ -85,7 +86,7 @@ class DuelCommand internal constructor(
         }
         if (args.size != 1) return emptyList()
         val prefix = args[0].lowercase()
-        val commands = mutableListOf("accept", "deny", "cancel", "leave", "stats", "top")
+        val commands = mutableListOf("accept", "deny", "cancel", "leave", "return", "stats", "top")
         if (sender.hasPermission("arcduels.admin")) commands += "admin"
         val playerNames = targets?.players()?.map(DuelTarget::name) ?: sender.server.onlinePlayers.map(Player::getName)
         return (commands + playerNames)

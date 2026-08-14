@@ -61,6 +61,9 @@ class PlayerStateEscrow(
 }
 
 interface PlayerStateEscrowRepository {
+    /** Stores one origin-owned snapshot idempotently and verifies its committed bytes. */
+    fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit>
+
     /** Stores both participants atomically and verifies their committed bytes. */
     fun savePair(
         first: PlayerStateEscrow,

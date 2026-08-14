@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class StoredPlayerSnapshot(
-    val snapshot: PlayerSnapshot,
+    val state: PlayerSnapshot,
     val escrow: PlayerStateEscrow,
 )
 
@@ -76,6 +76,48 @@ internal class DurablePlayerStateService(
             }
     }
 
+    fun store(
+        matchId: MatchId,
+        player: Player,
+        inventoryReplaced: Boolean,
+    ): CompletableFuture<StoredPlayerSnapshot> {
+        check(plugin.server.isPrimaryThread) { "Player state must be captured on the Paper primary thread" }
+        val stored = capture(matchId, player, inventoryReplaced)
+        return repository.save(stored.escrow)
+            .handle { _, failure ->
+                if (failure == null) {
+                    CompletableFuture.completedFuture(Unit)
+                } else {
+                    reconcileUnknownSave(stored.escrow, failure.unwrapCompletion())
+                }
+            }.thenCompose { it }
+            .thenApply {
+                pending[player.uniqueId] = stored.escrow
+                stored
+            }
+    }
+
+    fun findMatchSnapshots(
+        matchId: MatchId,
+        origins: Map<PlayerId, ServerId>,
+    ): CompletableFuture<Map<PlayerId, PlayerStateEscrow>> {
+        require(origins.size == 2) { "A network match requires exactly two origin snapshots" }
+        val entries = origins.entries.toList()
+        return repository.findPending(entries[0].key)
+            .thenCombine(repository.findPending(entries[1].key), ::Pair)
+            .thenApply { found ->
+                val snapshots = listOfNotNull(found.first, found.second).associateBy(PlayerStateEscrow::playerId)
+                check(snapshots.size == origins.size) { "Both origin inventory snapshots must exist before arena transfer" }
+                origins.forEach { (playerId, origin) ->
+                    val escrow = requireNotNull(snapshots[playerId]) { "Missing origin snapshot for $playerId" }
+                    verifyChecksum(escrow)
+                    check(escrow.matchId == matchId) { "Origin snapshot for $playerId belongs to another match" }
+                    check(escrow.serverId == origin) { "Origin snapshot for $playerId belongs to ${escrow.serverId}, not $origin" }
+                }
+                snapshots
+            }
+    }
+
     fun pending(playerId: UUID): PlayerStateEscrow? = pending[playerId]
 
     fun isPending(playerId: UUID): Boolean = pending.containsKey(playerId)
@@ -106,6 +148,15 @@ internal class DurablePlayerStateService(
         require(escrow.serverId == serverId) { "Player escrow belongs to ${escrow.serverId}, not $serverId" }
         require(escrow.formatVersion == PlayerSnapshotCodec.FORMAT_VERSION) { "Unsupported player escrow format" }
         return StoredPlayerSnapshot(codec.decode(escrow.payload), escrow)
+    }
+
+    fun decodeForArena(
+        escrow: PlayerStateEscrow,
+        player: Player,
+    ): StoredPlayerSnapshot {
+        verifyChecksum(escrow)
+        require(escrow.formatVersion == PlayerSnapshotCodec.FORMAT_VERSION) { "Unsupported player escrow format" }
+        return StoredPlayerSnapshot(codec.decode(escrow.payload, player.world), escrow)
     }
 
     /** Must be called after the exact snapshot was applied, verified, and saved on the primary thread. */
@@ -180,6 +231,28 @@ internal class DurablePlayerStateService(
                 }
             }.thenCompose { it }
 
+    private fun reconcileUnknownSave(
+        expected: PlayerStateEscrow,
+        originalFailure: Throwable,
+        emptyConfirmations: Int = 0,
+    ): CompletableFuture<Unit> =
+        repository.findPending(expected.playerId)
+            .handle { actual, lookupFailure ->
+                when {
+                    lookupFailure != null -> retryReconciliation(expected, originalFailure, emptyConfirmations)
+                    actual?.sameContent(expected) == true -> CompletableFuture.completedFuture(Unit)
+                    actual == null && emptyConfirmations + 1 >= EMPTY_CONFIRMATIONS_REQUIRED ->
+                        CompletableFuture.failedFuture(
+                            IllegalStateException("MySQL confirmed that the player state was not committed", originalFailure),
+                        )
+                    actual == null -> retryReconciliation(expected, originalFailure, emptyConfirmations + 1)
+                    else ->
+                        CompletableFuture.failedFuture(
+                            IllegalStateException("The player already has a different recovery snapshot", originalFailure),
+                        )
+                }
+            }.thenCompose { it }
+
     private fun retryReconciliation(
         first: PlayerStateEscrow,
         second: PlayerStateEscrow,
@@ -195,6 +268,22 @@ internal class DurablePlayerStateService(
             {},
             CompletableFuture.delayedExecutor(reconciliationDelay.toMillis(), TimeUnit.MILLISECONDS),
         ).thenCompose { reconcileUnknownSave(first, second, originalFailure, emptyConfirmations) }
+    }
+
+    private fun retryReconciliation(
+        expected: PlayerStateEscrow,
+        originalFailure: Throwable,
+        emptyConfirmations: Int,
+    ): CompletableFuture<Unit> {
+        if (!plugin.isEnabled) {
+            return CompletableFuture.failedFuture(
+                IllegalStateException("Plugin stopped before the unknown MySQL save outcome was reconciled", originalFailure),
+            )
+        }
+        return CompletableFuture.runAsync(
+            {},
+            CompletableFuture.delayedExecutor(reconciliationDelay.toMillis(), TimeUnit.MILLISECONDS),
+        ).thenCompose { reconcileUnknownSave(expected, originalFailure, emptyConfirmations) }
     }
 
     private fun capture(

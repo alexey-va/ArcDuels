@@ -80,13 +80,21 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 retention = Duration.ofDays(retentionDays),
             )
         val huskSyncEnabled = server.pluginManager.isPluginEnabled("HuskSync")
-        val playerDataSync = PlayerDataSyncGate(explicitSyncRequired = huskSyncEnabled)
+        val syncProvider =
+            PlayerDataSyncProvider.resolve(
+                config.getString("player-data-sync.provider", "AUTO")!!,
+                huskSyncEnabled,
+            )
+        val playerDataSync = PlayerDataSyncGate(explicitSyncRequired = syncProvider.requiresReadinessEvent)
         server.pluginManager.registerEvents(playerDataSync, this)
-        if (huskSyncEnabled) {
+        if (syncProvider == PlayerDataSyncProvider.HUSKSYNC) {
             val huskSyncListener = HuskSyncReadinessListener(playerDataSync)
             server.pluginManager.registerEvents(huskSyncListener, this)
             server.onlinePlayers.forEach(huskSyncListener::inspectAlreadyOnline)
-            logger.info("Duel starts and recovery will wait for HuskSync player data synchronization")
+            logger.info("Player data synchronization provider: HUSKSYNC; duel transfer and recovery wait for synchronization")
+        } else {
+            if (huskSyncEnabled) logger.warning("HuskSync is enabled but ArcDuels is explicitly configured with player-data-sync.provider=NONE")
+            logger.info("Player data synchronization provider: NONE; this node will host cross-server kit arenas only")
         }
         if (persistence.durable) {
             val recovered = playerStates.loadPending(config.getLong("mysql.pool.connection-timeout-ms", 10_000L) + 30_000L)
@@ -107,8 +115,13 @@ open class ArcDuelsPlugin : JavaPlugin() {
         }
         val countdownSeconds = config.getInt("countdown-seconds", 0)
         require(countdownSeconds in 0..10) { "countdown-seconds must be between 0 and 10" }
-        val recoveryApplyDelayTicks = config.getLong("recovery.apply-delay-ticks", 40L)
-        require(recoveryApplyDelayTicks in 0L..1_200L) { "recovery.apply-delay-ticks must be between 0 and 1200" }
+        val recoveryApplyDelayTicks =
+            if (config.contains("player-data-sync.settle-delay-ticks")) {
+                config.getLong("player-data-sync.settle-delay-ticks")
+            } else {
+                config.getLong("recovery.apply-delay-ticks", 40L)
+            }
+        require(recoveryApplyDelayTicks in 0L..1_200L) { "player-data-sync.settle-delay-ticks must be between 0 and 1200" }
         val sessionManager =
             DuelSessionManager(
                 this,
@@ -121,6 +134,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 remoteRecoveryTransfer = transfer?.let { gateway -> { player, destination -> gateway.connect(player, destination) } },
                 playerDataReady = playerDataSync::isReady,
                 recoveryApplyDelayTicks = recoveryApplyDelayTicks,
+                syncProvider = syncProvider,
+                serverSpawnLobbyFallback = config.getBoolean("post-match.server-spawn-fallback", true),
             )
         sessions = sessionManager
         val challenges =
@@ -143,6 +158,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 transfer,
                 playerDataSync::isReady,
                 transferTimeout = Duration.ofSeconds(config.getLong("redis.transfer-timeout-seconds", 30L).coerceIn(10L, 120L)),
+                returnPolicy = PostMatchReturnPolicy.parse(config.getString("post-match.return-policy", "PROMPT")!!),
             )
         closeables += controller
         val admin = DuelAdminCommand(this, arenas, sessionManager, locales)
@@ -152,7 +168,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command
         server.pluginManager.registerEvents(gui, this)
-        server.pluginManager.registerEvents(DuelGameplayListener(sessionManager, locales), this)
+        server.pluginManager.registerEvents(DuelGameplayListener(sessionManager, locales, controller = controller), this)
         if (server.pluginManager.isPluginEnabled("WorldGuard")) {
             server.pluginManager.registerEvents(WorldGuardDuelListener(sessionManager, logger), this)
             logger.info("WorldGuard duel PvP compatibility enabled")
@@ -166,7 +182,12 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 directory.publish(
                     ArenaNodeStatus(
                         server = serverId,
-                        ownInventory = arenas.networkCapacity(DuelMode.OWN_INVENTORY),
+                        ownInventory =
+                            if (syncProvider.sharesInventoryBetweenServers) {
+                                arenas.networkCapacity(DuelMode.OWN_INVENTORY)
+                            } else {
+                                emptyNetworkCapacity()
+                            },
                         kit = arenas.networkCapacity(DuelMode.KIT),
                         queuedPairs = arenas.queueSize(),
                     ),
@@ -194,6 +215,9 @@ open class ArcDuelsPlugin : JavaPlugin() {
             },
         )
     }
+
+    private fun emptyNetworkCapacity(): ArenaModeCapacity =
+        ArenaModeCapacity(DuelObjectiveType.entries.associateWith { ObjectiveCapacity(0, 0) })
 
     private fun createPersistence(): Persistence {
         if (!config.getBoolean("mysql.enabled", false)) {
@@ -364,6 +388,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private object UnavailablePlayerStateEscrowRepository : PlayerStateEscrowRepository {
         private fun <T> unavailable(): CompletableFuture<T> =
             CompletableFuture.failedFuture(IllegalStateException("MySQL durable inventory escrow is not configured"))
+
+        override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> = unavailable()
 
         override fun savePair(
             first: PlayerStateEscrow,

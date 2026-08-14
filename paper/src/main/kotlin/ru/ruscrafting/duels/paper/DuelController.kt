@@ -40,15 +40,18 @@ class DuelController(
     private val playerDataReady: (Player) -> Boolean = { true },
     private val clock: Clock = Clock.systemUTC(),
     private val transferTimeout: Duration = Duration.ofSeconds(30),
+    private val returnPolicy: PostMatchReturnPolicy = PostMatchReturnPolicy.PROMPT,
 ) : AutoCloseable {
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
     private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
     private val acceptedTasks = ConcurrentHashMap<ChallengeId, BukkitTask>()
     private val transferRequests = ConcurrentHashMap.newKeySet<Pair<ChallengeId, PlayerId>>()
+    private val originSnapshots = ConcurrentHashMap<Pair<ChallengeId, PlayerId>, java.util.concurrent.CompletableFuture<Unit>>()
     private val networkPendingPlayers = ConcurrentHashMap.newKeySet<PlayerId>()
     private val returnRoutes = ConcurrentHashMap<MatchId, ReturnRoutes>()
     private val returnTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val returnRequests = ConcurrentHashMap.newKeySet<Pair<MatchId, PlayerId>>()
+    private val returnOffers = ConcurrentHashMap<PlayerId, ReturnOffer>()
     private val networkSubscription = challengeBus?.subscribe(::onNetworkMessage)
     private val completionSubscription = sessions.onCompleted(::onMatchCompleted)
 
@@ -71,8 +74,10 @@ class DuelController(
         }
         val localTarget = plugin.server.getPlayer(target.uniqueId)
         if (sessions.isEngaged(challenger) || sessions.isStateLocked(challenger) || PlayerId(challenger.uniqueId) in networkPendingPlayers ||
+            returnOffers.containsKey(PlayerId(challenger.uniqueId)) ||
             (localTarget != null &&
-                (sessions.isEngaged(localTarget) || sessions.isStateLocked(localTarget) || PlayerId(localTarget.uniqueId) in networkPendingPlayers))
+                (sessions.isEngaged(localTarget) || sessions.isStateLocked(localTarget) || PlayerId(localTarget.uniqueId) in networkPendingPlayers ||
+                    returnOffers.containsKey(PlayerId(localTarget.uniqueId))))
         ) {
             challenger.sendMessage(locales.component(challenger, "controller.busy"))
             return
@@ -113,7 +118,9 @@ class DuelController(
         challengeId: ChallengeId? = null,
     ) {
         val challenge = resolveCandidate(player, challengeId, incoming = true) ?: return
-        if (challenge.challenger in networkPendingPlayers || challenge.target in networkPendingPlayers) {
+        if (challenge.challenger in networkPendingPlayers || challenge.target in networkPendingPlayers ||
+            returnOffers.containsKey(challenge.challenger) || returnOffers.containsKey(challenge.target)
+        ) {
             player.sendMessage(locales.component(player, "controller.busy"))
             return
         }
@@ -181,6 +188,29 @@ class DuelController(
         }
     }
 
+    fun returnToOrigin(player: Player) {
+        val playerId = PlayerId(player.uniqueId)
+        val offer = returnOffers[playerId]
+        if (offer == null) {
+            player.sendMessage(locales.component(player, "controller.no-return-offer"))
+            return
+        }
+        if (offer.destination == localServer) {
+            if (sessions.requestRecovery(player)) {
+                returnOffers.remove(playerId, offer)
+            } else {
+                player.sendMessage(locales.component(player, "controller.no-return-offer"))
+            }
+            return
+        }
+        player.sendMessage(locales.component(player, "controller.network-return", LocaleService.text("server", offer.destination.value)))
+        transfer?.connect(player, offer.destination)
+    }
+
+    fun handleQuit(player: Player) {
+        returnOffers.remove(PlayerId(player.uniqueId))
+    }
+
     fun showStatistics(
         viewer: Player,
         target: DuelTarget,
@@ -217,8 +247,10 @@ class DuelController(
         returnTasks.clear()
         acceptedMatches.clear()
         transferRequests.clear()
+        originSnapshots.clear()
         networkPendingPlayers.clear()
         returnRequests.clear()
+        returnOffers.clear()
         returnRoutes.clear()
         contexts.clear()
     }
@@ -245,7 +277,9 @@ class DuelController(
                 message.challenge.expiresAt.toEpochMilli(),
             ),
         )
-        if (sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
+        if (sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers ||
+            returnOffers.containsKey(PlayerId(target.uniqueId))
+        ) {
             publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)
             return
         }
@@ -318,8 +352,17 @@ class DuelController(
         host: ServerId,
         networkMessage: CrossServerChallengeMessage? = null,
     ) {
+        if (networkMessage != null && localServer != host &&
+            localServer != networkMessage.challengerServer && localServer != networkMessage.targetServer
+        ) {
+            return
+        }
         val accepted = AcceptedMatch(challenge, host, networkMessage, clock.millis() + transferTimeout.toMillis())
         acceptedMatches.putIfAbsent(challenge.id, accepted)
+        // Only the arena host must suppress join-time recovery while transferred
+        // participants arrive. Origin nodes must remain ready to recover a player
+        // who returns quickly after a short or cancelled match.
+        if (networkMessage != null && localServer == host) sessions.expectNetworkMatch(challenge)
         networkPendingPlayers += challenge.challenger
         networkPendingPlayers += challenge.target
         if (acceptedTasks.containsKey(challenge.id)) return
@@ -338,11 +381,25 @@ class DuelController(
         val challenge = accepted.challenge
         if (clock.millis() >= accepted.expiresAtMillis) {
             participants(challenge).forEach { it.sendMessage(locales.component(it, "controller.network-timeout")) }
+            returnAcceptedPlayers(accepted)
             stopAcceptedMatch(challengeId)
             return
         }
         val localParticipants = participants(challenge)
+        if (accepted.networkMessage != null) {
+            val originPreparation = prepareLocalOriginSnapshots(accepted, localParticipants)
+            if (originPreparation == OriginPreparation.WAIT) return
+            if (originPreparation == OriginPreparation.FAILED) {
+                returnAcceptedPlayers(accepted)
+                stopAcceptedMatch(challengeId)
+                return
+            }
+        }
         if (localServer != accepted.host) {
+            if (localParticipants.isEmpty() && transferRequests.any { it.first == challengeId }) {
+                stopAcceptedMatch(challengeId)
+                return
+            }
             localParticipants.forEach { player ->
                 val request = challengeId to PlayerId(player.uniqueId)
                 if (transferRequests.add(request)) {
@@ -357,7 +414,9 @@ class DuelController(
             acceptedMatchDecision(
                 localParticipants.map { participant ->
                     AcceptedParticipantReadiness(
-                        stateLocked = sessions.isStateLocked(participant),
+                        stateLocked =
+                            sessions.isStateLocked(participant) &&
+                                !sessions.hasOriginSnapshot(participant, challenge),
                         playerDataReady = playerDataReady(participant),
                         engaged = sessions.isEngaged(participant),
                     )
@@ -379,16 +438,32 @@ class DuelController(
         acceptedMatches.remove(challengeId)?.challenge?.let { challenge ->
             networkPendingPlayers -= challenge.challenger
             networkPendingPlayers -= challenge.target
+            sessions.stopExpectingNetworkMatch(challenge)
         }
         acceptedTasks.remove(challengeId)?.cancel()
         transferRequests.removeIf { it.first == challengeId }
+        originSnapshots.keys.removeIf { it.first == challengeId }
     }
 
     private fun startLocal(
         challenge: DuelChallenge,
         networkMessage: CrossServerChallengeMessage? = null,
     ) {
-        runCatching { sessions.start(challenge) }
+        val start =
+            if (networkMessage == null) {
+                runCatching { sessions.start(challenge) }
+            } else {
+                runCatching {
+                    sessions.startNetwork(
+                        challenge,
+                        mapOf(
+                            challenge.challenger to networkMessage.challengerServer,
+                            challenge.target to networkMessage.targetServer,
+                        ),
+                    )
+                }
+            }
+        start
             .getOrElse { failure -> java.util.concurrent.CompletableFuture.failedFuture(failure) }
             .whenComplete { match, failure ->
                 runSync {
@@ -397,6 +472,11 @@ class DuelController(
                         participants(challenge).forEach {
                             val reasonKey = if (cause is CancellationException) "controller.wait-cancelled" else "controller.start-internal"
                             it.sendMessage(locales.component(it, "controller.start-failed", LocaleService.component("reason", locales.component(it, reasonKey))))
+                        }
+                        networkMessage?.let {
+                            returnAcceptedPlayers(
+                                AcceptedMatch(challenge, requireNotNull(it.matchServer), it, clock.millis()),
+                            )
                         }
                     } else if (networkMessage != null) {
                         returnRoutes[requireNotNull(match).id] =
@@ -412,8 +492,74 @@ class DuelController(
             }
     }
 
+    private fun prepareLocalOriginSnapshots(
+        accepted: AcceptedMatch,
+        localParticipants: List<Player>,
+    ): OriginPreparation {
+        val message = requireNotNull(accepted.networkMessage)
+        val localOrigins =
+            localParticipants.filter { player ->
+                val playerId = PlayerId(player.uniqueId)
+                originFor(message, playerId) == localServer
+            }
+        if (localOrigins.any { !playerDataReady(it) }) return OriginPreparation.WAIT
+        localOrigins.forEach { player ->
+            val playerId = PlayerId(player.uniqueId)
+            val key = accepted.challenge.id to playerId
+            originSnapshots.computeIfAbsent(key) {
+                if (sessions.hasOriginSnapshot(player, accepted.challenge)) {
+                    java.util.concurrent.CompletableFuture.completedFuture(Unit)
+                } else {
+                    runCatching { sessions.storeOriginSnapshot(accepted.challenge, player).thenApply { Unit } }
+                        .getOrElse { java.util.concurrent.CompletableFuture.failedFuture(it) }
+                }
+            }
+        }
+        val required = localOrigins.map { accepted.challenge.id to PlayerId(it.uniqueId) }
+        if (required.any { originSnapshots[it]?.isCompletedExceptionally == true }) {
+            localParticipants.forEach { player ->
+                player.sendMessage(
+                    locales.component(
+                        player,
+                        "controller.start-failed",
+                        LocaleService.component("reason", locales.component(player, "controller.start-internal")),
+                    ),
+                )
+            }
+            plugin.logger.severe("Origin inventory snapshot failed for network challenge ${accepted.challenge.id}; no affected player will be transferred")
+            return OriginPreparation.FAILED
+        }
+        return if (required.all { originSnapshots[it]?.isDone == true }) OriginPreparation.READY else OriginPreparation.WAIT
+    }
+
+    private fun returnAcceptedPlayers(accepted: AcceptedMatch) {
+        val message = accepted.networkMessage ?: return
+        participants(accepted.challenge).forEach { player ->
+            val destination = originFor(message, PlayerId(player.uniqueId))
+            if (destination == localServer) {
+                sessions.requestRecovery(player)
+            } else {
+                transfer?.connect(player, destination)
+            }
+        }
+    }
+
+    private fun originFor(
+        message: CrossServerChallengeMessage,
+        playerId: PlayerId,
+    ): ServerId =
+        when (playerId) {
+            message.challenge.challenger -> message.challengerServer
+            message.challenge.target -> message.targetServer
+            else -> error("Player $playerId is not part of challenge ${message.challenge.id}")
+        }
+
     private fun onMatchCompleted(match: DuelMatch) {
         val routes = returnRoutes.remove(match.id) ?: return
+        if (returnPolicy == PostMatchReturnPolicy.PROMPT) {
+            offerReturns(match, routes)
+            return
+        }
         val deadline = clock.millis() + RETURN_TIMEOUT.toMillis()
         val task =
             plugin.server.scheduler.runTaskTimer(
@@ -423,6 +569,30 @@ class DuelController(
                 NETWORK_MATCH_POLL_TICKS,
             )
         returnTasks.putIfAbsent(match.id, task)?.let { task.cancel() }
+    }
+
+    private fun offerReturns(
+        match: DuelMatch,
+        routes: ReturnRoutes,
+    ) {
+        listOf(match.firstPlayer, match.secondPlayer).forEach { playerId ->
+            val destination = routes.forPlayer(playerId)
+            returnOffers[playerId] = ReturnOffer(match.id, destination)
+            plugin.server.getPlayer(playerId.value)?.let { player ->
+                val action =
+                    locales.component(player, "controller.return-action")
+                        .clickEvent(ClickEvent.runCommand("/duel return"))
+                        .hoverEvent(HoverEvent.showText(locales.component(player, "controller.return-hover")))
+                player.sendMessage(
+                    locales.component(
+                        player,
+                        "controller.return-offer",
+                        LocaleService.text("server", destination.value),
+                        LocaleService.component("action", action),
+                    ),
+                )
+            }
+        }
     }
 
     private fun tickReturn(match: DuelMatch, routes: ReturnRoutes, deadline: Long) {
@@ -581,6 +751,17 @@ class DuelController(
         }
 
         fun forPlayer(player: PlayerId): ServerId = requireNotNull(byPlayer[player]) { "Missing return route for $player" }
+    }
+
+    private data class ReturnOffer(
+        val matchId: MatchId,
+        val destination: ServerId,
+    )
+
+    private enum class OriginPreparation {
+        WAIT,
+        READY,
+        FAILED,
     }
 
     private companion object {

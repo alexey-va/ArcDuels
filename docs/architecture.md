@@ -42,20 +42,22 @@ The arena allocator queues accepted pairs FIFO. Per-arena loadout policies are
 evaluated together with objective compatibility locally and in Redis routing;
 they do not depend on server names. The coordinator owns both
 players while their request is queued, so racing challenges cannot allocate the
-same participant twice. Once an arena is available, Paper freezes inventory and
-movement mutations, captures both states on the primary thread, and commits the
-pair to MySQL atomically. No gameplay mutation happens before that future
-completes successfully. If the client loses the COMMIT response, ArcDuels keeps
-both players frozen and reconciles the exact rows through fresh connections. It
-requires an immediate read plus six delayed empty confirmations over 30 seconds
-before treating the pair as absent; lookup failure or a partial pair stays
-fail-closed.
+same participant twice. For a cross-server challenge, each origin Paper node
+captures and commits its own participant before allowing proxy transfer. The
+arena host verifies that both origin rows have the challenge-derived match id
+and immutable origin server id before it mutates either player. Same-server
+matches retain an atomic two-row commit. A lost COMMIT response is reconciled
+against the exact row through fresh connections; an immediate read plus six
+delayed empty confirmations over 30 seconds are required before absence is
+accepted.
 
-If HuskSync is present, accepted matches remain in the pre-start state until
+When the node policy selects HuskSync, accepted matches remain in the pre-start state until
 both players have emitted its successful synchronization-complete event.
 ArcDuels does not capture or mutate player state while that barrier is closed.
-Join-time recovery also waits for that event and a configured post-sync delay,
-preventing a late player-data load from replacing the restored kit inventory.
+Join-time recovery also waits for that event and a configured post-sync delay.
+It compares the loaded inventory to the origin snapshot first and applies
+nothing when they already match. A `NONE` arena node restores only its local
+pre-fight state before moving players to its lobby; it never claims an origin row.
 
 Completed matches retain player and arena ownership until Paper has applied and
 verified and saved both online snapshots. Only then does the coordinator release

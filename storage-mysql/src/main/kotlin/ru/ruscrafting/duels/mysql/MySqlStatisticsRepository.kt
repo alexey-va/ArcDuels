@@ -131,6 +131,11 @@ class MySqlStatisticsRepository(
         return savePairWithRetry(listOf(first, second).sortedBy { it.playerId.value }, attempt = 0)
     }
 
+    override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> {
+        validateEscrow(snapshot)
+        return saveWithRetry(snapshot, attempt = 0)
+    }
+
     override fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> =
         runtime.executor.read { connection -> findEscrow(connection, playerId, lock = false) }
 
@@ -237,6 +242,38 @@ class MySqlStatisticsRepository(
                     }
                 }
             }.thenCompose { it }
+
+    private fun saveWithRetry(
+        snapshot: PlayerStateEscrow,
+        attempt: Int,
+    ): CompletableFuture<Unit> =
+        runtime.executor.transaction { connection ->
+            val existing = findEscrow(connection, snapshot.playerId, lock = true)
+            if (existing == null) {
+                insertEscrow(connection, snapshot)
+            } else {
+                check(existing.sameContent(snapshot)) {
+                    "Player ${snapshot.playerId} already has a different pending state escrow"
+                }
+            }
+            val committed = checkNotNull(findEscrow(connection, snapshot.playerId, lock = false))
+            check(committed.sameContent(snapshot)) { "Committed escrow verification failed for ${snapshot.playerId}" }
+            validateEscrow(committed)
+        }.handle { result, failure ->
+            if (failure == null) {
+                CompletableFuture.completedFuture(result)
+            } else {
+                val cause = failure.unwrapCompletion()
+                if (attempt < MAX_TRANSACTION_RETRIES && cause.isRetryableMySqlTransactionFailure()) {
+                    CompletableFuture.runAsync(
+                        {},
+                        CompletableFuture.delayedExecutor(RETRY_BASE_DELAY_MS shl attempt, TimeUnit.MILLISECONDS),
+                    ).thenCompose { saveWithRetry(snapshot, attempt + 1) }
+                } else {
+                    CompletableFuture.failedFuture(cause)
+                }
+            }
+        }.thenCompose { it }
 
     private fun savePairTransaction(
         connection: Connection,

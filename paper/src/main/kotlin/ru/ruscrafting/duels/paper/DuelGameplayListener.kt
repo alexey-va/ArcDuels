@@ -40,6 +40,7 @@ internal class DuelGameplayListener(
     private val sessions: DuelSessionManager,
     private val locales: LocaleService,
     private val commandPolicy: DuelCommandPolicy = DuelCommandPolicy(),
+    private val controller: DuelController? = null,
 ) : Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -142,7 +143,10 @@ internal class DuelGameplayListener(
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
-    fun onQuit(event: PlayerQuitEvent) = sessions.handleQuit(event.player)
+    fun onQuit(event: PlayerQuitEvent) {
+        controller?.handleQuit(event.player)
+        sessions.handleQuit(event.player)
+    }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onJoin(event: PlayerJoinEvent) = sessions.handleJoin(event.player)

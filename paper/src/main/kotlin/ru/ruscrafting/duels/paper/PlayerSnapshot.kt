@@ -33,12 +33,72 @@ data class PlayerSnapshot(
     val velocity: Vector,
     val potionEffects: Collection<PotionEffect>,
 ) {
-    fun restoreState(player: Player) {
+    fun inventoryMatches(player: Player): Boolean =
+        player.inventory.storageContents.sameItems(storage) &&
+            player.inventory.armorContents.sameItems(armor) &&
+            player.inventory.itemInOffHand.sameItem(offHand) &&
+            player.itemOnCursor.sameItem(cursor) &&
+            player.inventory.heldItemSlot == heldItemSlot
+
+    fun locationMatches(player: Player): Boolean = player.location.sameLocation(location)
+
+    fun nonInventoryStateMatches(player: Player): Boolean =
+        player.gameMode == gameMode &&
+            player.allowFlight == allowFlight &&
+            player.isFlying == (flying && allowFlight) &&
+            player.foodLevel == foodLevel &&
+            player.saturation == saturation &&
+            player.exhaustion == exhaustion &&
+            player.totalExperience == totalExperience &&
+            player.level == level &&
+            player.exp == experience &&
+            player.fireTicks == fireTicks &&
+            player.fallDistance == fallDistance &&
+            player.remainingAir == remainingAir &&
+            player.noDamageTicks == noDamageTicks &&
+            player.absorptionAmount == absorptionAmount &&
+            player.health == restoredHealth(player) &&
+            player.activePotionEffects.toSet() == potionEffects.toSet() &&
+            player.velocity == velocity
+
+    fun restoreLocation(
+        player: Player,
+        teleport: (Player, Location) -> Boolean,
+    ) {
+        if (locationMatches(player)) return
+        check(teleport(player, location.clone())) { "Could not restore ${player.uniqueId} to their saved location" }
+        check(locationMatches(player)) { "Location verification failed" }
+    }
+
+    fun restoreInventory(player: Player) {
         player.inventory.storageContents = storage.clonedItems()
         player.inventory.armorContents = armor.clonedItems()
         player.inventory.setItemInOffHand(offHand?.clone())
         player.setItemOnCursor(cursor.clone())
         player.inventory.heldItemSlot = heldItemSlot
+        player.updateInventory()
+        check(inventoryMatches(player)) { "Inventory verification failed" }
+    }
+
+    fun restoreState(player: Player) {
+        restoreInventory(player)
+        restoreNonInventoryState(player)
+    }
+
+    fun restoreWithoutInventory(
+        player: Player,
+        teleport: (Player, Location) -> Boolean,
+    ) {
+        restoreNonInventoryState(player)
+        restoreLocation(player, teleport)
+        // Teleport listeners can normalize health and velocity.
+        restoreHealth(player)
+        player.velocity = velocity.clone()
+        verifyNonInventoryState(player)
+        check(locationMatches(player)) { "Location verification failed" }
+    }
+
+    private fun restoreNonInventoryState(player: Player) {
         player.gameMode = gameMode
         player.allowFlight = allowFlight
         player.isFlying = flying && allowFlight
@@ -56,7 +116,6 @@ data class PlayerSnapshot(
         player.activePotionEffects.forEach { player.removePotionEffect(it.type) }
         player.addPotionEffects(potionEffects)
         restoreHealth(player)
-        player.updateInventory()
     }
 
     fun restore(
@@ -64,7 +123,7 @@ data class PlayerSnapshot(
         teleport: (Player, Location) -> Boolean,
     ) {
         restoreState(player)
-        check(teleport(player, location.clone())) { "Could not restore ${player.uniqueId} to their saved location" }
+        restoreLocation(player, teleport)
         // Teleport listeners may update max-health modifiers or normalize current
         // health for the destination. Re-apply health against the post-teleport
         // attribute value before verifying the durable snapshot.
@@ -97,8 +156,12 @@ data class PlayerSnapshot(
             "Health verification failed"
         }
         check(player.activePotionEffects.toSet() == potionEffects.toSet()) { "Potion effect verification failed" }
-        check(player.location.sameLocation(location)) { "Location verification failed" }
+        check(locationMatches(player)) { "Location verification failed" }
         check(player.velocity == velocity) { "Velocity verification failed" }
+    }
+
+    private fun verifyNonInventoryState(player: Player) {
+        check(nonInventoryStateMatches(player)) { "Non-inventory state verification failed" }
     }
 
     private fun restoreHealth(player: Player) {

@@ -202,6 +202,23 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             duplicate shouldBe firstWrite.copy(newlyRecorded = false)
         }
 
+        "single origin state save is idempotent and rejects conflicting bytes" {
+            val serverId = ServerId("duels-origin-it")
+            val matchId = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000055"))
+            val state = escrow("00000000-0000-0000-0000-000000000056", matchId, serverId, "origin-state")
+
+            repository.save(state).get()
+            repository.save(state).get()
+
+            repository.findPending(state.playerId).get()?.sameContent(state) shouldBe true
+            val conflicting = escrow(state.playerId.value.toString(), matchId, serverId, "different-origin-state")
+            shouldThrow<ExecutionException> { repository.save(conflicting).get() }
+            repository.findPending(state.playerId).get()?.sameContent(state) shouldBe true
+
+            val restoredAt = Instant.parse("2026-08-14T11:00:00Z")
+            repository.retainRestored(state, restoredAt, restoredAt.plusSeconds(3600)).get() shouldBe true
+        }
+
         "player state pair is atomically moved to retained history and purged only after expiry" {
             val serverId = ServerId("duels-it")
             val matchId = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000060"))

@@ -40,7 +40,9 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.isEnabled shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
         plugin.config.getInt("countdown-seconds") shouldBe 0
-        plugin.config.getLong("recovery.apply-delay-ticks") shouldBe 40L
+        plugin.config.getString("player-data-sync.provider") shouldBe "AUTO"
+        plugin.config.getLong("player-data-sync.settle-delay-ticks") shouldBe 40L
+        plugin.config.getString("post-match.return-policy") shouldBe "PROMPT"
         plugin.getCommand("duel")?.executor?.javaClass shouldBe DuelCommand::class.java
         KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "boxing", "classic", "sumo", "tank", "uhc")
         java.io.File(plugin.dataFolder, "lang/ru.yml").isFile shouldBe true

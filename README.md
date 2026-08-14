@@ -35,10 +35,13 @@ This repository is under active development. The first vertical slice targets:
 - bounded arenas with per-arena loadout and objective compatibility, scoped
   internal teleports and protected player inventories;
 - FIFO waiting for a free arena and in-game `/duels admin` GUI and commands;
-- a HuskSync completion barrier before any duel snapshot or inventory mutation;
-- crash-safe, versioned MySQL player-state escrow before any duel mutation,
+- an explicit per-node player-data synchronization policy (`AUTO`, `HUSKSYNC`, or `NONE`);
+- crash-safe, versioned MySQL player-state escrow on each origin backend before
+  any cross-server transfer or duel mutation,
   a player recovery entry for unclaimed snapshots, and administrator-only replay
   of claimed snapshots retained for configurable N days;
+- post-match arena lobbies with a clickable, player-controlled return to the
+  origin backend and compare-before-apply inventory recovery;
 - arena-scoped WorldGuard PvP compatibility with startup warnings instead of
   broad changes to a world's region policy;
 - real KOTH capture zones with contested progress, particles, action bars, and

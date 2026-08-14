@@ -44,7 +44,7 @@ internal class DuelAdminCommand(
             return filter(sender.server.onlinePlayers.map(Player::getName), args[1])
         }
         if (!args[0].equals("arena", true)) return emptyList()
-        if (args.size == 2) return filter(listOf("create", "setspawn", "setcorner", "sethill", "setloadouts", "setobjectives", "enable", "disable", "list", "info", "reload"), args[1])
+        if (args.size == 2) return filter(listOf("create", "setspawn", "setlobby", "setcorner", "sethill", "setloadouts", "setobjectives", "enable", "disable", "list", "info", "reload"), args[1])
         val operation = args[1].lowercase()
         if (args.size == 3 && operation != "create" && operation !in setOf("list", "reload")) {
             return filter(arenaIds(), args[2])
@@ -86,6 +86,15 @@ internal class DuelAdminCommand(
                 writeLocation("$path.${if (point == 1) "first-spawn" else "second-spawn"}", player.location)
                 disableWhileEditing(path, id)
                 sender.sendMessage(message(sender, "admin.spawn-saved", LocaleService.text("point", point), LocaleService.text("arena", id.value)))
+            }
+            "setlobby" -> {
+                val player = requirePlayer(sender) ?: return
+                if (!requireIdle(sender)) return
+                val id = existingId(sender, args.getOrNull(1)) ?: return
+                val path = "arenas.${id.value}"
+                writeLocation("$path.lobby", player.location)
+                disableWhileEditing(path, id)
+                sender.sendMessage(message(sender, "admin.lobby-saved", LocaleService.text("arena", id.value)))
             }
             "setcorner" -> {
                 val player = requirePlayer(sender) ?: return
@@ -247,8 +256,9 @@ internal class DuelAdminCommand(
         val minimum = plugin.config.getConfigurationSection("$path.bounds.min")
         val maximum = plugin.config.getConfigurationSection("$path.bounds.max")
         val hill = plugin.config.getConfigurationSection("$path.hill.center")
+        val lobby = plugin.config.getConfigurationSection("$path.lobby")
         val stateKey = if (plugin.config.getBoolean("$path.enabled")) "admin.state-enabled" else "admin.state-disabled"
-        sender.sendMessage(message(sender, "admin.arena-info", LocaleService.text("arena", id.value), LocaleService.component("state", message(sender, stateKey)), LocaleService.text("spawn1", first != null), LocaleService.text("spawn2", second != null), LocaleService.text("corner1", minimum != null), LocaleService.text("corner2", maximum != null), LocaleService.text("hill", hill != null)))
+        sender.sendMessage(message(sender, "admin.arena-info", LocaleService.text("arena", id.value), LocaleService.component("state", message(sender, stateKey)), LocaleService.text("spawn1", first != null), LocaleService.text("spawn2", second != null), LocaleService.text("corner1", minimum != null), LocaleService.text("corner2", maximum != null), LocaleService.text("hill", hill != null), LocaleService.text("lobby", lobby != null)))
     }
 
     private fun recover(
