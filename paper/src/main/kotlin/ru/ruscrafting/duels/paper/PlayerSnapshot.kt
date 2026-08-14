@@ -1,5 +1,6 @@
 package ru.ruscrafting.duels.paper
 
+import kotlin.math.abs
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.attribute.Attribute
@@ -52,7 +53,7 @@ data class PlayerSnapshot(
             if (player.totalExperience != totalExperience || player.level != level || player.exp != experience) add("experience")
             if (player.fireTicks != fireTicks || player.fallDistance != fallDistance || player.remainingAir != remainingAir) add("movement")
             if (player.noDamageTicks != noDamageTicks || player.absorptionAmount != absorptionAmount) add("damage")
-            if (player.health != restoredHealth(player)) add("health")
+            if (!healthMatches(player)) add("health")
             if (player.activePotionEffects.toSet() != potionEffects.toSet()) add("potionEffects")
             if (player.velocity != velocity) add("velocity")
         }
@@ -145,7 +146,7 @@ data class PlayerSnapshot(
         check(player.noDamageTicks == noDamageTicks && player.absorptionAmount == absorptionAmount) {
             "Damage state verification failed"
         }
-        check(player.health == restoredHealth(player)) {
+        check(healthMatches(player)) {
             "Health verification failed"
         }
         check(player.activePotionEffects.toSet() == potionEffects.toSet()) { "Potion effect verification failed" }
@@ -162,12 +163,17 @@ data class PlayerSnapshot(
         player.health = restoredHealth(player)
     }
 
+    private fun healthMatches(player: Player): Boolean =
+        abs(player.health - restoredHealth(player)) <= HEALTH_EPSILON
+
     private fun restoredHealth(player: Player): Double {
         val maximumHealth = player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
         return health.coerceIn(0.1, maximumHealth)
     }
 
     companion object {
+        private const val HEALTH_EPSILON = 0.00001
+
         fun capture(player: Player): PlayerSnapshot =
             PlayerSnapshot(
                 location = player.location.clone(),

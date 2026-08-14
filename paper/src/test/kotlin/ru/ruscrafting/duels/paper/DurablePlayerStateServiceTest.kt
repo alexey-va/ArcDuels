@@ -3,6 +3,7 @@ package ru.ruscrafting.duels.paper
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.collections.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import org.bukkit.Material
@@ -341,6 +342,16 @@ class DurablePlayerStateServiceTest : StringSpec({
         player.foodLevel shouldBe 13
         player.noDamageTicks shouldBe 7
         snapshot.nonInventoryStateMismatches(player) shouldBe emptyList()
+    }
+
+    "health verification tolerates attribute float normalization" {
+        val player = server.addPlayer()
+        player.health = 18.0
+        val snapshot = PlayerSnapshot.capture(player)
+
+        player.health = 17.9999995
+
+        snapshot.nonInventoryStateMismatches(player) shouldNotContain "health"
     }
 
     "overlapping archive cleanup runs are coalesced" {
