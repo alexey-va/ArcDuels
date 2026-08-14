@@ -146,7 +146,13 @@ open class ArcDuelsPlugin : JavaPlugin() {
             server.scheduler.runTaskTimer(this, publishArenaStatus, ARENA_HEARTBEAT_TICKS, ARENA_HEARTBEAT_TICKS)
         }
         logger.info("ArcDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
-        if (arenas.size() == 0) logger.warning("No enabled duel arenas are configured; challenges cannot start yet")
+        if (arenas.size() == 0) {
+            if (hasUsableArenaRoute(arenas.size(), network.arenas != null)) {
+                logger.info("No local duel arenas are configured; compatible Redis arena routing is enabled")
+            } else {
+                logger.warning("No enabled duel arenas are configured; challenges cannot start yet")
+            }
+        }
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
     }
 
@@ -344,3 +350,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
         const val ARENA_HEARTBEAT_TICKS = 40L
     }
 }
+
+internal fun hasUsableArenaRoute(
+    localArenaCount: Int,
+    networkArenaRoutingEnabled: Boolean,
+): Boolean = localArenaCount > 0 || networkArenaRoutingEnabled

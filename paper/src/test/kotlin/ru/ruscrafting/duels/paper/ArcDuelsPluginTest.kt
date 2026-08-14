@@ -63,6 +63,12 @@ class ArcDuelsPluginTest : StringSpec({
         localeWarnings.none { "already exists" in it } shouldBe true
     }
 
+    "network arena routing prevents a false no-arena startup failure" {
+        hasUsableArenaRoute(localArenaCount = 0, networkArenaRoutingEnabled = true) shouldBe true
+        hasUsableArenaRoute(localArenaCount = 0, networkArenaRoutingEnabled = false) shouldBe false
+        hasUsableArenaRoute(localArenaCount = 1, networkArenaRoutingEnabled = false) shouldBe true
+    }
+
     "player snapshot restores cursor slot experience and movement state" {
         val player = server.addPlayer()
         val world = server.addSimpleWorld("snapshot-world")
