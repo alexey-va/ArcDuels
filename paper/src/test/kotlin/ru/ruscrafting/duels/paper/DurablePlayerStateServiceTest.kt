@@ -3,12 +3,14 @@ package ru.ruscrafting.duels.paper
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.mockk.every
 import io.mockk.mockk
 import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.ruscrafting.duels.domain.MatchId
+import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
@@ -272,6 +274,45 @@ class DurablePlayerStateServiceTest : StringSpec({
         player.level shouldBe 7
         saveCalls shouldBe 1
         service.isPending(player.uniqueId) shouldBe false
+        sessions.shutdown()
+    }
+
+    "remote recovery retries a failed backend switch until the player leaves" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val player = server.addPlayer()
+        val originService = DurablePlayerStateService(plugin, ServerId("spawn"), repository)
+        originService.store(MatchId.random(), player, inventoryReplaced = false).get()
+        val remoteService = DurablePlayerStateService(plugin, ServerId("survival"), repository)
+        val destinations = mutableListOf<ServerId>()
+        val coordinator = mockk<MatchCoordinator>(relaxed = true)
+        every { coordinator.findByPlayer(any()) } returns null
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                coordinator,
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                remoteService,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                remoteRecoveryTransfer = { _, destination -> destinations += destination },
+                recoveryApplyDelayTicks = 0L,
+            )
+
+        sessions.handleJoin(player)
+
+        destinations shouldBe listOf(ServerId("spawn"))
+        sessions.isPreparing(player) shouldBe true
+        server.scheduler.performTicks(99)
+        destinations.size shouldBe 1
+        server.scheduler.performTicks(1)
+        destinations shouldBe listOf(ServerId("spawn"), ServerId("spawn"))
+
+        sessions.handleQuit(player)
+        server.scheduler.performTicks(200)
+        destinations.size shouldBe 2
+        sessions.isPreparing(player) shouldBe false
         sessions.shutdown()
     }
 

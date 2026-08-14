@@ -15,6 +15,8 @@ class DuelInteractionPolicyTest : StringSpec({
         policy.isAllowed("/minecraft:tell Alex привет") shouldBe true
         policy.isAllowed("/duel") shouldBe true
         policy.isAllowed("/duel leave") shouldBe true
+        policy.isAllowed("/duel return") shouldBe true
+        policy.isAllowed("/дуэль вернуться") shouldBe true
         policy.isAllowed("/duels stats") shouldBe true
         policy.isAllowed("/duels top") shouldBe false
         policy.isAllowed("/spawn") shouldBe false
@@ -64,7 +66,7 @@ class DuelInteractionPolicyTest : StringSpec({
 
     "command policy rejects whitespace aliases and unsafe duel subcommands" {
         val policy = DuelCommandPolicy()
-        val allowed = listOf(" /r ok ", "/minecraft:msg Alex hi", "/duel", "/duel stats", "/дуэль покинуть")
+        val allowed = listOf(" /r ok ", "/minecraft:msg Alex hi", "/duel", "/duel stats", "/duel return", "/дуэль покинуть")
         val rejected = listOf("", "/", "/duel top", "/duel accept", "/minecraft:tp x", "/spawn")
 
         allowed.forEach { policy.isAllowed(it) shouldBe true }

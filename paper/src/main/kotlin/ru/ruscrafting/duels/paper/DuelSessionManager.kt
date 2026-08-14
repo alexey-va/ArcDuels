@@ -60,6 +60,7 @@ class DuelSessionManager internal constructor(
     private val pendingStarts = ConcurrentHashMap<UUID, CompletableFuture<DuelMatch>>()
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val recoveryTokens = ConcurrentHashMap<UUID, UUID>()
+    private val remoteRecoveryTokens = ConcurrentHashMap<UUID, UUID>()
     private val restoringPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val expectedNetworkPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val networkLobbyPlayers = ConcurrentHashMap.newKeySet<UUID>()
@@ -499,9 +500,63 @@ class DuelSessionManager internal constructor(
             player.sendMessage(locales.component(player, "session.remote-recovery-unavailable", LocaleService.text("server", escrow.serverId.value)))
             return false
         }
+        val token = UUID.randomUUID()
+        if (remoteRecoveryTokens.putIfAbsent(player.uniqueId, token) != null) return true
         player.sendMessage(locales.component(player, "session.remote-recovery", LocaleService.text("server", escrow.serverId.value)))
-        transfer(player, escrow.serverId)
+        requestRemoteRecoveryTransfer(player, escrow, token, transfer)
         return true
+    }
+
+    private fun requestRemoteRecoveryTransfer(
+        player: Player,
+        escrow: PlayerStateEscrow,
+        token: UUID,
+        transfer: (Player, ServerId) -> Unit,
+    ) {
+        if (!player.isOnline || remoteRecoveryTokens[player.uniqueId] != token) return
+        runCatching { transfer(player, escrow.serverId) }
+            .onFailure { failure ->
+                plugin.logger.warning(
+                    "Could not transfer duel recovery player ${player.uniqueId} to ${escrow.serverId}: ${unwrap(failure).message}",
+                )
+            }
+        plugin.server.scheduler.runTaskLater(
+            plugin,
+            Runnable { retryRemoteRecoveryTransfer(player, escrow, token, transfer) },
+            REMOTE_RECOVERY_RETRY_TICKS,
+        )
+    }
+
+    private fun retryRemoteRecoveryTransfer(
+        player: Player,
+        escrow: PlayerStateEscrow,
+        token: UUID,
+        transfer: (Player, ServerId) -> Unit,
+    ) {
+        if (!player.isOnline || remoteRecoveryTokens[player.uniqueId] != token) return
+        playerStates.discover(player.uniqueId).whenComplete { current, failure ->
+            runSync {
+                if (!player.isOnline || remoteRecoveryTokens[player.uniqueId] != token) return@runSync
+                if (failure != null) {
+                    plugin.logger.warning(
+                        "Could not verify remote duel recovery for ${player.uniqueId}: ${unwrap(failure).message}",
+                    )
+                    requestRemoteRecoveryTransfer(player, escrow, token, transfer)
+                    return@runSync
+                }
+                if (current == escrow) {
+                    requestRemoteRecoveryTransfer(player, escrow, token, transfer)
+                    return@runSync
+                }
+
+                remoteRecoveryTokens.remove(player.uniqueId, token)
+                when {
+                    current == null -> preparingPlayers -= player.uniqueId
+                    playerStates.isLocal(current) -> schedulePendingRecovery(player, current)
+                    else -> routeRemoteRecovery(player, current)
+                }
+            }
+        }
     }
 
     fun handleElimination(loser: Player) {
@@ -557,6 +612,7 @@ class DuelSessionManager internal constructor(
 
     fun handleQuit(player: Player) {
         recoveryTokens.remove(player.uniqueId)
+        remoteRecoveryTokens.remove(player.uniqueId)
         networkLobbyPlayers -= player.uniqueId
         pendingStarts[player.uniqueId]?.cancel(false)
         val match = matchFor(player)
@@ -656,6 +712,7 @@ class DuelSessionManager internal constructor(
         sessions.clear()
         sessionByPlayer.clear()
         recoveryTokens.clear()
+        remoteRecoveryTokens.clear()
         restoringPlayers.clear()
         expectedNetworkPlayers.clear()
         networkLobbyPlayers.clear()
@@ -1206,6 +1263,7 @@ class DuelSessionManager internal constructor(
         const val OBJECTIVE_PERIOD_TICKS = 10L
         const val HILL_PARTICLES = 16
         const val RECOVERY_RETRY_TICKS = 60L
+        const val REMOTE_RECOVERY_RETRY_TICKS = 100L
         const val RECOVERY_READY_POLL_TICKS = 5L
     }
 }

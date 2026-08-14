@@ -15,6 +15,6 @@ internal class DuelCommandPolicy {
         val WHITESPACE = Regex("\\s+")
         val CHAT_COMMANDS = setOf("msg", "tell", "w", "whisper", "r", "reply")
         val DUEL_COMMANDS = setOf("duel", "duels", "дуэль")
-        val SAFE_DUEL_SUBCOMMANDS = setOf("leave", "покинуть", "stats", "статы")
+        val SAFE_DUEL_SUBCOMMANDS = setOf("leave", "покинуть", "return", "вернуться", "stats", "статы")
     }
 }
