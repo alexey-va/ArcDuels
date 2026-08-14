@@ -34,6 +34,9 @@ class DuelAdminCommandTest : StringSpec({
 
         admin.execute(player, listOf("arena", "create", "alpha"))
         plugin.config.getBoolean("arenas.alpha.enabled") shouldBe false
+        plugin.config.getStringList("arenas.alpha.allowed-loadouts").toSet() shouldBe setOf("KIT", "OWN_INVENTORY")
+        admin.execute(player, listOf("arena", "setloadouts", "alpha", "own"))
+        plugin.config.getStringList("arenas.alpha.allowed-loadouts") shouldBe listOf("OWN_INVENTORY")
 
         player.teleport(Location(world, -6.5, 70.0, 0.5, -90f, 0f))
         admin.execute(player, listOf("arena", "setspawn", "alpha", "1"))

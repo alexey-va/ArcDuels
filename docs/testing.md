@@ -12,16 +12,18 @@ The suite covers:
 
 - challenge authorization, expiry, duplicate pairs, and bounded TTL;
 - every match transition, BO1/BO3 scoring, forfeits, objectives, and cleanup;
-- exact KOTH capture thresholds, contested-progress pauses, compatible-arena
-  selection, and invalid SUMO/loadout combinations;
+- exact KOTH capture thresholds, contested-progress pauses, per-arena objective
+  and loadout selection, and invalid SUMO/loadout combinations;
 - queued player ownership, FIFO arena handoff, cancellation, and overlapping persistence completion;
 - local statistics idempotency under concurrent duplicate writes;
 - long result sequences, rating bounds, streaks, revisions, and leaderboards;
 - Redis event and challenge codec validation, authenticated origins, listener
   isolation, dedupe, source collisions, player-snapshot TTL expiry, blank
-  backend handling, and dynamic objective-compatible arena-node selection;
+  backend handling, schema-version rejection, and dynamic objective/loadout-compatible
+  arena-node selection;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
-  arena and kit validation, pagination matrices, teleport authorization, and
+  arena and kit validation, HuskSync readiness gating, pagination matrices,
+  teleport authorization, and
   damage-free celebration entities, default-kit presence, and strict Russian /
   English locale-key and MiniMessage parity.
 

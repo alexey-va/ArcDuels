@@ -39,7 +39,7 @@ menu:
   loadouts:
     title: '<dark_gray>Loadout</dark_gray>'
     own: '<gold><bold>Own inventory</bold></gold>'
-    own-lore: ['<dark_gray>✖</dark_gray> <white>Each player uses their own items.</white>', '<gray>A snapshot is committed to MySQL before</gray>', '<gray>teleport and restored after the match.</gray>', '', '<aqua>Left click</aqua> <gray>Select</gray>']
+    own-lore: ['<dark_gray>✖</dark_gray> <white>Each player uses their own items.</white>', '<gray>Your state is protected before teleport</gray>', '<gray>and restored after the match.</gray>', '', '<aqua>Left click</aqua> <gray>Select</gray>']
     sumo-missing: '<red>The sumo kit is not configured</red>'
     kit-hint: ['', '<aqua>Left click</aqua> <gray>Select this kit</gray>']
   rules:
@@ -110,6 +110,11 @@ menu:
     point-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '', '<aqua>Left click</aqua> <gray>Save current position</gray>']
     hill: '<gold><bold>Hill objective</bold></gold>'
     hill-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '<gray>Radius 3.5, height 3 blocks.</gray>', '', '<aqua>Left click</aqua> <gray>Save current position</gray>']
+    loadouts: '<gold><bold>Arena loadouts</bold></gold>'
+    loadouts-lore: ['<gray>Allowed:</gray> <loadout>', '', '<aqua>Left click</aqua> <gray>Cycle policy</gray>']
+    loadouts-all: '<white>own inventory and kits</white>'
+    loadouts-own_inventory: '<white>own inventory only</white>'
+    loadouts-kit: '<white>kits only</white>'
     enable: '<green><bold>Validate and enable</bold></green>'
     enable-lore: ['<gray>Validate the world, points, bounds, hill,</gray>', '<gray>and separation from every other arena.</gray>', '', '<aqua>Left click</aqua> <gray>Enable arena</gray>']
     disable: '<red><bold>Disable arena</bold></red>'
@@ -161,10 +166,10 @@ controller:
   sent: '<green>Challenge sent to <white><player></white>.</green>'
   failed: '<red>Could not process the duel challenge.</red>'
   network-unavailable: '<red>Network challenges are currently unavailable.</red>'
-  no-network-arena: '<red>No live server currently has an arena compatible with this objective.</red>'
+  no-network-arena: '<red>No live arena currently supports the selected objective and loadout.</red>'
   network-transfer: '<gray>Challenge accepted. Moving you to arena server</gray> <white><server></white><gray>…</gray>'
   network-return: '<gray>Your state is restored. Returning you to server</gray> <white><server></white><gray>…</gray>'
-  network-timeout: '<red>Both players did not reach the arena server in time.</red>'
+  network-timeout: '<red>Both players could not be prepared for the duel in time.</red>'
   expired: '<red>This challenge has expired.</red>'
   start-failed: '<red>Could not start the duel: <reason></red>'
   wait-cancelled: '<gray>arena wait was cancelled</gray>'
@@ -198,10 +203,10 @@ controller:
 
 session:
   queued: '<yellow>All compatible arenas are busy. Your pair is queue position <white>#<position></white>.</yellow>'
-  recovery-check-retry: '<red>MySQL recovery check is temporarily unavailable.</red> <yellow>Your state is locked safely; ArcDuels will retry automatically.</yellow>'
-  remote-recovery: '<red>You have an unfinished ArcDuels recovery on server <white><server></white>.</red> <yellow>Return there or contact an administrator; the snapshot remains in MySQL.</yellow>'
+  recovery-check-retry: '<red>The recovery check is temporarily unavailable.</red> <yellow>Your state is locked safely; ArcDuels will retry automatically.</yellow>'
+  remote-recovery: '<red>You have an unfinished ArcDuels recovery on server <white><server></white>.</red> <yellow>Return there or contact an administrator; a protected copy remains available.</yellow>'
   recovering: '<yellow>Restoring your saved state from an unfinished duel…</yellow>'
-  recovery-failed: '<red>State recovery failed. Contact an administrator; your inventory remains stored in MySQL.</red>'
+  recovery-failed: '<red>State recovery failed. Contact an administrator; a protected copy of your inventory remains available.</red>'
   fight-title: '<red><bold>FIGHT!</bold></red>'
   fight-subtitle: '<gray>Good luck — you may need it</gray>'
   hill-contested: '<yellow>Hill contested</yellow>'
@@ -216,7 +221,7 @@ session:
   match-loss: '<gradient:#ff5555:#aa0000><bold>DEFEAT</bold></gradient>'
   persistence-retry: '<red>Could not save the result. Retrying in 3 seconds…</red>'
   restored: '<green>Your inventory and state were safely restored.</green>'
-  ack-retry: '<yellow>Your state is restored, but its safe archival in MySQL will retry. Do not leave the server.</yellow>'
+  ack-retry: '<yellow>Your state is restored, but the final safety check will retry. Do not leave the server.</yellow>'
   score: '<gray>Score:</gray> <aqua><first></aqua> <dark_gray>—</dark_gray> <red><second></red>'
   command-blocked: '<red>This command is unavailable during a duel.</red> <gray>Forfeit with <white>/duel leave</white></gray>'
 
@@ -234,6 +239,11 @@ admin:
   corner-saved: '<green>Corner <point> for arena <white><arena></white> was saved.</green> <gray>Coordinates are normalized when enabled.</gray>'
   hill-range: '<red>Hill radius and height must be between 1 and 32 blocks.</red>'
   hill-saved: '<green>Hill for arena <white><arena></white> was saved: radius <radius>, height <height>.</green>'
+  loadouts-invalid: '<red>Choose all, own, or kit.</red>'
+  loadouts-saved: '<green>Arena <white><arena></white> now supports: <loadout>.</green>'
+  loadouts-all: '<white>own inventory and kits</white>'
+  loadouts-own_inventory: '<white>own inventory only</white>'
+  loadouts-kit: '<white>kits only</white>'
   arena-invalid: '<red>Arena was not applied: <reason></red>'
   arena-enabled: '<green>Arena <white><arena></white> was validated and enabled. Active arenas: <count>.</green>'
   arena-disabled: '<yellow>Arena <white><arena></white> was disabled. Active arenas: <count>.</yellow>'
@@ -261,6 +271,7 @@ admin:
     - '<white>/duels admin arena setspawn (id) (1|2)</white>'
     - '<white>/duels admin arena setcorner (id) (1|2)</white>'
     - '<white>/duels admin arena sethill (id) [radius] [height]</white>'
+    - '<white>/duels admin arena setloadouts (id) (all|own|kit)</white>'
     - '<white>/duels admin arena enable|disable (id)</white>'
     - '<white>/duels admin arena list|info (id)|reload</white>'
     - '<white>/duels admin status</white>'
@@ -274,6 +285,6 @@ help:
     - '<white>/duel accept|deny</white> <gray>— accept or reject</gray>'
     - '<white>/duel leave</white> <gray>— forfeit</gray>'
     - '<white>/duel stats</white> <gray>— statistics</gray>'
-    - '<green>Your inventory is stored in MySQL before teleport</green>'
-    - '<green>and escrow is deleted only after successful restoration.</green>'
+    - '<green>Your inventory is protected before teleport</green>'
+    - '<green>and restored before the duel is complete.</green>'
     - '<dark_gray>────────────────────────</dark_gray>'

@@ -23,10 +23,10 @@ Enable `redis.enabled` for the network player picker, cross-server challenges,
 live arena routing, win announcements, and leaderboard invalidation. ProxyARC's
 authenticated `arc.proxy_player_list` snapshot is the authoritative online
 directory; entries expire locally when the proxy heartbeat becomes stale.
-Every ArcDuels node also publishes its objective-compatible arena capacity,
-free slots, and queue depth. When a challenge is accepted, the plugin chooses
-a live compatible node by free capacity and load, then transfers both players
-there through the proxy. No fixed arena server is configured or assumed. Once
+Every ArcDuels node also publishes its objective- and loadout-compatible arena
+capacity, free slots, and queue depth. When a challenge is accepted, the plugin
+chooses a live compatible node by free capacity and load, then transfers both
+players there through the proxy. No fixed arena server is configured or assumed. Once
 the match result is durable and both inventory snapshots have been restored
 and released, each participant is returned to the backend they came from.
 
@@ -89,6 +89,7 @@ unsafe placeholder coordinates.
 arenas:
   colosseum:
     enabled: true
+    allowed-loadouts: [OWN_INVENTORY, KIT]
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
     second-spawn: { world: duels, x: 8.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
     bounds:
@@ -100,6 +101,11 @@ arenas:
       height: 3.0
 ```
 
+`allowed-loadouts` is an arena policy, not a server role. It accepts
+`OWN_INVENTORY`, `KIT`, or both; omitting it keeps both modes enabled for
+backward compatibility. This lets one network dedicate individual arenas to
+personal items or kits without ArcDuels knowing server names or topology.
+
 Arena reservations are exclusive. If all arenas are occupied, accepted pairs
 wait in FIFO order without touching either player's inventory. Queue ownership
 prevents either participant from entering another duel. Both spawns must be
@@ -107,11 +113,10 @@ inside the bounds and use the same loaded world. Leaving the bounds loses the
 round; only scoped ArcDuels teleports and in-bounds combat teleports are
 accepted while a player owns an arena.
 
-Network arena heartbeats distinguish ordinary/sumo arenas from arenas that
-contain a valid KOTH hill. A KOTH challenge is never routed to a node that only
-has ordinary arenas. Stale or spoofed heartbeats are ignored; a capacity race
-is still safe because the destination's normal exclusive FIFO allocator is the
-final authority.
+Network arena heartbeats distinguish both objective support and allowed
+loadouts. A challenge is never routed to a node without a compatible arena.
+Stale or spoofed heartbeats are ignored; a capacity race is still safe because
+the destination's normal exclusive FIFO allocator is the final authority.
 
 Operators can configure arenas in game. Any point edit disables the arena until
 the full definition validates again; edits and reloads are rejected while a
@@ -122,11 +127,16 @@ match owns an arena or a pair is waiting.
 /duels admin arena setspawn <id> <1|2>
 /duels admin arena setcorner <id> <1|2>
 /duels admin arena sethill <id> [radius] [height]
+/duels admin arena setloadouts <id> <all|own|kit>
 /duels admin arena enable|disable <id>
 /duels admin arena list
 /duels admin arena info <id>
 /duels admin arena reload
 ```
+
+`/duels admin` opens the graphical editor. The commands remain available for
+automation and console operation; the arena editor cycles the same loadout
+policy directly in the arena details screen.
 
 ## Kits
 
@@ -147,6 +157,11 @@ transaction response is safe to retry. Archived rows are never auto-applied, so
 retention cannot rewind or duplicate a player's later inventory. A crash before
 that transaction commits leaves the active row and causes the same idempotent
 restore on the next join.
+
+When HuskSync is installed, ArcDuels also waits for its successful login-sync
+completion event for both participants before it asks the durable snapshot
+service to capture anything. A transfer or fresh login therefore cannot race
+duel inventory capture against network player-data application.
 
 Restored snapshots are retained for seven days by default and expired archive
 rows are purged in bounded batches once per hour. Both values are configurable:

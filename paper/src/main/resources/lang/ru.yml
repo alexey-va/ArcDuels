@@ -39,7 +39,7 @@ menu:
   loadouts:
     title: '<dark_gray>Снаряжение</dark_gray>'
     own: '<gold><bold>Свои вещи</bold></gold>'
-    own-lore: ['<dark_gray>✖</dark_gray> <white>Каждый использует свой инвентарь.</white>', '<gray>Снимок сохраняется в MySQL до телепорта</gray>', '<gray>и восстанавливается после боя.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать</gray>']
+    own-lore: ['<dark_gray>✖</dark_gray> <white>Каждый использует свой инвентарь.</white>', '<gray>Состояние защищено до телепорта</gray>', '<gray>и восстанавливается после боя.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать</gray>']
     sumo-missing: '<red>Кит sumo не настроен</red>'
     kit-hint: ['', '<aqua>ЛКМ</aqua> <gray>Выбрать набор</gray>']
   rules:
@@ -110,6 +110,11 @@ menu:
     point-lore: ['<gray>Сейчас:</gray> <yellow><value></yellow>', '', '<aqua>ЛКМ</aqua> <gray>Сохранить текущую позицию</gray>']
     hill: '<gold><bold>Точка захвата</bold></gold>'
     hill-lore: ['<gray>Сейчас:</gray> <yellow><value></yellow>', '<gray>Радиус 3.5, высота 3 блока.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Сохранить текущую позицию</gray>']
+    loadouts: '<gold><bold>Снаряжение на арене</bold></gold>'
+    loadouts-lore: ['<gray>Разрешено:</gray> <loadout>', '', '<aqua>ЛКМ</aqua> <gray>Переключить режим</gray>']
+    loadouts-all: '<white>свои вещи и киты</white>'
+    loadouts-own_inventory: '<white>только свои вещи</white>'
+    loadouts-kit: '<white>только киты</white>'
     enable: '<green><bold>Проверить и включить</bold></green>'
     enable-lore: ['<gray>Проверить мир, точки, границы, холм</gray>', '<gray>и отсутствие пересечений с аренами.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Включить арену</gray>']
     disable: '<red><bold>Выключить арену</bold></red>'
@@ -161,10 +166,10 @@ controller:
   sent: '<green>Вызов отправлен игроку <white><player></white>.</green>'
   failed: '<red>Не удалось обработать вызов на дуэль.</red>'
   network-unavailable: '<red>Сетевые вызовы сейчас недоступны.</red>'
-  no-network-arena: '<red>Сейчас нет доступного сервера с ареной для этого режима.</red>'
+  no-network-arena: '<red>Сейчас нет доступной арены для выбранного режима и снаряжения.</red>'
   network-transfer: '<gray>Вызов принят. Перевожу тебя на сервер арены</gray> <white><server></white><gray>…</gray>'
   network-return: '<gray>Состояние восстановлено. Возвращаю тебя на сервер</gray> <white><server></white><gray>…</gray>'
-  network-timeout: '<red>Не удалось собрать обоих игроков на сервере арены вовремя.</red>'
+  network-timeout: '<red>Не удалось вовремя подготовить обоих игроков к дуэли.</red>'
   expired: '<red>Этот вызов уже истёк.</red>'
   start-failed: '<red>Не удалось начать дуэль: <reason></red>'
   wait-cancelled: '<gray>ожидание арены отменено</gray>'
@@ -198,10 +203,10 @@ controller:
 
 session:
   queued: '<yellow>Все совместимые арены заняты. Ваша пара в очереди: <white>#<position></white>.</yellow>'
-  recovery-check-retry: '<red>Проверка восстановления в MySQL временно недоступна.</red> <yellow>Состояние надёжно заблокировано; ArcDuels повторит попытку автоматически.</yellow>'
-  remote-recovery: '<red>У тебя есть незавершённое восстановление ArcDuels на сервере <white><server></white>.</red> <yellow>Вернись туда или обратись к администратору; снимок сохранён в MySQL.</yellow>'
+  recovery-check-retry: '<red>Проверка восстановления временно недоступна.</red> <yellow>Состояние надёжно заблокировано; ArcDuels повторит попытку автоматически.</yellow>'
+  remote-recovery: '<red>У тебя есть незавершённое восстановление ArcDuels на сервере <white><server></white>.</red> <yellow>Вернись туда или обратись к администратору; защищённая копия сохранена.</yellow>'
   recovering: '<yellow>Восстанавливаю сохранённое состояние после незавершённой дуэли…</yellow>'
-  recovery-failed: '<red>Состояние не восстановлено. Обратись к администратору; инвентарь остаётся сохранён в MySQL.</red>'
+  recovery-failed: '<red>Состояние не восстановлено. Обратись к администратору; защищённая копия инвентаря сохранена.</red>'
   fight-title: '<red><bold>В БОЙ!</bold></red>'
   fight-subtitle: '<gray>Удачи — она пригодится</gray>'
   hill-contested: '<yellow>Холм оспаривается</yellow>'
@@ -216,7 +221,7 @@ session:
   match-loss: '<gradient:#ff5555:#aa0000><bold>ПОРАЖЕНИЕ</bold></gradient>'
   persistence-retry: '<red>Не удалось сохранить результат. Повтор через 3 секунды…</red>'
   restored: '<green>Инвентарь и состояние надёжно восстановлены.</green>'
-  ack-retry: '<yellow>Состояние восстановлено, но безопасный перенос снимка в архив MySQL будет повторён. Не выходи с сервера.</yellow>'
+  ack-retry: '<yellow>Состояние восстановлено, но завершающая проверка будет повторена. Не выходи с сервера.</yellow>'
   score: '<gray>Счёт:</gray> <aqua><first></aqua> <dark_gray>—</dark_gray> <red><second></red>'
   command-blocked: '<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>'
 
@@ -234,6 +239,11 @@ admin:
   corner-saved: '<green>Угол <point> арены <white><arena></white> сохранён.</green> <gray>При включении координаты автоматически нормализуются.</gray>'
   hill-range: '<red>Радиус и высота холма должны быть от 1 до 32 блоков.</red>'
   hill-saved: '<green>Холм арены <white><arena></white> сохранён: радиус <radius>, высота <height>.</green>'
+  loadouts-invalid: '<red>Укажи режим: all, own или kit.</red>'
+  loadouts-saved: '<green>Арена <white><arena></white> теперь поддерживает: <loadout>.</green>'
+  loadouts-all: '<white>свои вещи и киты</white>'
+  loadouts-own_inventory: '<white>только свои вещи</white>'
+  loadouts-kit: '<white>только киты</white>'
   arena-invalid: '<red>Арена не применена: <reason></red>'
   arena-enabled: '<green>Арена <white><arena></white> проверена и включена. Активных арен: <count>.</green>'
   arena-disabled: '<yellow>Арена <white><arena></white> выключена. Активных арен: <count>.</yellow>'
@@ -261,6 +271,7 @@ admin:
     - '<white>/duels admin arena setspawn (id) (1|2)</white>'
     - '<white>/duels admin arena setcorner (id) (1|2)</white>'
     - '<white>/duels admin arena sethill (id) [радиус] [высота]</white>'
+    - '<white>/duels admin arena setloadouts (id) (all|own|kit)</white>'
     - '<white>/duels admin arena enable|disable (id)</white>'
     - '<white>/duels admin arena list|info (id)|reload</white>'
     - '<white>/duels admin status</white>'
@@ -274,6 +285,6 @@ help:
     - '<white>/duel accept|deny</white> <gray>— принять или отклонить</gray>'
     - '<white>/duel leave</white> <gray>— сдаться</gray>'
     - '<white>/duel stats</white> <gray>— статистика</gray>'
-    - '<green>Инвентарь сохраняется в MySQL до телепорта</green>'
-    - '<green>и удаляется из escrow только после успешного восстановления.</green>'
+    - '<green>Инвентарь защищён до телепорта</green>'
+    - '<green>и восстанавливается до завершения дуэли.</green>'
     - '<dark_gray>────────────────────────</dark_gray>'

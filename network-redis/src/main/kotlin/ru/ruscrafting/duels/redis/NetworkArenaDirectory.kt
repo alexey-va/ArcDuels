@@ -6,26 +6,25 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import ru.arc.redis.ChannelListener
 import ru.arc.redis.RedisOperations
+import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
-data class ArenaNodeStatus(
-    val server: ServerId,
+data class ArenaModeCapacity(
     val generalTotal: Int,
     val generalFree: Int,
     val kingOfTheHillTotal: Int,
     val kingOfTheHillFree: Int,
-    val queuedPairs: Int,
 ) {
     init {
         require(generalTotal in 0..MAX_ARENAS && generalFree in 0..generalTotal) { "Invalid general arena capacity" }
         require(kingOfTheHillTotal in 0..generalTotal && kingOfTheHillFree in 0..kingOfTheHillTotal) {
             "Invalid king-of-the-hill arena capacity"
         }
-        require(queuedPairs in 0..MAX_QUEUE) { "Invalid arena queue size" }
     }
 
     fun total(objective: DuelObjectiveType): Int =
@@ -34,8 +33,29 @@ data class ArenaNodeStatus(
     fun free(objective: DuelObjectiveType): Int =
         if (objective == DuelObjectiveType.KING_OF_THE_HILL) kingOfTheHillFree else generalFree
 
+    private companion object {
+        const val MAX_ARENAS = 10_000
+    }
+}
+
+data class ArenaNodeStatus(
+    val server: ServerId,
+    val ownInventory: ArenaModeCapacity,
+    val kit: ArenaModeCapacity,
+    val queuedPairs: Int,
+) {
+    init {
+        require(queuedPairs in 0..MAX_QUEUE) { "Invalid arena queue size" }
+    }
+
+    fun capacity(mode: DuelMode): ArenaModeCapacity =
+        if (mode == DuelMode.OWN_INVENTORY) ownInventory else kit
+
+    fun total(rules: DuelRules): Int = capacity(rules.mode).total(rules.objective)
+
+    fun free(rules: DuelRules): Int = capacity(rules.mode).free(rules.objective)
+
     companion object {
-        private const val MAX_ARENAS = 10_000
         private const val MAX_QUEUE = 100_000
     }
 }
@@ -63,18 +83,18 @@ class NetworkArenaDirectory(
         redis.publish(CHANNEL, gson.toJson(WireStatus.from(status)))
     }
 
-    fun select(objective: DuelObjectiveType): ServerId? {
+    fun select(rules: DuelRules): ServerId? {
         val now = clock.millis()
         return nodes.values
             .asSequence()
             .filter { now - it.receivedAtMillis < staleAfter.toMillis() }
             .map(ObservedStatus::status)
-            .filter { it.total(objective) > 0 }
+            .filter { it.total(rules) > 0 }
             .sortedWith(
-                compareByDescending<ArenaNodeStatus> { it.free(objective) > 0 }
+                compareByDescending<ArenaNodeStatus> { it.free(rules) > 0 }
                     .thenBy(ArenaNodeStatus::queuedPairs)
-                    .thenBy { status -> status.total(objective) - status.free(objective) }
-                    .thenByDescending { it.free(objective) }
+                    .thenBy { status -> status.total(rules) - status.free(rules) }
+                    .thenByDescending { it.free(rules) }
                     .thenBy { it.server.value },
             )
             .firstOrNull()
@@ -119,31 +139,52 @@ class NetworkArenaDirectory(
     private data class WireStatus(
         val version: Int = WIRE_VERSION,
         val server: String,
-        val generalTotal: Int,
-        val generalFree: Int,
-        val kingOfTheHillTotal: Int,
-        val kingOfTheHillFree: Int,
+        val ownInventory: WireModeCapacity,
+        val kit: WireModeCapacity,
         val queuedPairs: Int,
     ) {
         fun toStatus(): ArenaNodeStatus =
-            ArenaNodeStatus(ServerId(server), generalTotal, generalFree, kingOfTheHillTotal, kingOfTheHillFree, queuedPairs)
+            ArenaNodeStatus(
+                ServerId(server),
+                ownInventory.toCapacity(),
+                kit.toCapacity(),
+                queuedPairs,
+            )
 
         companion object {
             fun from(status: ArenaNodeStatus): WireStatus =
                 WireStatus(
                     server = status.server.value,
-                    generalTotal = status.generalTotal,
-                    generalFree = status.generalFree,
-                    kingOfTheHillTotal = status.kingOfTheHillTotal,
-                    kingOfTheHillFree = status.kingOfTheHillFree,
+                    ownInventory = WireModeCapacity.from(status.ownInventory),
+                    kit = WireModeCapacity.from(status.kit),
                     queuedPairs = status.queuedPairs,
+                )
+        }
+    }
+
+    private data class WireModeCapacity(
+        val generalTotal: Int,
+        val generalFree: Int,
+        val kingOfTheHillTotal: Int,
+        val kingOfTheHillFree: Int,
+    ) {
+        fun toCapacity(): ArenaModeCapacity =
+            ArenaModeCapacity(generalTotal, generalFree, kingOfTheHillTotal, kingOfTheHillFree)
+
+        companion object {
+            fun from(capacity: ArenaModeCapacity): WireModeCapacity =
+                WireModeCapacity(
+                    capacity.generalTotal,
+                    capacity.generalFree,
+                    capacity.kingOfTheHillTotal,
+                    capacity.kingOfTheHillFree,
                 )
         }
     }
 
     companion object {
         const val CHANNEL = "arcduels:v1:arenas"
-        private const val WIRE_VERSION = 1
+        private const val WIRE_VERSION = 2
         private const val MAX_MESSAGE_CHARACTERS = 4_096
     }
 }

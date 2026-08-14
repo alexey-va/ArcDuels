@@ -32,8 +32,10 @@ This repository is under active development. The first vertical slice targets:
   ranked play, sudden death, and per-match combat modifiers;
 - six bundled starter kits and Russian/English client-locale presentation;
 - countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
-- bounded arenas, scoped internal teleports and protected player inventories;
-- FIFO waiting for a free arena and in-game `/duels admin arena` setup;
+- bounded arenas with per-arena own-inventory/kit compatibility, scoped
+  internal teleports and protected player inventories;
+- FIFO waiting for a free arena and in-game `/duels admin` GUI and commands;
+- a HuskSync completion barrier before any duel snapshot or inventory mutation;
 - crash-safe, versioned MySQL player-state escrow before any duel mutation,
   with restored snapshots retained in a non-replayable archive for configurable N days;
 - real KOTH capture zones with contested progress, particles, action bars, and

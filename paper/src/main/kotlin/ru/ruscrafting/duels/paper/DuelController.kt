@@ -37,11 +37,12 @@ class DuelController(
     private val challengeBus: CrossServerChallengeBus? = null,
     private val arenaDirectory: NetworkArenaDirectory? = null,
     private val transfer: PlayerTransfer? = null,
+    private val playerDataReady: (Player) -> Boolean = { true },
     private val clock: Clock = Clock.systemUTC(),
     private val transferTimeout: Duration = Duration.ofSeconds(30),
 ) : AutoCloseable {
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
-    private val acceptedNetworkMatches = ConcurrentHashMap<ChallengeId, AcceptedNetworkMatch>()
+    private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
     private val acceptedTasks = ConcurrentHashMap<ChallengeId, BukkitTask>()
     private val transferRequests = ConcurrentHashMap.newKeySet<Pair<ChallengeId, PlayerId>>()
     private val networkPendingPlayers = ConcurrentHashMap.newKeySet<PlayerId>()
@@ -121,7 +122,7 @@ class DuelController(
             player.sendMessage(locales.component(player, "controller.network-unavailable"))
             return
         }
-        val matchServer = arenaDirectory?.select(challenge.rules.objective)
+        val matchServer = arenaDirectory?.select(challenge.rules)
         if (arenaDirectory != null && matchServer == null) {
             player.sendMessage(locales.component(player, "controller.no-network-arena"))
             return
@@ -137,7 +138,7 @@ class DuelController(
             return
         }
         if (bothLocal && (matchServer == null || matchServer == localServer)) {
-            startLocal(accepted)
+            scheduleAcceptedMatch(accepted, localServer)
         } else {
             publishResolution(accepted, requireNotNull(matchServer))
         }
@@ -214,7 +215,7 @@ class DuelController(
         returnTasks.values.forEach(BukkitTask::cancel)
         acceptedTasks.clear()
         returnTasks.clear()
-        acceptedNetworkMatches.clear()
+        acceptedMatches.clear()
         transferRequests.clear()
         networkPendingPlayers.clear()
         returnRequests.clear()
@@ -309,52 +310,73 @@ class DuelController(
 
     private fun acceptNetworkMatch(message: CrossServerChallengeMessage) {
         val host = requireNotNull(message.matchServer)
-        val accepted = AcceptedNetworkMatch(message, clock.millis() + transferTimeout.toMillis())
-        acceptedNetworkMatches.putIfAbsent(message.challenge.id, accepted)
-        networkPendingPlayers += message.challenge.challenger
-        networkPendingPlayers += message.challenge.target
-        if (acceptedTasks.containsKey(message.challenge.id)) return
+        scheduleAcceptedMatch(message.challenge, host, message)
+    }
+
+    private fun scheduleAcceptedMatch(
+        challenge: DuelChallenge,
+        host: ServerId,
+        networkMessage: CrossServerChallengeMessage? = null,
+    ) {
+        val accepted = AcceptedMatch(challenge, host, networkMessage, clock.millis() + transferTimeout.toMillis())
+        acceptedMatches.putIfAbsent(challenge.id, accepted)
+        networkPendingPlayers += challenge.challenger
+        networkPendingPlayers += challenge.target
+        if (acceptedTasks.containsKey(challenge.id)) return
         val task =
             plugin.server.scheduler.runTaskTimer(
                 plugin,
-                Runnable { tickAcceptedMatch(message.challenge.id, host) },
+                Runnable { tickAcceptedMatch(challenge.id) },
                 1L,
                 NETWORK_MATCH_POLL_TICKS,
             )
-        acceptedTasks.putIfAbsent(message.challenge.id, task)?.let { task.cancel() }
+        acceptedTasks.putIfAbsent(challenge.id, task)?.let { task.cancel() }
     }
 
-    private fun tickAcceptedMatch(challengeId: ChallengeId, host: ServerId) {
-        val accepted = acceptedNetworkMatches[challengeId] ?: return stopAcceptedMatch(challengeId)
-        val challenge = accepted.message.challenge
+    private fun tickAcceptedMatch(challengeId: ChallengeId) {
+        val accepted = acceptedMatches[challengeId] ?: return stopAcceptedMatch(challengeId)
+        val challenge = accepted.challenge
         if (clock.millis() >= accepted.expiresAtMillis) {
             participants(challenge).forEach { it.sendMessage(locales.component(it, "controller.network-timeout")) }
             stopAcceptedMatch(challengeId)
             return
         }
         val localParticipants = participants(challenge)
-        if (localServer != host) {
+        if (localServer != accepted.host) {
             localParticipants.forEach { player ->
                 val request = challengeId to PlayerId(player.uniqueId)
                 if (transferRequests.add(request)) {
-                    player.sendMessage(locales.component(player, "controller.network-transfer", LocaleService.text("server", host.value)))
-                    transfer?.connect(player, host)
+                    player.sendMessage(locales.component(player, "controller.network-transfer", LocaleService.text("server", accepted.host.value)))
+                    transfer?.connect(player, accepted.host)
                 }
             }
             return
         }
         if (localParticipants.size != 2) return
-        if (localParticipants.any { sessions.isStateLocked(it) }) return
-        if (localParticipants.any { sessions.isEngaged(it) }) {
-            stopAcceptedMatch(challengeId)
-            return
+        val decision =
+            acceptedMatchDecision(
+                localParticipants.map { participant ->
+                    AcceptedParticipantReadiness(
+                        stateLocked = sessions.isStateLocked(participant),
+                        playerDataReady = playerDataReady(participant),
+                        engaged = sessions.isEngaged(participant),
+                    )
+                },
+            )
+        when (decision) {
+            AcceptedMatchDecision.WAIT -> return
+            AcceptedMatchDecision.CANCEL_BUSY -> {
+                stopAcceptedMatch(challengeId)
+                return
+            }
+            AcceptedMatchDecision.START -> Unit
         }
         stopAcceptedMatch(challengeId)
-        startLocal(challenge, accepted.message)
+        startLocal(challenge, accepted.networkMessage)
     }
 
     private fun stopAcceptedMatch(challengeId: ChallengeId) {
-        acceptedNetworkMatches.remove(challengeId)?.message?.challenge?.let { challenge ->
+        acceptedMatches.remove(challengeId)?.challenge?.let { challenge ->
             networkPendingPlayers -= challenge.challenger
             networkPendingPlayers -= challenge.target
         }
@@ -523,8 +545,10 @@ class DuelController(
         val expiresAtMillis: Long,
     )
 
-    private data class AcceptedNetworkMatch(
-        val message: CrossServerChallengeMessage,
+    private data class AcceptedMatch(
+        val challenge: DuelChallenge,
+        val host: ServerId,
+        val networkMessage: CrossServerChallengeMessage?,
         val expiresAtMillis: Long,
     )
 
@@ -543,4 +567,24 @@ class DuelController(
         val RETURN_TIMEOUT: Duration = Duration.ofMinutes(2)
         val CONTEXT_RETENTION: Duration = Duration.ofMinutes(10)
     }
+}
+
+internal data class AcceptedParticipantReadiness(
+    val stateLocked: Boolean,
+    val playerDataReady: Boolean,
+    val engaged: Boolean,
+)
+
+internal enum class AcceptedMatchDecision {
+    WAIT,
+    CANCEL_BUSY,
+    START,
+}
+
+internal fun acceptedMatchDecision(participants: List<AcceptedParticipantReadiness>): AcceptedMatchDecision {
+    if (participants.size != 2) return AcceptedMatchDecision.WAIT
+    if (participants.any(AcceptedParticipantReadiness::engaged)) return AcceptedMatchDecision.CANCEL_BUSY
+    if (participants.any(AcceptedParticipantReadiness::stateLocked)) return AcceptedMatchDecision.WAIT
+    if (participants.any { !it.playerDataReady }) return AcceptedMatchDecision.WAIT
+    return AcceptedMatchDecision.START
 }

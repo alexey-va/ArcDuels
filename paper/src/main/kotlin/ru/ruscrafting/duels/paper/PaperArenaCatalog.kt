@@ -6,6 +6,7 @@ import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaAllocator
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaReservation
+import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import java.util.UUID
@@ -64,9 +65,19 @@ data class PaperArena(
     val secondSpawn: Location,
     val bounds: ArenaBounds,
     val hill: HillZone? = null,
+    val allowedLoadouts: Set<DuelMode> = DuelMode.entries.toSet(),
 ) {
-    fun supports(objective: DuelObjectiveType): Boolean =
-        objective != DuelObjectiveType.KING_OF_THE_HILL || hill != null
+    init {
+        require(allowedLoadouts.isNotEmpty()) { "Arena must support at least one loadout mode" }
+    }
+
+    fun supports(rules: DuelRules): Boolean = supports(rules.mode, rules.objective)
+
+    fun supports(
+        mode: DuelMode,
+        objective: DuelObjectiveType,
+    ): Boolean =
+        mode in allowedLoadouts && (objective != DuelObjectiveType.KING_OF_THE_HILL || hill != null)
 }
 
 data class HillZone(
@@ -105,7 +116,7 @@ class PaperArenaCatalog private constructor(
         val future = CompletableFuture<ArenaReservation>()
         synchronized(lock) {
             if (arenas.isEmpty()) return CompletableFuture.failedFuture(IllegalStateException("No enabled duel arenas are configured"))
-            val compatible = arenas.values.filter { it.supports(rules.objective) }
+            val compatible = arenas.values.filter { it.supports(rules) }
             if (compatible.isEmpty()) {
                 return CompletableFuture.failedFuture(IllegalStateException("No arena supports the selected objective"))
             }
@@ -131,9 +142,12 @@ class PaperArenaCatalog private constructor(
 
     fun reservedCount(): Int = synchronized(lock) { reserved.size }
 
-    fun capacity(objective: DuelObjectiveType): ArenaCapacity =
+    fun capacity(
+        mode: DuelMode,
+        objective: DuelObjectiveType,
+    ): ArenaCapacity =
         synchronized(lock) {
-            val compatible = arenas.values.filter { it.supports(objective) }
+            val compatible = arenas.values.filter { it.supports(mode, objective) }
             ArenaCapacity(
                 total = compatible.size,
                 free = compatible.count { it.id !in reserved },
@@ -168,10 +182,10 @@ class PaperArenaCatalog private constructor(
             if (!reserved.remove(id)) return
             while (true) {
                 val next = waiting.firstOrNull { pending ->
-                    !pending.future.isDone && arenas.values.any { it.id !in reserved && it.supports(pending.rules.objective) }
+                    !pending.future.isDone && arenas.values.any { it.id !in reserved && it.supports(pending.rules) }
                 } ?: break
                 waiting.remove(next)
-                val arena = requireNotNull(arenas.values.firstOrNull { it.id !in reserved && it.supports(next.rules.objective) })
+                val arena = requireNotNull(arenas.values.firstOrNull { it.id !in reserved && it.supports(next.rules) })
                 reserved += arena.id
                 assignments += next.future to reservationFor(arena.id)
             }
@@ -200,7 +214,7 @@ class PaperArenaCatalog private constructor(
                     require(bounds.contains(first) && bounds.contains(second)) { "Arena $id spawns must be inside its bounds" }
                     val hill = section.getConfigurationSection("hill")?.readHill(plugin)
                     require(hill == null || bounds.contains(hill)) { "Arena $id hill zone must be fully inside its bounds" }
-                    id to PaperArena(id, first, second, bounds, hill)
+                    id to PaperArena(id, first, second, bounds, hill, readArenaAllowedLoadouts(section))
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
                 "Arena ids must be unique after lowercase normalization"
@@ -274,4 +288,56 @@ class PaperArenaCatalog private constructor(
         val rules: DuelRules,
         val future: CompletableFuture<ArenaReservation>,
     )
+}
+
+internal fun readArenaAllowedLoadouts(section: ConfigurationSection): Set<DuelMode> {
+    if (!section.contains(ARENA_LOADOUTS_PATH)) return DuelMode.entries.toSet()
+    val configured = section.getStringList(ARENA_LOADOUTS_PATH)
+    require(configured.isNotEmpty()) { "Arena ${section.currentPath} must allow at least one loadout" }
+    return configured.map { raw ->
+        runCatching { DuelMode.valueOf(raw.trim().uppercase()) }
+            .getOrElse { throw IllegalArgumentException("Arena ${section.currentPath} has invalid loadout '$raw'") }
+    }.toSet()
+}
+
+internal const val ARENA_LOADOUTS_PATH = "allowed-loadouts"
+
+internal enum class ArenaLoadoutSelection(
+    val modes: Set<DuelMode>,
+) {
+    ALL(DuelMode.entries.toSet()),
+    OWN_INVENTORY(setOf(DuelMode.OWN_INVENTORY)),
+    KIT(setOf(DuelMode.KIT)),
+    ;
+
+    fun next(): ArenaLoadoutSelection =
+        when (this) {
+            ALL -> OWN_INVENTORY
+            OWN_INVENTORY -> KIT
+            KIT -> ALL
+        }
+
+    val commandValue: String
+        get() =
+            when (this) {
+                ALL -> "all"
+                OWN_INVENTORY -> "own"
+                KIT -> "kit"
+            }
+
+    companion object {
+        fun from(section: ConfigurationSection): ArenaLoadoutSelection {
+            val modes = readArenaAllowedLoadouts(section)
+            return entries.firstOrNull { it.modes == modes }
+                ?: throw IllegalArgumentException("Arena ${section.currentPath} has an unsupported loadout combination")
+        }
+
+        fun parse(raw: String): ArenaLoadoutSelection? =
+            when (raw.lowercase()) {
+                "all", "both" -> ALL
+                "own", "own_inventory" -> OWN_INVENTORY
+                "kit", "kits" -> KIT
+                else -> null
+            }
+    }
 }

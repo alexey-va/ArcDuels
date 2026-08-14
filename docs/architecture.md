@@ -38,7 +38,9 @@ Redis is presentation-only. Startup failure closes both bus and client and
 falls back to local operation. Event deduplication is scoped by source server,
 bounded in size, and expires after one hour.
 
-The arena allocator queues accepted pairs FIFO. The coordinator owns both
+The arena allocator queues accepted pairs FIFO. Per-arena loadout policies are
+evaluated together with objective compatibility locally and in Redis routing;
+they do not depend on server names. The coordinator owns both
 players while their request is queued, so racing challenges cannot allocate the
 same participant twice. Once an arena is available, Paper freezes inventory and
 movement mutations, captures both states on the primary thread, and commits the
@@ -48,6 +50,10 @@ both players frozen and reconciles the exact rows through fresh connections. It
 requires an immediate read plus six delayed empty confirmations over 30 seconds
 before treating the pair as absent; lookup failure or a partial pair stays
 fail-closed.
+
+If HuskSync is present, accepted matches remain in the pre-start state until
+both players have emitted its successful synchronization-complete event.
+ArcDuels does not capture or mutate player state while that barrier is closed.
 
 Completed matches retain player and arena ownership until Paper has applied and
 verified and saved both online snapshots. Only then does the coordinator release

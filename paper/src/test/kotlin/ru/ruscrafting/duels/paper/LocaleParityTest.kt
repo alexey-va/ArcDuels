@@ -41,6 +41,19 @@ class LocaleParityTest : StringSpec({
             }
         }
     }
+
+    "player-facing copy does not expose storage implementation details" {
+        val forbidden = Regex("(?i)mysql|mariadb|jdbc|redis|database|escrow|баз[а-я]*\\s+данн")
+        for (language in listOf("ru", "en")) {
+            for ((key, values) in leaves(loadBundle(language))) {
+                values.forEach { value ->
+                    withClue("$language:$key") {
+                        forbidden.containsMatchIn(value) shouldBe false
+                    }
+                }
+            }
+        }
+    }
 })
 
 private fun loadBundle(language: String): YamlConfiguration {

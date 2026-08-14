@@ -4,7 +4,10 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
+import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Instant
@@ -25,29 +28,53 @@ class NetworkArenaDirectoryTest : StringSpec({
     "selects a live compatible node with free capacity before a queued node" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
         val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
-        directory.publish(ArenaNodeStatus(ServerId("spawn"), 2, 0, 1, 0, 1))
+        directory.publish(
+            ArenaNodeStatus(
+                ServerId("spawn"),
+                ownInventory = ArenaModeCapacity(2, 0, 1, 0),
+                kit = ArenaModeCapacity(0, 0, 0, 0),
+                queuedPairs = 1,
+            ),
+        )
         redis.simulateExternalMessage(
             NetworkArenaDirectory.CHANNEL,
-            """{"version":1,"server":"parkour","generalTotal":5,"generalFree":3,"kingOfTheHillTotal":0,"kingOfTheHillFree":0,"queuedPairs":0}""",
+            """{"version":2,"server":"parkour","ownInventory":{"generalTotal":0,"generalFree":0,"kingOfTheHillTotal":0,"kingOfTheHillFree":0},"kit":{"generalTotal":5,"generalFree":3,"kingOfTheHillTotal":0,"kingOfTheHillFree":0},"queuedPairs":0}""",
             "parkour",
         )
 
-        directory.select(DuelObjectiveType.ELIMINATION) shouldBe ServerId("parkour")
-        directory.select(DuelObjectiveType.KING_OF_THE_HILL) shouldBe ServerId("spawn")
+        directory.select(DuelRules(DuelMode.KIT, KitId("classic"))) shouldBe ServerId("parkour")
+        directory.select(DuelRules(DuelMode.OWN_INVENTORY)) shouldBe ServerId("spawn")
+        directory.select(DuelRules(DuelMode.OWN_INVENTORY, objective = DuelObjectiveType.KING_OF_THE_HILL)) shouldBe
+            ServerId("spawn")
+        directory.select(DuelRules(DuelMode.KIT, KitId("classic"), objective = DuelObjectiveType.KING_OF_THE_HILL)) shouldBe null
         directory.close()
     }
 
     "rejects spoofed nodes and stops routing to stale heartbeats" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
         val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
-        val status = """{"version":1,"server":"parkour","generalTotal":5,"generalFree":5,"kingOfTheHillTotal":1,"kingOfTheHillFree":1,"queuedPairs":0}"""
+        val status = """{"version":2,"server":"parkour","ownInventory":{"generalTotal":0,"generalFree":0,"kingOfTheHillTotal":0,"kingOfTheHillFree":0},"kit":{"generalTotal":5,"generalFree":5,"kingOfTheHillTotal":1,"kingOfTheHillFree":1},"queuedPairs":0}"""
+        val rules = DuelRules(DuelMode.KIT, KitId("classic"))
 
         redis.simulateExternalMessage(NetworkArenaDirectory.CHANNEL, status, "spoofed")
-        directory.select(DuelObjectiveType.ELIMINATION) shouldBe null
+        directory.select(rules) shouldBe null
         redis.simulateExternalMessage(NetworkArenaDirectory.CHANNEL, status, "parkour")
         now = now.plusSeconds(6)
 
-        directory.select(DuelObjectiveType.ELIMINATION) shouldBe null
+        directory.select(rules) shouldBe null
+        directory.close()
+    }
+
+    "ignores rolling-deployment heartbeats from the previous schema" {
+        val redis = InMemoryRedis(ServerIdentity { "spawn" })
+        val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
+        val oldStatus =
+            """{"version":1,"server":"legacy","generalTotal":5,"generalFree":5,"kingOfTheHillTotal":1,"kingOfTheHillFree":1,"queuedPairs":0}"""
+
+        redis.simulateExternalMessage(NetworkArenaDirectory.CHANNEL, oldStatus, "legacy")
+
+        directory.select(DuelRules(DuelMode.OWN_INVENTORY)) shouldBe null
+        directory.activeNodes() shouldBe emptyList()
         directory.close()
     }
 })

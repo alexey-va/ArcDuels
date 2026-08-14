@@ -23,19 +23,19 @@
 - elimination, king-of-the-hill, and sumo objectives;
 - BO1/BO3/BO5, ranked kit matches, sudden death, and combat modifiers;
 - bounded KOTH zones, non-overlapping arena validation, FIFO arena handoff,
-  and in-game arena setup commands;
+  per-arena loadout policies, and in-game arena setup GUI and commands;
+- cross-server player discovery, challenge transfer and compatible arena routing;
+- HuskSync-aware pre-start readiness gating;
 - crash-safe MySQL player-state escrow with retained restore history.
 
 ## Next — competitive operations
 
 - ranked queues and ELO seasons;
 - rematches, spectators and match history;
-- arena administration GUI (the command editor is complete);
 - PlaceholderAPI expansion and moderation/audit commands;
 - orphaned-match reconciliation and recovery audit history.
 
 ## Later
 
 - team formats;
-- Velocity-aware matchmaking and server transfer handoff;
 - web/API read model for leaderboards and match history.

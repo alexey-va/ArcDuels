@@ -129,6 +129,9 @@ kits:
 arenas:
   example:
     enabled: false
+    # Optional per-arena compatibility. Omit for both modes.
+    # Values: OWN_INVENTORY, KIT.
+    allowed-loadouts: [OWN_INVENTORY, KIT]
     first-spawn:
       world: world
       x: 0.5

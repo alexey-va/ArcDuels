@@ -10,6 +10,8 @@ import ru.arc.sql.SqlRuntime
 import ru.arc.sql.SqlSslMode
 import ru.ruscrafting.duels.domain.ChallengeRegistry
 import ru.ruscrafting.duels.domain.DuelEventPublisher
+import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
 import ru.ruscrafting.duels.domain.MatchCompletedEvent
 import ru.ruscrafting.duels.domain.MatchCoordinator
@@ -21,6 +23,7 @@ import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
 import ru.ruscrafting.duels.redis.ArenaNodeStatus
+import ru.ruscrafting.duels.redis.ArenaModeCapacity
 import ru.ruscrafting.duels.redis.CrossServerChallengeBus
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 import ru.ruscrafting.duels.redis.NetworkArenaDirectory
@@ -100,6 +103,15 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val targets = DuelTargetDirectory(this, serverId, network.players)
         val transfer = network.challenges?.let { ProxyPlayerTransfer(this) }
         if (transfer != null) closeables += transfer
+        val huskSyncEnabled = server.pluginManager.isPluginEnabled("HuskSync")
+        val playerDataSync = PlayerDataSyncGate(explicitSyncRequired = huskSyncEnabled)
+        server.pluginManager.registerEvents(playerDataSync, this)
+        if (huskSyncEnabled) {
+            val huskSyncListener = HuskSyncReadinessListener(playerDataSync)
+            server.pluginManager.registerEvents(huskSyncListener, this)
+            server.onlinePlayers.forEach(huskSyncListener::inspectAlreadyOnline)
+            logger.info("Duel starts will wait for HuskSync player data synchronization")
+        }
         val controller =
             DuelController(
                 this,
@@ -112,6 +124,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 network.challenges,
                 network.arenas,
                 transfer,
+                playerDataSync::isReady,
                 transferTimeout = Duration.ofSeconds(config.getLong("redis.transfer-timeout-seconds", 30L).coerceIn(10L, 120L)),
             )
         closeables += controller
@@ -129,15 +142,11 @@ open class ArcDuelsPlugin : JavaPlugin() {
         server.onlinePlayers.forEach(sessionManager::handleJoin)
         network.arenas?.let { directory ->
             val publishArenaStatus = Runnable {
-                val general = arenas.capacity(ru.ruscrafting.duels.domain.DuelObjectiveType.ELIMINATION)
-                val koth = arenas.capacity(ru.ruscrafting.duels.domain.DuelObjectiveType.KING_OF_THE_HILL)
                 directory.publish(
                     ArenaNodeStatus(
                         server = serverId,
-                        generalTotal = general.total,
-                        generalFree = general.free,
-                        kingOfTheHillTotal = koth.total,
-                        kingOfTheHillFree = koth.free,
+                        ownInventory = arenas.networkCapacity(DuelMode.OWN_INVENTORY),
+                        kit = arenas.networkCapacity(DuelMode.KIT),
                         queuedPairs = arenas.queueSize(),
                     ),
                 )
@@ -154,6 +163,17 @@ open class ArcDuelsPlugin : JavaPlugin() {
             }
         }
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
+    }
+
+    private fun PaperArenaCatalog.networkCapacity(mode: DuelMode): ArenaModeCapacity {
+        val general = capacity(mode, DuelObjectiveType.ELIMINATION)
+        val kingOfTheHill = capacity(mode, DuelObjectiveType.KING_OF_THE_HILL)
+        return ArenaModeCapacity(
+            generalTotal = general.total,
+            generalFree = general.free,
+            kingOfTheHillTotal = kingOfTheHill.total,
+            kingOfTheHillFree = kingOfTheHill.free,
+        )
     }
 
     private fun createPersistence(): Persistence {

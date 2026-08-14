@@ -43,12 +43,13 @@ internal class DuelAdminCommand(
             return filter(sender.server.onlinePlayers.map(Player::getName), args[1])
         }
         if (!args[0].equals("arena", true)) return emptyList()
-        if (args.size == 2) return filter(listOf("create", "setspawn", "setcorner", "sethill", "enable", "disable", "list", "info", "reload"), args[1])
+        if (args.size == 2) return filter(listOf("create", "setspawn", "setcorner", "sethill", "setloadouts", "enable", "disable", "list", "info", "reload"), args[1])
         val operation = args[1].lowercase()
         if (args.size == 3 && operation != "create" && operation !in setOf("list", "reload")) {
             return filter(arenaIds(), args[2])
         }
         if (args.size == 4 && operation in setOf("setspawn", "setcorner")) return filter(listOf("1", "2"), args[3])
+        if (args.size == 4 && operation == "setloadouts") return filter(listOf("all", "own", "kit"), args[3])
         return emptyList()
     }
 
@@ -66,6 +67,7 @@ internal class DuelAdminCommand(
                     return
                 }
                 plugin.config.set("$path.enabled", false)
+                plugin.config.set("$path.$ARENA_LOADOUTS_PATH", ArenaLoadoutSelection.ALL.modes.map { it.name })
                 plugin.saveConfig()
                 sender.sendMessage(message(sender, "admin.arena-created", LocaleService.text("arena", id.value)))
                 player.sendActionBar(message(player, "admin.arena-editing", LocaleService.text("arena", id.value)))
@@ -115,6 +117,7 @@ internal class DuelAdminCommand(
                 disableWhileEditing(path, id)
                 sender.sendMessage(message(sender, "admin.hill-saved", LocaleService.text("arena", id.value), LocaleService.text("radius", radius), LocaleService.text("height", height)))
             }
+            "setloadouts" -> setLoadouts(sender, args.getOrNull(1), args.getOrNull(2))
             "enable" -> setEnabled(sender, args.getOrNull(1), true)
             "disable" -> setEnabled(sender, args.getOrNull(1), false)
             "list" -> list(sender)
@@ -122,6 +125,32 @@ internal class DuelAdminCommand(
             "reload" -> reload(sender)
             else -> help(sender)
         }
+    }
+
+    private fun setLoadouts(
+        sender: CommandSender,
+        rawId: String?,
+        rawSelection: String?,
+    ) {
+        if (!requireIdle(sender)) return
+        val id = existingId(sender, rawId) ?: return
+        val selection = rawSelection?.let(ArenaLoadoutSelection::parse)
+        if (selection == null) {
+            sender.sendMessage(message(sender, "admin.loadouts-invalid"))
+            return
+        }
+        val path = "arenas.${id.value}"
+        plugin.config.set("$path.$ARENA_LOADOUTS_PATH", selection.modes.map { it.name })
+        plugin.saveConfig()
+        if (plugin.config.getBoolean("$path.enabled")) arenas.reload(plugin)
+        sender.sendMessage(
+            message(
+                sender,
+                "admin.loadouts-saved",
+                LocaleService.text("arena", id.value),
+                LocaleService.component("loadout", message(sender, "admin.loadouts-${selection.name.lowercase()}")),
+            ),
+        )
     }
 
     private fun setEnabled(

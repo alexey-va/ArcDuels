@@ -24,8 +24,9 @@ class PaperArenaQueueTest : StringSpec({
     "capacity reports only arenas compatible with the selected objective" {
         val catalog = PaperArenaCatalog.load(plugin)
 
-        catalog.capacity(DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
-        catalog.capacity(DuelObjectiveType.KING_OF_THE_HILL) shouldBe ArenaCapacity(0, 0)
+        catalog.capacity(DuelMode.OWN_INVENTORY, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
+        catalog.capacity(DuelMode.KIT, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
+        catalog.capacity(DuelMode.OWN_INVENTORY, DuelObjectiveType.KING_OF_THE_HILL) shouldBe ArenaCapacity(0, 0)
     }
 
     afterSpec { MockBukkit.unmock() }
@@ -89,6 +90,23 @@ class PaperArenaQueueTest : StringSpec({
 
         plugin.config.set("$path.radius", 20.0)
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        plugin.config.set("$path.radius", 3.5)
+    }
+
+    "arena loadout allowlist is enforced for reservation and capacity" {
+        plugin.config.set("arenas.queue.allowed-loadouts", listOf("OWN_INVENTORY"))
+        val catalog = PaperArenaCatalog.load(plugin)
+
+        catalog.capacity(DuelMode.OWN_INVENTORY, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
+        catalog.capacity(DuelMode.KIT, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(0, 0)
+        shouldThrow<java.util.concurrent.ExecutionException> {
+            catalog.reserve(DuelRules(DuelMode.KIT, ru.ruscrafting.duels.domain.KitId("classic"))).get()
+        }
+        catalog.reserve(DuelRules(DuelMode.OWN_INVENTORY)).get().close()
+
+        plugin.config.set("arenas.queue.allowed-loadouts", emptyList<String>())
+        shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
     }
 
     "enabled arenas cannot own overlapping physical space" {

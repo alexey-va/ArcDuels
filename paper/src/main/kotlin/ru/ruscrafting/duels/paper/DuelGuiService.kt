@@ -180,6 +180,21 @@ class DuelGuiService internal constructor(
         inventory.setItem(19, item(player, Material.WOODEN_AXE, "menu.admin-arena.corner1", "menu.admin-arena.point-lore", LocaleService.text("value", coordinateSummary("$path.bounds.min"))))
         inventory.setItem(21, item(player, Material.GOLDEN_AXE, "menu.admin-arena.corner2", "menu.admin-arena.point-lore", LocaleService.text("value", coordinateSummary("$path.bounds.max"))))
         inventory.setItem(23, item(player, Material.BEACON, "menu.admin-arena.hill", "menu.admin-arena.hill-lore", LocaleService.text("value", locationSummary("$path.hill.center"))))
+        val loadouts = arenaLoadoutSelection(path)
+        inventory.setItem(
+            25,
+            item(
+                player,
+                when (loadouts) {
+                    ArenaLoadoutSelection.ALL -> Material.CHEST
+                    ArenaLoadoutSelection.OWN_INVENTORY -> Material.BUNDLE
+                    ArenaLoadoutSelection.KIT -> Material.IRON_SWORD
+                },
+                "menu.admin-arena.loadouts",
+                "menu.admin-arena.loadouts-lore",
+                LocaleService.component("loadout", locales.component(player, "menu.admin-arena.loadouts-${loadouts.name.lowercase()}")),
+            ),
+        )
         inventory.setItem(
             31,
             item(
@@ -420,6 +435,10 @@ class DuelGuiService internal constructor(
                 19 -> executeArenaAction(player, holder.arenaId, "setcorner", "1")
                 21 -> executeArenaAction(player, holder.arenaId, "setcorner", "2")
                 23 -> executeArenaAction(player, holder.arenaId, "sethill")
+                25 -> {
+                    val path = "arenas.${holder.arenaId}"
+                    executeArenaAction(player, holder.arenaId, "setloadouts", arenaLoadoutSelection(path).next().commandValue)
+                }
                 31 -> executeArenaAction(player, holder.arenaId, if (plugin.config.getBoolean("arenas.${holder.arenaId}.enabled")) "disable" else "enable")
             }
             is RecoveryMenuHolder -> when (slot) {
@@ -488,6 +507,9 @@ class DuelGuiService internal constructor(
 
     private fun arenaIds(): List<String> =
         plugin.config.getConfigurationSection("arenas")?.getKeys(false)?.sorted() ?: emptyList()
+
+    private fun arenaLoadoutSelection(path: String): ArenaLoadoutSelection =
+        plugin.config.getConfigurationSection(path)?.let(ArenaLoadoutSelection::from) ?: ArenaLoadoutSelection.ALL
 
     private fun locationSummary(path: String): String {
         if (!hasLocation(path)) return "—"
