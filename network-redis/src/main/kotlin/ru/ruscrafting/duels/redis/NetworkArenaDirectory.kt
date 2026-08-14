@@ -124,7 +124,10 @@ class NetworkArenaDirectory(
                 } catch (failure: RuntimeException) {
                     throw JsonParseException("Invalid arena status JSON", failure)
                 } ?: throw JsonParseException("Arena status cannot be null")
-            require(wire.version == WIRE_VERSION) { "Unsupported arena status version ${wire.version}" }
+            if (wire.version != WIRE_VERSION) {
+                logger.debug("Ignored ArcDuels arena status version {} from {}", wire.version, originServer)
+                return@runCatching
+            }
             val status = wire.toStatus()
             require(status.server.value == originServer) { "Redis origin does not match arena status server" }
             nodes[status.server] = ObservedStatus(status, clock.millis())

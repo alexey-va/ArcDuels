@@ -2,6 +2,9 @@ package ru.ruscrafting.duels.redis
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.mockk.mockk
+import io.mockk.verify
+import org.slf4j.Logger
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.DuelMode
@@ -67,7 +70,8 @@ class NetworkArenaDirectoryTest : StringSpec({
 
     "ignores rolling-deployment heartbeats from the previous schema" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
-        val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
+        val logger = mockk<Logger>(relaxed = true)
+        val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock, logger = logger)
         val oldStatus =
             """{"version":1,"server":"legacy","generalTotal":5,"generalFree":5,"kingOfTheHillTotal":1,"kingOfTheHillFree":1,"queuedPairs":0}"""
 
@@ -75,6 +79,8 @@ class NetworkArenaDirectoryTest : StringSpec({
 
         directory.select(DuelRules(DuelMode.OWN_INVENTORY)) shouldBe null
         directory.activeNodes() shouldBe emptyList()
+        verify(exactly = 1) { logger.debug("Ignored ArcDuels arena status version {} from {}", 1, "legacy") }
+        verify(exactly = 0) { logger.warn(any<String>(), any<Any>(), any<Throwable>()) }
         directory.close()
     }
 })
