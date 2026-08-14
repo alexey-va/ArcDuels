@@ -39,6 +39,7 @@ class DuelGuiService internal constructor(
     private val statisticsAction: (Player, DuelTarget) -> Unit,
 ) : Listener {
     private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
+    private val guiItems = GuiItemCatalog.load(plugin)
 
     fun openChallenge(player: Player, target: DuelTarget) = openObjectives(player, target)
 
@@ -123,8 +124,8 @@ class DuelGuiService internal constructor(
         )
         inventory.setItem(15, item(player, Material.RECOVERY_COMPASS, "menu.admin.recovery", "menu.admin.recovery-lore", LocaleService.text("players", plugin.server.onlinePlayers.size)))
         inventory.setItem(29, item(player, Material.NAME_TAG, "menu.admin.create", "menu.admin.create-lore"))
-        inventory.setItem(33, item(player, Material.REPEATER, "menu.admin.reload", "menu.admin.reload-lore"))
-        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        inventory.setItem(33, roleItem(player, "refresh", Material.REPEATER, "menu.admin.reload", "menu.admin.reload-lore"))
+        inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         player.openInventory(inventory)
     }
 
@@ -196,6 +197,10 @@ class DuelGuiService internal constructor(
             ),
         )
         inventory.setItem(
+            27,
+            roleItem(player, "info", Material.TARGET, "menu.admin-arena.objectives", "menu.admin-arena.objectives-lore"),
+        )
+        inventory.setItem(
             31,
             item(
                 player,
@@ -204,7 +209,31 @@ class DuelGuiService internal constructor(
                 if (enabled) "menu.admin-arena.disable-lore" else "menu.admin-arena.enable-lore",
             ),
         )
-        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        player.openInventory(inventory)
+    }
+
+    private fun openAdminArenaObjectives(player: Player, arenaId: String) {
+        val section = plugin.config.getConfigurationSection("arenas.$arenaId") ?: return openAdminArenas(player)
+        val enabled = readArenaAllowedObjectives(section)
+        val holder = AdminArenaObjectivesHolder(arenaId)
+        val inventory = create(holder, locales.component(player, "menu.admin-objectives.title", LocaleService.text("arena", arenaId)))
+        decorate(inventory)
+        OBJECTIVE_SLOTS.forEach { (slot, objective) ->
+            holder.objectives[slot] = objective
+            inventory.setItem(
+                slot,
+                item(
+                    player,
+                    objective.material,
+                    "menu.admin-objectives.entry",
+                    "menu.admin-objectives.entry-lore",
+                    LocaleService.component("objective", locales.component(player, "objective.${objective.key}.name")),
+                    LocaleService.component("state", state(player, objective in enabled)),
+                ),
+            )
+        }
+        inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         player.openInventory(inventory)
     }
 
@@ -269,13 +298,22 @@ class DuelGuiService internal constructor(
         objectiveItem(player, DuelObjectiveType.ELIMINATION, Material.DIAMOND_SWORD)?.let { inventory.setItem(11, it) }
         objectiveItem(player, DuelObjectiveType.KING_OF_THE_HILL, Material.BEACON)?.let { inventory.setItem(13, it) }
         objectiveItem(player, DuelObjectiveType.SUMO, Material.SLIME_BALL)?.let { inventory.setItem(15, it) }
-        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        objectiveItem(player, DuelObjectiveType.BOXING, Material.LEATHER_BOOTS)?.let { inventory.setItem(29, it) }
+        objectiveItem(player, DuelObjectiveType.COMBO, Material.BLAZE_POWDER)?.let { inventory.setItem(33, it) }
+        inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         player.openInventory(inventory)
     }
 
     private fun openLoadouts(player: Player, target: DuelTarget, objective: DuelObjectiveType, requestedPage: Int = 0) {
-        val availableKits = if (objective == DuelObjectiveType.SUMO) kits.all().filter { it.id.value == "sumo" } else kits.all()
-        val kitSlots = if (objective == DuelObjectiveType.SUMO) CONTENT_SLOTS else CONTENT_SLOTS.filter { it != 32 }
+        val controlledKit =
+            when {
+                objective == DuelObjectiveType.SUMO -> "sumo"
+                objective.isHitRace -> "boxing"
+                else -> null
+            }
+        val availableKits = controlledKit?.let { required -> kits.all().filter { it.id.value == required } } ?: kits.all()
+        val controlledOnly = controlledKit != null
+        val kitSlots = if (controlledOnly) CONTENT_SLOTS else CONTENT_SLOTS.filter { it != 32 }
         val page = pageWindow(availableKits, requestedPage, kitSlots.size)
         val holder = LoadoutMenuHolder(target, objective, page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.loadouts.title"))
@@ -285,11 +323,11 @@ class DuelGuiService internal constructor(
             holder.kits[slot] = kit.id
             inventory.setItem(slot, kitItem(player, kit))
         }
-        if (objective != DuelObjectiveType.SUMO) {
+        if (!controlledOnly) {
             holder.ownInventorySlot = 32
             inventory.setItem(32, item(player, Material.BUNDLE, "menu.loadouts.own", "menu.loadouts.own-lore"))
         } else if (availableKits.isEmpty()) {
-            inventory.setItem(22, item(player, Material.BARRIER, "menu.loadouts.sumo-missing"))
+            inventory.setItem(22, item(player, Material.BARRIER, "menu.loadouts.controlled-missing", resolvers = arrayOf(LocaleService.text("kit", controlledKit))))
         }
         navigation(player, inventory, page, MenuBack.MAIN)
         player.openInventory(inventory)
@@ -307,16 +345,22 @@ class DuelGuiService internal constructor(
         decorate(inventory)
         inventory.setItem(10, toggleItem(player, "menu.rules.ranked", draft.ranked, enabled = draft.mode == DuelMode.KIT))
         inventory.setItem(12, item(player, Material.REPEATER, "menu.rules.best-of", "menu.rules.best-of-lore", LocaleService.text("value", draft.bestOf)))
-        inventory.setItem(14, item(player, Material.WITHER_SKELETON_SKULL, "menu.rules.sudden-death", "menu.rules.sudden-death-lore", LocaleService.text("seconds", draft.modifiers.suddenDeathAfterSeconds)))
-        inventory.setItem(19, toggleItem(player, "menu.rules.projectiles", draft.modifiers.projectiles))
-        inventory.setItem(21, toggleItem(player, "menu.rules.consumables", draft.modifiers.consumables))
-        inventory.setItem(23, toggleItem(player, "menu.rules.pearls", draft.modifiers.enderPearls))
-        inventory.setItem(25, toggleItem(player, "menu.rules.regeneration", draft.modifiers.naturalRegeneration))
+        if (draft.objective.isHitRace) {
+            val target = if (draft.objective == DuelObjectiveType.BOXING) draft.modifiers.boxingHitsToWin else draft.modifiers.comboHitsToWin
+            inventory.setItem(14, item(player, Material.TARGET, "menu.rules.hit-target", "menu.rules.hit-target-lore", LocaleService.text("hits", target)))
+        } else {
+            inventory.setItem(14, item(player, Material.WITHER_SKELETON_SKULL, "menu.rules.sudden-death", "menu.rules.sudden-death-lore", LocaleService.text("seconds", draft.modifiers.suddenDeathAfterSeconds)))
+        }
+        val combatTogglesEnabled = !draft.objective.isHitRace
+        inventory.setItem(19, toggleItem(player, "menu.rules.projectiles", draft.modifiers.projectiles, combatTogglesEnabled))
+        inventory.setItem(21, toggleItem(player, "menu.rules.consumables", draft.modifiers.consumables, combatTogglesEnabled))
+        inventory.setItem(23, toggleItem(player, "menu.rules.pearls", draft.modifiers.enderPearls, combatTogglesEnabled))
+        inventory.setItem(25, toggleItem(player, "menu.rules.regeneration", draft.modifiers.naturalRegeneration, combatTogglesEnabled))
         if (draft.objective == DuelObjectiveType.KING_OF_THE_HILL) {
             inventory.setItem(31, item(player, Material.BEACON, "menu.rules.capture", "menu.rules.capture-lore", LocaleService.text("seconds", draft.modifiers.kingOfTheHillCaptureSeconds)))
         }
-        inventory.setItem(40, item(player, Material.LIME_CONCRETE, "menu.rules.confirm", "menu.rules.confirm-lore"))
-        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        inventory.setItem(40, roleItem(player, "confirm", Material.LIME_CONCRETE, "menu.rules.confirm", "menu.rules.confirm-lore"))
+        inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         player.openInventory(inventory)
     }
 
@@ -327,7 +371,9 @@ class DuelGuiService internal constructor(
         inventory.setItem(11, requireNotNull(objectiveItem(player, DuelObjectiveType.ELIMINATION, Material.DIAMOND_SWORD)))
         inventory.setItem(13, requireNotNull(objectiveItem(player, DuelObjectiveType.KING_OF_THE_HILL, Material.BEACON)))
         inventory.setItem(15, requireNotNull(objectiveItem(player, DuelObjectiveType.SUMO, Material.SLIME_BALL)))
-        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        inventory.setItem(29, requireNotNull(objectiveItem(player, DuelObjectiveType.BOXING, Material.LEATHER_BOOTS)))
+        inventory.setItem(33, requireNotNull(objectiveItem(player, DuelObjectiveType.COMBO, Material.BLAZE_POWDER)))
+        inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         player.openInventory(inventory)
     }
 
@@ -347,7 +393,7 @@ class DuelGuiService internal constructor(
         decorate(inventory)
         inventory.setItem(12, item(player, Material.IRON_SWORD, "menu.queue.active", "menu.queue.active-lore", LocaleService.text("active", sessions.activeArenaCount())))
         inventory.setItem(14, item(player, Material.CLOCK, "menu.queue.waiting", "menu.queue.waiting-lore", LocaleService.text("waiting", sessions.queueSize())))
-        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         player.openInventory(inventory)
     }
 
@@ -385,7 +431,7 @@ class DuelGuiService internal constructor(
             }
             is ObjectiveMenuHolder -> {
                 if (slot == BACK_SLOT) return openTargets(player)
-                val objective = when (slot) { 11 -> DuelObjectiveType.ELIMINATION; 13 -> DuelObjectiveType.KING_OF_THE_HILL; 15 -> DuelObjectiveType.SUMO; else -> null } ?: return
+                val objective = OBJECTIVE_SLOTS[slot] ?: return
                 targets.find(holder.target.uniqueId)?.let { openLoadouts(player, it, objective) }
                     ?: player.sendMessage(locales.component(player, "error.player-left"))
             }
@@ -399,6 +445,7 @@ class DuelGuiService internal constructor(
                 val modifiers =
                     when {
                         holder.objective == DuelObjectiveType.SUMO -> SUMO_MODIFIERS
+                        holder.objective.isHitRace -> HIT_RACE_MODIFIERS
                         kit?.value == "uhc" -> CombatModifiers(naturalRegeneration = false)
                         else -> CombatModifiers()
                     }
@@ -439,7 +486,12 @@ class DuelGuiService internal constructor(
                     val path = "arenas.${holder.arenaId}"
                     executeArenaAction(player, holder.arenaId, "setloadouts", arenaLoadoutSelection(path).next().commandValue)
                 }
+                27 -> openAdminArenaObjectives(player, holder.arenaId)
                 31 -> executeArenaAction(player, holder.arenaId, if (plugin.config.getBoolean("arenas.${holder.arenaId}.enabled")) "disable" else "enable")
+            }
+            is AdminArenaObjectivesHolder -> when (slot) {
+                BACK_SLOT -> openAdminArena(player, holder.arenaId)
+                else -> holder.objectives[slot]?.let { objective -> toggleArenaObjective(player, holder.arenaId, objective) }
             }
             is RecoveryMenuHolder -> when (slot) {
                 BACK_SLOT -> openAdmin(player)
@@ -499,6 +551,22 @@ class DuelGuiService internal constructor(
         openAdminArena(player, arenaId)
     }
 
+    private fun toggleArenaObjective(
+        player: Player,
+        arenaId: String,
+        objective: DuelObjectiveType,
+    ) {
+        val section = plugin.config.getConfigurationSection("arenas.$arenaId") ?: return openAdminArenas(player)
+        val selected = readArenaAllowedObjectives(section).toMutableSet()
+        if (!selected.add(objective)) selected.remove(objective)
+        if (selected.isEmpty()) {
+            player.sendMessage(locales.component(player, "menu.admin-objectives.required"))
+            return openAdminArenaObjectives(player, arenaId)
+        }
+        admin.execute(player, listOf("arena", "setobjectives", arenaId, *selected.map { it.key }.toTypedArray()))
+        openAdminArenaObjectives(player, arenaId)
+    }
+
     private fun state(player: Player, enabled: Boolean): Component =
         locales.component(player, if (enabled) "menu.common.enabled" else "menu.common.disabled")
 
@@ -540,11 +608,15 @@ class DuelGuiService internal constructor(
                 ?: run { player.closeInventory(); player.sendMessage(locales.component(player, "error.player-left")) }
             10 -> if (draft.mode == DuelMode.KIT) openRules(player, draft.copy(ranked = !draft.ranked))
             12 -> openRules(player, draft.copy(bestOf = when (draft.bestOf) { 1 -> 3; 3 -> 5; else -> 1 }))
-            14 -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(suddenDeathAfterSeconds = nextOf(draft.modifiers.suddenDeathAfterSeconds, listOf(60, 180, 300, 600)))))
-            19 -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(projectiles = !draft.modifiers.projectiles)))
-            21 -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(consumables = !draft.modifiers.consumables)))
-            23 -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(enderPearls = !draft.modifiers.enderPearls)))
-            25 -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(naturalRegeneration = !draft.modifiers.naturalRegeneration)))
+            14 -> when (draft.objective) {
+                DuelObjectiveType.BOXING -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(boxingHitsToWin = nextOf(draft.modifiers.boxingHitsToWin, listOf(50, 100, 200)))))
+                DuelObjectiveType.COMBO -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(comboHitsToWin = nextOf(draft.modifiers.comboHitsToWin, listOf(5, 10, 15, 20)))))
+                else -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(suddenDeathAfterSeconds = nextOf(draft.modifiers.suddenDeathAfterSeconds, listOf(60, 180, 300, 600)))))
+            }
+            19 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(projectiles = !draft.modifiers.projectiles)))
+            21 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(consumables = !draft.modifiers.consumables)))
+            23 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(enderPearls = !draft.modifiers.enderPearls)))
+            25 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(naturalRegeneration = !draft.modifiers.naturalRegeneration)))
             31 -> if (draft.objective == DuelObjectiveType.KING_OF_THE_HILL) openRules(player, draft.copy(modifiers = draft.modifiers.copy(kingOfTheHillCaptureSeconds = nextOf(draft.modifiers.kingOfTheHillCaptureSeconds, listOf(10, 15, 30, 45)))))
             40 -> {
                 val target = targets.find(draft.target.uniqueId)
@@ -575,16 +647,16 @@ class DuelGuiService internal constructor(
         Bukkit.createInventory(holder, MENU_SIZE, title).also(holder::attach)
 
     private fun decorate(inventory: Inventory) {
-        val filler = item(Material.GRAY_STAINED_GLASS_PANE, Component.text(" "))
+        val filler = roleItem("background", Material.GRAY_STAINED_GLASS_PANE, Component.text(" "))
         for (slot in 0 until inventory.size) inventory.setItem(slot, filler)
         CONTENT_SLOTS.forEach { inventory.setItem(it, null) }
     }
 
     private fun <T> navigation(player: Player, inventory: Inventory, page: PageWindow<T>, back: MenuBack) {
-        if (back == MenuBack.MAIN) inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        if (page.hasPrevious) inventory.setItem(PREVIOUS_SLOT, item(player, Material.ARROW, "menu.common.previous"))
-        inventory.setItem(PAGE_SLOT, item(player, Material.CLOCK, "menu.common.page", resolvers = arrayOf(LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages))))
-        if (page.hasNext) inventory.setItem(NEXT_SLOT, item(player, Material.SPECTRAL_ARROW, "menu.common.next"))
+        if (back == MenuBack.MAIN) inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        if (page.hasPrevious) inventory.setItem(PREVIOUS_SLOT, roleItem(player, "previous", Material.ARROW, "menu.common.previous"))
+        inventory.setItem(PAGE_SLOT, roleItem(player, "info", Material.CLOCK, "menu.common.page", resolvers = arrayOf(LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages))))
+        if (page.hasNext) inventory.setItem(NEXT_SLOT, roleItem(player, "next", Material.SPECTRAL_ARROW, "menu.common.next"))
     }
 
     private fun item(player: Player, material: Material, nameKey: String, loreKey: String? = null, vararg resolvers: net.kyori.adventure.text.minimessage.tag.resolver.TagResolver): ItemStack =
@@ -593,8 +665,41 @@ class DuelGuiService internal constructor(
     private fun item(player: Player, material: Material, nameKey: String, resolvers: Array<net.kyori.adventure.text.minimessage.tag.resolver.TagResolver>): ItemStack =
         item(material, locales.component(player, nameKey, *resolvers))
 
+    private fun roleItem(
+        player: Player,
+        role: String,
+        fallback: Material,
+        nameKey: String,
+        loreKey: String? = null,
+        vararg resolvers: net.kyori.adventure.text.minimessage.tag.resolver.TagResolver,
+    ): ItemStack =
+        roleItem(
+            role,
+            fallback,
+            locales.component(player, nameKey, *resolvers),
+            loreKey?.let { locales.lines(player, it, *resolvers) }.orEmpty(),
+        )
+
+    private fun roleItem(
+        player: Player,
+        role: String,
+        fallback: Material,
+        nameKey: String,
+        resolvers: Array<net.kyori.adventure.text.minimessage.tag.resolver.TagResolver>,
+    ): ItemStack = roleItem(role, fallback, locales.component(player, nameKey, *resolvers))
+
+    private fun roleItem(
+        role: String,
+        fallback: Material,
+        name: Component,
+        lore: List<Component> = emptyList(),
+    ): ItemStack = style(guiItems.create(role, fallback), name, lore)
+
     private fun item(material: Material, name: Component, lore: List<Component> = emptyList()): ItemStack =
-        ItemStack(material).apply {
+        style(ItemStack(material), name, lore)
+
+    private fun style(stack: ItemStack, name: Component, lore: List<Component>): ItemStack =
+        stack.apply {
             itemMeta = itemMeta.apply {
                 displayName(nonItalic(name))
                 lore(lore.map(::nonItalic))
@@ -634,6 +739,7 @@ class DuelGuiService internal constructor(
     private class AdminMenuHolder : MenuHolder()
     private class AdminArenaListHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val arenas = mutableMapOf<Int, String>() }
     private class AdminArenaHolder(val arenaId: String) : MenuHolder()
+    private class AdminArenaObjectivesHolder(val arenaId: String) : MenuHolder() { val objectives = mutableMapOf<Int, DuelObjectiveType>() }
     private class RecoveryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val players = mutableMapOf<Int, UUID>() }
     private enum class CatalogType { MODES, KITS, QUEUE }
     private enum class MenuBack { MAIN }
@@ -649,11 +755,43 @@ class DuelGuiService internal constructor(
         const val ARENA_NAME_TIMEOUT_TICKS = 1_200L
         val COORDINATE_KEYS = listOf("x", "y", "z")
         val CONTENT_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34)
-        val SUMO_MODIFIERS = CombatModifiers(false, false, false, false, 180, 15)
+        val SUMO_MODIFIERS =
+            CombatModifiers(
+                projectiles = false,
+                consumables = false,
+                enderPearls = false,
+                naturalRegeneration = false,
+                suddenDeathAfterSeconds = 180,
+            )
+        val HIT_RACE_MODIFIERS =
+            CombatModifiers(
+                projectiles = false,
+                consumables = false,
+                enderPearls = false,
+                naturalRegeneration = false,
+            )
+        val OBJECTIVE_SLOTS =
+            mapOf(
+                11 to DuelObjectiveType.ELIMINATION,
+                13 to DuelObjectiveType.KING_OF_THE_HILL,
+                15 to DuelObjectiveType.SUMO,
+                29 to DuelObjectiveType.BOXING,
+                33 to DuelObjectiveType.COMBO,
+            )
     }
 }
 
 private val DuelObjectiveType.key: String get() = name.lowercase().replace("king_of_the_hill", "koth")
+
+private val DuelObjectiveType.material: Material
+    get() =
+        when (this) {
+            DuelObjectiveType.ELIMINATION -> Material.DIAMOND_SWORD
+            DuelObjectiveType.KING_OF_THE_HILL -> Material.BEACON
+            DuelObjectiveType.SUMO -> Material.SLIME_BALL
+            DuelObjectiveType.BOXING -> Material.LEATHER_BOOTS
+            DuelObjectiveType.COMBO -> Material.BLAZE_POWDER
+        }
 
 private data class DuelDraft(
     val target: DuelTarget,

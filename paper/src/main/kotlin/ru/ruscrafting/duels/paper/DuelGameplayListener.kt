@@ -70,7 +70,14 @@ internal class DuelGameplayListener(
             event.isCancelled = true
             return
         }
-        if (sessions.isSumo(victim)) event.damage = 0.0
+        if (sessions.isSumo(victim) || sessions.isHitRace(victim)) event.damage = 0.0
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onAcceptedMeleeHit(event: EntityDamageByEntityEvent) {
+        val victim = event.entity as? Player ?: return
+        val attacker = event.damager as? Player ?: return
+        if (sessions.isHitRace(attacker)) sessions.recordMeleeHit(attacker, victim)
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -89,7 +96,7 @@ internal class DuelGameplayListener(
             event.isCancelled = true
             return
         }
-        if (sessions.isSumo(player) && event.cause != EntityDamageEvent.DamageCause.WITHER) {
+        if ((sessions.isSumo(player) || sessions.isHitRace(player)) && event.cause != EntityDamageEvent.DamageCause.WITHER) {
             event.damage = 0.0
             return
         }

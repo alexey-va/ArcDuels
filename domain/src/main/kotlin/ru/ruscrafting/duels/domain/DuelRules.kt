@@ -9,6 +9,12 @@ enum class DuelObjectiveType {
     ELIMINATION,
     KING_OF_THE_HILL,
     SUMO,
+    BOXING,
+    COMBO,
+    ;
+
+    val isHitRace: Boolean
+        get() = this == BOXING || this == COMBO
 }
 
 data class CombatModifiers(
@@ -18,6 +24,8 @@ data class CombatModifiers(
     val naturalRegeneration: Boolean = true,
     val suddenDeathAfterSeconds: Int = 300,
     val kingOfTheHillCaptureSeconds: Int = 15,
+    val boxingHitsToWin: Int = 100,
+    val comboHitsToWin: Int = 10,
 ) {
     init {
         require(suddenDeathAfterSeconds in 30..1_800) {
@@ -25,6 +33,12 @@ data class CombatModifiers(
         }
         require(kingOfTheHillCaptureSeconds in 5..120) {
             "kingOfTheHillCaptureSeconds must be between 5 and 120"
+        }
+        require(boxingHitsToWin in 10..500) {
+            "boxingHitsToWin must be between 10 and 500"
+        }
+        require(comboHitsToWin in 3..50) {
+            "comboHitsToWin must be between 3 and 50"
         }
     }
 }
@@ -42,6 +56,11 @@ data class DuelRules(
         require((mode == DuelMode.KIT) == (kitId != null)) { "KIT mode requires a kit and OWN_INVENTORY forbids one" }
         require(!ranked || mode == DuelMode.KIT) { "Ranked own-inventory duels are not supported" }
         require(objective != DuelObjectiveType.SUMO || mode == DuelMode.KIT) { "SUMO requires a controlled kit" }
+        require(!objective.isHitRace || mode == DuelMode.KIT) { "Hit-race objectives require a controlled kit" }
+        require(
+            !objective.isHitRace ||
+                (!modifiers.projectiles && !modifiers.consumables && !modifiers.enderPearls && !modifiers.naturalRegeneration),
+        ) { "Hit-race objectives require locked combat-item modifiers" }
     }
 
     val roundsToWin: Int get() = bestOf / 2 + 1

@@ -27,6 +27,7 @@ import ru.ruscrafting.duels.redis.ArenaModeCapacity
 import ru.ruscrafting.duels.redis.CrossServerChallengeBus
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 import ru.ruscrafting.duels.redis.NetworkArenaDirectory
+import ru.ruscrafting.duels.redis.ObjectiveCapacity
 import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
 import java.time.Clock
 import java.time.Duration
@@ -93,7 +94,9 @@ open class ArcDuelsPlugin : JavaPlugin() {
         } else {
             logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
         }
-        val sessionManager = DuelSessionManager(this, coordinator, arenas, kits, playerStates, locales)
+        val countdownSeconds = config.getInt("countdown-seconds", 0)
+        require(countdownSeconds in 0..10) { "countdown-seconds must be between 0 and 10" }
+        val sessionManager = DuelSessionManager(this, coordinator, arenas, kits, playerStates, locales, countdownSeconds)
         sessions = sessionManager
         val challenges =
             ChallengeRegistry(
@@ -166,13 +169,11 @@ open class ArcDuelsPlugin : JavaPlugin() {
     }
 
     private fun PaperArenaCatalog.networkCapacity(mode: DuelMode): ArenaModeCapacity {
-        val general = capacity(mode, DuelObjectiveType.ELIMINATION)
-        val kingOfTheHill = capacity(mode, DuelObjectiveType.KING_OF_THE_HILL)
         return ArenaModeCapacity(
-            generalTotal = general.total,
-            generalFree = general.free,
-            kingOfTheHillTotal = kingOfTheHill.total,
-            kingOfTheHillFree = kingOfTheHill.free,
+            DuelObjectiveType.entries.associateWith { objective ->
+                val capacity = capacity(mode, objective)
+                ObjectiveCapacity(capacity.total, capacity.free)
+            },
         )
     }
 

@@ -9,6 +9,7 @@ import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.CombatModifiers
 
 class PaperArenaQueueTest : StringSpec({
     lateinit var server: ServerMock
@@ -107,6 +108,29 @@ class PaperArenaQueueTest : StringSpec({
         plugin.config.set("arenas.queue.allowed-loadouts", emptyList<String>())
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
         plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
+    }
+
+    "arena objective allowlist is enforced for reservation and capacity" {
+        plugin.config.set("arenas.queue.allowed-objectives", listOf("BOXING"))
+        val catalog = PaperArenaCatalog.load(plugin)
+
+        catalog.capacity(DuelMode.KIT, DuelObjectiveType.BOXING) shouldBe ArenaCapacity(1, 1)
+        catalog.capacity(DuelMode.KIT, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(0, 0)
+        shouldThrow<java.util.concurrent.ExecutionException> {
+            catalog.reserve(DuelRules(DuelMode.KIT, ru.ruscrafting.duels.domain.KitId("classic"))).get()
+        }
+        catalog.reserve(
+            DuelRules(
+                DuelMode.KIT,
+                ru.ruscrafting.duels.domain.KitId("boxing"),
+                objective = DuelObjectiveType.BOXING,
+                modifiers = CombatModifiers(false, false, false, false),
+            ),
+        ).get().close()
+
+        plugin.config.set("arenas.queue.allowed-objectives", emptyList<String>())
+        shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
     }
 
     "enabled arenas cannot own overlapping physical space" {

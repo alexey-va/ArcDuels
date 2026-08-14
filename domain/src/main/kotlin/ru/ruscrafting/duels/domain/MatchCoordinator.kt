@@ -130,7 +130,7 @@ class MatchCoordinator(
             synchronized(lock) {
                 val current = getRequired(matchId)
                 check(current.state == MatchState.ACTIVE) { "Objectives can only be evaluated for an active match" }
-                require((frame.contenders + frame.progressTicks.keys).all { it == current.firstPlayer || it == current.secondPlayer }) {
+                require((frame.contenders + frame.progress.keys).all { it == current.firstPlayer || it == current.secondPlayer }) {
                     "Objective frame contains a player who is not in the match"
                 }
                 when (val decision = objective.evaluate(current, frame)) {

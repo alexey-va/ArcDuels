@@ -15,6 +15,7 @@ import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.text.format.TextDecoration
+import io.papermc.paper.datacomponent.DataComponentTypes
 import ru.ruscrafting.duels.domain.ChallengeId
 import java.util.UUID
 import java.util.logging.Handler
@@ -38,8 +39,9 @@ class ArcDuelsPluginTest : StringSpec({
 
         plugin.isEnabled shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
+        plugin.config.getInt("countdown-seconds") shouldBe 0
         plugin.getCommand("duel")?.executor?.javaClass shouldBe DuelCommand::class.java
-        KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "classic", "sumo", "tank", "uhc")
+        KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "boxing", "classic", "sumo", "tank", "uhc")
         java.io.File(plugin.dataFolder, "lang/ru.yml").isFile shouldBe true
         java.io.File(plugin.dataFolder, "lang/en.yml").isFile shouldBe true
 
@@ -67,6 +69,14 @@ class ArcDuelsPluginTest : StringSpec({
         hasUsableArenaRoute(localArenaCount = 0, networkArenaRoutingEnabled = true) shouldBe true
         hasUsableArenaRoute(localArenaCount = 0, networkArenaRoutingEnabled = false) shouldBe false
         hasUsableArenaRoute(localArenaCount = 1, networkArenaRoutingEnabled = false) shouldBe true
+    }
+
+    "GUI item specs preserve the configured ItemsAdder material and modern model data" {
+        val item = GuiItemSpec(Material.BLUE_STAINED_GLASS_PANE, 11_013).create()
+
+        item.type shouldBe Material.BLUE_STAINED_GLASS_PANE
+        item.getData(DataComponentTypes.CUSTOM_MODEL_DATA)?.floats() shouldBe listOf(11_013f)
+        shouldThrow<IllegalArgumentException> { GuiItemSpec(Material.STONE, 0) }
     }
 
     "player snapshot restores cursor slot experience and movement state" {
@@ -211,6 +221,15 @@ class ArcDuelsPluginTest : StringSpec({
         player.openInventory.topInventory.getItem(40)?.type shouldBe Material.LIME_CONCRETE
 
         player.closeInventory()
+        player.performCommand("duel Opponent") shouldBe true
+        player.openInventory.topInventory.getItem(29)?.type shouldBe Material.LEATHER_BOOTS
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
+        player.openInventory.topInventory.getItem(10)?.type shouldBe Material.LEATHER_BOOTS
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
+        player.openInventory.topInventory.getItem(14)?.type shouldBe Material.TARGET
+        player.openInventory.topInventory.getItem(19)?.type shouldBe Material.GRAY_DYE
+
+        player.closeInventory()
         player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         player.performCommand("duel") shouldBe true
         PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "Вызвать на бой"
@@ -230,6 +249,12 @@ class ArcDuelsPluginTest : StringSpec({
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
         player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
         player.openInventory.topInventory.getItem(31)?.type shouldBe Material.LIME_CONCRETE
+        player.openInventory.topInventory.getItem(27)?.type shouldBe Material.CLOCK
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 27)
+        player.openInventory.topInventory.getItem(29)?.type shouldBe Material.LEATHER_BOOTS
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
+        plugin.config.getStringList("arenas.example.allowed-objectives").contains("BOXING") shouldBe false
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 36)
 
         player.teleport(Location(world, 7.5, 82.0, -4.5, 45f, 5f))
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 12)

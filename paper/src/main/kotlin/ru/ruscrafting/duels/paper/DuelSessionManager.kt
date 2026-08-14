@@ -28,6 +28,7 @@ import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchState
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ObjectiveFrame
+import ru.ruscrafting.duels.domain.ScoreRaceObjective
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -41,6 +42,7 @@ class DuelSessionManager internal constructor(
     private val kits: KitRegistry,
     private val playerStates: DurablePlayerStateService,
     private val locales: LocaleService,
+    private val countdownSeconds: Int,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
@@ -243,6 +245,37 @@ class DuelSessionManager internal constructor(
 
     fun isSumo(player: Player): Boolean = matchFor(player)?.rules?.objective == DuelObjectiveType.SUMO
 
+    fun isHitRace(player: Player): Boolean = matchFor(player)?.rules?.objective?.isHitRace == true
+
+    fun recordMeleeHit(
+        attacker: Player,
+        victim: Player,
+    ) {
+        val match = matchFor(attacker) ?: return
+        if (match.state != MatchState.ACTIVE || !match.rules.objective.isHitRace) return
+        if (matchFor(victim)?.id != match.id || match.opponentOf(PlayerId(attacker.uniqueId)).value != victim.uniqueId) return
+        val session = sessions[match.id] ?: return
+        val progress = session.hitRace.record(match.rules.objective, PlayerId(attacker.uniqueId), PlayerId(victim.uniqueId))
+        showHitRaceProgress(match, progress.scores)
+        val target =
+            when (match.rules.objective) {
+                DuelObjectiveType.BOXING -> match.rules.modifiers.boxingHitsToWin
+                DuelObjectiveType.COMBO -> match.rules.modifiers.comboHitsToWin
+                else -> return
+            }
+        coordinator.evaluateObjective(
+            match.id,
+            ScoreRaceObjective(match.rules.objective.name.lowercase(), target),
+            ObjectiveFrame(session.roundElapsedTicks, emptySet(), progress.scores),
+        ).whenComplete { updated, failure ->
+            if (failure != null) {
+                runSync { handleRoundResult(match.id, progress.scorer, null, failure) }
+            } else if (updated.state != MatchState.ACTIVE) {
+                runSync { handleRoundResult(match.id, progress.scorer, updated, null) }
+            }
+        }
+    }
+
     fun handleQuit(player: Player) {
         pendingStarts[player.uniqueId]?.cancel(false)
         val match = matchFor(player)
@@ -370,6 +403,7 @@ class DuelSessionManager internal constructor(
         val session = sessions[match.id] ?: error("Missing Paper session for match ${match.id}")
         objectiveTasks.remove(match.id)?.cancel()
         session.hillCapture.reset()
+        session.hitRace.reset()
         session.roundElapsedTicks = 0L
         session.suddenDeathStarted = false
         val arena = arenas.get(match.arenaId)
@@ -421,7 +455,7 @@ class DuelSessionManager internal constructor(
         countdownTasks.remove(matchId)?.cancel()
         val task =
             object : BukkitRunnable() {
-                var seconds = 3
+                var seconds = countdownSeconds
 
                 override fun run() {
                     val match = coordinator.find(matchId)
@@ -463,6 +497,7 @@ class DuelSessionManager internal constructor(
     private fun scheduleObjective(match: DuelMatch) {
         objectiveTasks.remove(match.id)?.cancel()
         val session = sessions[match.id] ?: return
+        if (match.rules.objective.isHitRace) return
         val task =
             object : BukkitRunnable() {
                 override fun run() {
@@ -542,10 +577,35 @@ class DuelSessionManager internal constructor(
         }
     }
 
+    private fun showHitRaceProgress(
+        match: DuelMatch,
+        progress: Map<PlayerId, Long>,
+    ) {
+        val target =
+            when (match.rules.objective) {
+                DuelObjectiveType.BOXING -> match.rules.modifiers.boxingHitsToWin
+                DuelObjectiveType.COMBO -> match.rules.modifiers.comboHitsToWin
+                else -> return
+            }
+        participants(match).forEach { player ->
+            val ownId = PlayerId(player.uniqueId)
+            player.sendActionBar(
+                locales.component(
+                    player,
+                    "session.hit-progress",
+                    LocaleService.text("score", progress[ownId] ?: 0L),
+                    LocaleService.text("target", target),
+                    LocaleService.text("opponent", progress[match.opponentOf(ownId)] ?: 0L),
+                ),
+            )
+        }
+    }
+
     private fun startSuddenDeathIfNeeded(
         match: DuelMatch,
         session: PaperSession,
     ) {
+        if (match.rules.objective.isHitRace) return
         if (session.suddenDeathStarted || session.roundElapsedTicks < match.rules.modifiers.suddenDeathAfterSeconds * 20L) return
         session.suddenDeathStarted = true
         participants(match).forEach { player ->
@@ -755,6 +815,7 @@ class DuelSessionManager internal constructor(
         val matchId: MatchId,
         val snapshots: Map<UUID, StoredPlayerSnapshot>,
         val hillCapture: HillCaptureTracker = HillCaptureTracker(),
+        val hitRace: HitRaceTracker = HitRaceTracker(),
         var roundElapsedTicks: Long = 0L,
         var suddenDeathStarted: Boolean = false,
         val finishing: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(),

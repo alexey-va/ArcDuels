@@ -6,11 +6,13 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.bukkit.entity.Player
 import org.bukkit.event.entity.EntityDamageEvent
+import org.bukkit.event.entity.EntityDamageByEntityEvent
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.CombatModifiers
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
@@ -72,5 +74,43 @@ class DuelGameplayListenerTest : StringSpec({
         verify(exactly = 1) { event.isCancelled = true }
         verify(exactly = 1) { sessions.handleElimination(player) }
         verify(exactly = 0) { event.damage = 0.0 }
+    }
+
+    "boxing accepts only a direct participant melee hit and suppresses health damage" {
+        val attacker = mockk<Player>(relaxed = true)
+        val victim = mockk<Player>(relaxed = true)
+        val attackerId = PlayerId(UUID.randomUUID())
+        val victimId = PlayerId(UUID.randomUUID())
+        every { attacker.uniqueId } returns attackerId.value
+        every { victim.uniqueId } returns victimId.value
+        val match =
+            DuelMatch.reserve(
+                attackerId,
+                victimId,
+                ArenaId("boxing"),
+                ServerId("test"),
+                DuelRules(
+                    DuelMode.KIT,
+                    KitId("boxing"),
+                    objective = DuelObjectiveType.BOXING,
+                    modifiers = CombatModifiers(false, false, false, false),
+                ),
+                Instant.EPOCH,
+            ).beginCountdown().activate(Instant.EPOCH)
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.matchFor(attacker) } returns match
+        every { sessions.matchFor(victim) } returns match
+        every { sessions.isHitRace(attacker) } returns true
+        every { sessions.isHitRace(victim) } returns true
+        val event = mockk<EntityDamageByEntityEvent>(relaxed = true)
+        every { event.entity } returns victim
+        every { event.damager } returns attacker
+        val listener = DuelGameplayListener(sessions, mockk(relaxed = true))
+
+        listener.onPlayerDamage(event)
+        listener.onAcceptedMeleeHit(event)
+
+        verify(exactly = 1) { event.damage = 0.0 }
+        verify(exactly = 1) { sessions.recordMeleeHit(attacker, victim) }
     }
 })

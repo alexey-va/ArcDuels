@@ -66,10 +66,13 @@ copy.
 ## Match objectives and loadouts
 
 `KIT` and `OWN_INVENTORY` describe loadout ownership, independently of the
-`ELIMINATION`, `KING_OF_THE_HILL`, and `SUMO` objectives. Combat modifiers are
+`ELIMINATION`, `KING_OF_THE_HILL`, `SUMO`, `BOXING`, and `COMBO` objectives. Combat modifiers are
 immutable challenge data, so both participants accept the same validated
 rules. KOTH arenas declare a bounded hill zone; incompatible arenas are never
 reserved for that objective. The Paper adapter submits capture progress through
 `ObjectiveFrame`, and `MatchCoordinator.evaluateObjective` applies a winner
 atomically through the normal round, persistence, rating, and event path.
-Objectives cannot mutate statistics directly.
+Boxing and Combo use the same path with event-driven score frames: Boxing counts
+total accepted direct melee hits, while Combo resets the struck player's streak.
+Both require the controlled boxing kit and cannot deal health damage. Objectives
+cannot mutate statistics directly.

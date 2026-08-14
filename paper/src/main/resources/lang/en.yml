@@ -20,7 +20,7 @@ menu:
     leaderboard: '<gold><bold>Leaderboard</bold></gold>'
     leaderboard-lore: ['<dark_gray>✖</dark_gray> <white>Network-wide player ranking</white>', '   <white>across all servers.</white>', '', '<aqua>Left click</aqua> <gray>Open leaderboard</gray>']
     modes: '<gold><bold>Game modes</bold></gold>'
-    modes-lore: ['<dark_gray>✖</dark_gray> <white>Elimination, king of the hill, and sumo.</white>', '', '<aqua>Left click</aqua> <gray>Browse modes</gray>']
+    modes-lore: ['<dark_gray>✖</dark_gray> <white>Classic, king of the hill, sumo,</white>', '   <white>boxing, and combo.</white>', '', '<aqua>Left click</aqua> <gray>Browse modes</gray>']
     kits: '<gold><bold>Loadout kits</bold></gold>'
     kits-lore: ['<dark_gray>✖</dark_gray> <white>Ready-made equipment for a match.</white>', '', '<aqua>Left click</aqua> <gray>Browse kits</gray>']
     stats: '<gold><bold>My statistics</bold></gold>'
@@ -40,7 +40,7 @@ menu:
     title: '<dark_gray>Loadout</dark_gray>'
     own: '<gold><bold>Own inventory</bold></gold>'
     own-lore: ['<dark_gray>✖</dark_gray> <white>Each player uses their own items.</white>', '<gray>Your state is protected before teleport</gray>', '<gray>and restored after the match.</gray>', '', '<aqua>Left click</aqua> <gray>Select</gray>']
-    sumo-missing: '<red>The sumo kit is not configured</red>'
+    controlled-missing: '<red>The required <kit> kit is not configured</red>'
     kit-hint: ['', '<aqua>Left click</aqua> <gray>Select this kit</gray>']
   rules:
     title: '<dark_gray>Rules · <player></dark_gray>'
@@ -60,6 +60,8 @@ menu:
     regeneration-lore: ['<gray>State:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
     capture: '<gold><bold>Hill capture: <seconds>s</bold></gold>'
     capture-lore: ['<gray>Required uncontested hold time.</gray>', '<gray>Progress pauses while contested.</gray>', '', '<aqua>Left click</aqua> <gray>Change the timer</gray>']
+    hit-target: '<gold><bold>Target: <hits> hits</bold></gold>'
+    hit-target-lore: ['<gray>The round ends when a player is first</gray>', '<gray>to reach the selected hit target.</gray>', '', '<aqua>Left click</aqua> <gray>Change target</gray>']
     confirm: '<green><bold>Send challenge</bold></green>'
     confirm-lore: ['<dark_gray>✖</dark_gray> <white>All match options are ready.</white>', '', '<aqua>Left click</aqua> <gray>Confirm</gray>']
   leaderboard:
@@ -115,10 +117,17 @@ menu:
     loadouts-all: '<white>own inventory and kits</white>'
     loadouts-own_inventory: '<white>own inventory only</white>'
     loadouts-kit: '<white>kits only</white>'
+    objectives: '<gold><bold>Combat modes</bold></gold>'
+    objectives-lore: ['<gray>Allow only modes that fit this</gray>', '<gray>arena’s geometry and purpose.</gray>', '', '<aqua>Left click</aqua> <gray>Configure modes</gray>']
     enable: '<green><bold>Validate and enable</bold></green>'
     enable-lore: ['<gray>Validate the world, points, bounds, hill,</gray>', '<gray>and separation from every other arena.</gray>', '', '<aqua>Left click</aqua> <gray>Enable arena</gray>']
     disable: '<red><bold>Disable arena</bold></red>'
     disable-lore: ['<gray>New matches will no longer use this arena.</gray>', '', '<aqua>Left click</aqua> <gray>Disable</gray>']
+  admin-objectives:
+    title: '<dark_gray>Modes · <arena></dark_gray>'
+    entry: '<objective>'
+    entry-lore: ['<gray>State:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
+    required: '<red>An arena must keep at least one combat mode enabled.</red>'
   admin-recovery:
     title: '<dark_gray>Player recovery · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
@@ -134,6 +143,12 @@ objective:
   sumo:
     name: '<gold><bold>Sumo</bold></gold>'
     description: ['<gray>Damage is disabled: knock your opponent</gray>', '<gray>outside the safe arena bounds.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
+  boxing:
+    name: '<gold><bold>Boxing</bold></gold>'
+    description: ['<gray>Be first to land the selected number of hits.</gray>', '<gray>Damage is disabled and only direct</gray>', '<gray>melee hits count.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
+  combo:
+    name: '<gold><bold>Combo</bold></gold>'
+    description: ['<gray>Build an unanswered hit streak.</gray>', '<gray>An opponent’s return hit resets</gray>', '<gray>your current streak.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
 
 kit:
   classic:
@@ -154,6 +169,9 @@ kit:
   sumo:
     name: '<gold><bold>Sumo</bold></gold>'
     description: ['<gray>Empty hands and perfectly equal conditions.</gray>']
+  boxing:
+    name: '<gold><bold>Boxing</bold></gold>'
+    description: ['<gray>Equal light equipment for hit-race modes.</gray>']
 
 error:
   player-only: '<red>This command requires a player.</red>'
@@ -193,8 +211,11 @@ controller:
   received: |-
     <yellow><white><player></white> challenged you: <objective></yellow>
     <gray>Loadout:</gray> <loadout> <dark_gray>•</dark_gray> <gray>BO<bestof></gray> <dark_gray>•</dark_gray> <gray>Ranked:</gray> <ranked>
+    <rules>
+  combat-summary: |-
     <gray>Sudden death:</gray> <white><sudden>s</white> <dark_gray>•</dark_gray> <gray>Projectiles:</gray> <projectiles> <dark_gray>•</dark_gray> <gray>Consumables:</gray> <consumables>
     <gray>Pearls:</gray> <pearls> <dark_gray>•</dark_gray> <gray>Regeneration:</gray> <regeneration>
+  hit-race-summary: '<gray>Target:</gray> <white><hits> hits</white> <dark_gray>•</dark_gray> <gray>Damage is disabled and direct melee hits count.</gray>'
 
   accept: '<newline><green><bold>[ACCEPT]</bold></green>'
   accept-hover: '<green>Start the duel</green>'
@@ -214,6 +235,7 @@ session:
   hill-free: '<gray>Hill is free</gray>'
   hill-enemy: '<red>Opponent is capturing</red>'
   hill-progress: '<state> <dark_gray>•</dark_gray> <aqua><percent>%</aqua>'
+  hit-progress: '<gray>You:</gray> <aqua><score></aqua><dark_gray>/</dark_gray><white><target></white> <dark_gray>•</dark_gray> <gray>Opponent:</gray> <red><opponent></red>'
   sudden-death: '<red><bold>SUDDEN DEATH!</bold></red> <gray>Both players now lose health continuously.</gray>'
   round-win: '<green><bold>ROUND WON</bold></green>'
   round-loss: '<red><bold>ROUND LOST</bold></red>'
@@ -244,6 +266,8 @@ admin:
   loadouts-all: '<white>own inventory and kits</white>'
   loadouts-own_inventory: '<white>own inventory only</white>'
   loadouts-kit: '<white>kits only</white>'
+  objectives-invalid: '<red>Choose one or more modes: elimination, koth, sumo, boxing, combo.</red>'
+  objectives-saved: '<green>Allowed modes for arena <white><arena></white> were saved.</green>'
   arena-invalid: '<red>Arena was not applied: <reason></red>'
   arena-enabled: '<green>Arena <white><arena></white> was validated and enabled. Active arenas: <count>.</green>'
   arena-disabled: '<yellow>Arena <white><arena></white> was disabled. Active arenas: <count>.</yellow>'
@@ -272,6 +296,7 @@ admin:
     - '<white>/duels admin arena setcorner (id) (1|2)</white>'
     - '<white>/duels admin arena sethill (id) [radius] [height]</white>'
     - '<white>/duels admin arena setloadouts (id) (all|own|kit)</white>'
+    - '<white>/duels admin arena setobjectives (id) (all|elimination|koth|sumo|boxing|combo...)</white>'
     - '<white>/duels admin arena enable|disable (id)</white>'
     - '<white>/duels admin arena list|info (id)|reload</white>'
     - '<white>/duels admin status</white>'

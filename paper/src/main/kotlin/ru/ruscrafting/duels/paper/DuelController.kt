@@ -486,8 +486,30 @@ class DuelController(
                 ru.ruscrafting.duels.domain.DuelObjectiveType.ELIMINATION -> "objective.elimination.name"
                 ru.ruscrafting.duels.domain.DuelObjectiveType.KING_OF_THE_HILL -> "objective.koth.name"
                 ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO -> "objective.sumo.name"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.BOXING -> "objective.boxing.name"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.COMBO -> "objective.combo.name"
             }
         fun state(value: Boolean) = locales.component(recipient, if (value) "menu.common.enabled" else "menu.common.disabled")
+        val ruleSummary =
+            if (challenge.rules.objective.isHitRace) {
+                val target =
+                    if (challenge.rules.objective == ru.ruscrafting.duels.domain.DuelObjectiveType.BOXING) {
+                        challenge.rules.modifiers.boxingHitsToWin
+                    } else {
+                        challenge.rules.modifiers.comboHitsToWin
+                    }
+                locales.component(recipient, "controller.hit-race-summary", LocaleService.text("hits", target))
+            } else {
+                locales.component(
+                    recipient,
+                    "controller.combat-summary",
+                    LocaleService.text("sudden", challenge.rules.modifiers.suddenDeathAfterSeconds),
+                    LocaleService.component("projectiles", state(challenge.rules.modifiers.projectiles)),
+                    LocaleService.component("consumables", state(challenge.rules.modifiers.consumables)),
+                    LocaleService.component("pearls", state(challenge.rules.modifiers.enderPearls)),
+                    LocaleService.component("regeneration", state(challenge.rules.modifiers.naturalRegeneration)),
+                )
+            }
         val prefix =
             locales.component(
                 recipient,
@@ -497,11 +519,7 @@ class DuelController(
                 LocaleService.component("loadout", mode),
                 LocaleService.text("bestof", challenge.rules.bestOf),
                 LocaleService.component("ranked", state(challenge.rules.ranked)),
-                LocaleService.text("sudden", challenge.rules.modifiers.suddenDeathAfterSeconds),
-                LocaleService.component("projectiles", state(challenge.rules.modifiers.projectiles)),
-                LocaleService.component("consumables", state(challenge.rules.modifiers.consumables)),
-                LocaleService.component("pearls", state(challenge.rules.modifiers.enderPearls)),
-                LocaleService.component("regeneration", state(challenge.rules.modifiers.naturalRegeneration)),
+                LocaleService.component("rules", ruleSummary),
             )
         val accept =
             locales.component(recipient, "controller.accept")

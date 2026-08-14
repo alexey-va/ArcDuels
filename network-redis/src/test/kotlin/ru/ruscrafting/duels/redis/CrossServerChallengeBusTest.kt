@@ -42,6 +42,8 @@ class CrossServerChallengeBusTest : StringSpec({
                                 naturalRegeneration = false,
                                 suddenDeathAfterSeconds = 600,
                                 kingOfTheHillCaptureSeconds = 45,
+                                boxingHitsToWin = 250,
+                                comboHitsToWin = 20,
                             ),
                     ),
                     Instant.parse("2026-08-14T09:00:00Z"),
@@ -67,6 +69,28 @@ class CrossServerChallengeBusTest : StringSpec({
                 matchServer = ServerId("parkour"),
             )
         codec.decode(codec.encode(resolution)) shouldBe resolution
+    }
+
+    "codec carries objective-specific hit targets and rejects the previous schema" {
+        val codec = ChallengeMessageCodec()
+        val boxing =
+            offer.copy(
+                challenge =
+                    offer.challenge.copy(
+                        rules =
+                            DuelRules(
+                                DuelMode.KIT,
+                                KitId("boxing"),
+                                objective = DuelObjectiveType.BOXING,
+                                modifiers = CombatModifiers(false, false, false, false, boxingHitsToWin = 200),
+                            ),
+                    ),
+            )
+
+        codec.decode(codec.encode(boxing)) shouldBe boxing
+        io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
+            codec.decode(codec.encode(boxing).replace("\"version\":2", "\"version\":1"))
+        }
     }
 
     "bus authenticates origin and deduplicates challenge messages" {

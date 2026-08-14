@@ -71,4 +71,4 @@ private fun leaves(configuration: YamlConfiguration): Map<String, List<String>> 
     }.toMap()
 
 private fun replacePlaceholders(input: String): String =
-    input.replace(Regex("<(page|pages|active|waiting|player|players|position|rating|wins|losses|value|seconds|state|server|percent|first|second|reason|kit|loadout|winrate|streak|best|winner|loser|permission|arenas|arena|point|world|radius|height|count|spawn1|spawn2|corner1|corner2|hill|id|online-player|objective|bestof|ranked|sudden|projectiles|consumables|pearls|regeneration)>"), "value")
+    input.replace(Regex("<(page|pages|active|waiting|player|players|position|rating|wins|losses|value|seconds|state|server|percent|first|second|reason|kit|loadout|winrate|streak|best|winner|loser|permission|arenas|arena|point|world|radius|height|count|spawn1|spawn2|corner1|corner2|hill|id|online-player|objective|bestof|ranked|sudden|projectiles|consumables|pearls|regeneration|hits|score|target|opponent|rules)>"), "value")

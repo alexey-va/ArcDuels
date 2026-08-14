@@ -12,8 +12,9 @@ The suite covers:
 
 - challenge authorization, expiry, duplicate pairs, and bounded TTL;
 - every match transition, BO1/BO3 scoring, forfeits, objectives, and cleanup;
-- exact KOTH capture thresholds, contested-progress pauses, per-arena objective
-  and loadout selection, and invalid SUMO/loadout combinations;
+- exact KOTH capture thresholds, contested-progress pauses, boxing totals,
+  combo resets, per-arena objective and loadout selection, and invalid
+  controlled-objective/loadout combinations;
 - queued player ownership, FIFO arena handoff, cancellation, and overlapping persistence completion;
 - local statistics idempotency under concurrent duplicate writes;
 - long result sequences, rating bounds, streaks, revisions, and leaderboards;
@@ -23,7 +24,7 @@ The suite covers:
   arena-node selection;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
   arena and kit validation, HuskSync readiness gating, pagination matrices,
-  teleport authorization, and
+  modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization, and
   damage-free celebration entities, default-kit presence, and strict Russian /
   English locale-key and MiniMessage parity.
 

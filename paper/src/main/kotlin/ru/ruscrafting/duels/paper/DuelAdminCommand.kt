@@ -7,6 +7,7 @@ import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 
 internal class DuelAdminCommand(
     private val plugin: JavaPlugin,
@@ -43,13 +44,16 @@ internal class DuelAdminCommand(
             return filter(sender.server.onlinePlayers.map(Player::getName), args[1])
         }
         if (!args[0].equals("arena", true)) return emptyList()
-        if (args.size == 2) return filter(listOf("create", "setspawn", "setcorner", "sethill", "setloadouts", "enable", "disable", "list", "info", "reload"), args[1])
+        if (args.size == 2) return filter(listOf("create", "setspawn", "setcorner", "sethill", "setloadouts", "setobjectives", "enable", "disable", "list", "info", "reload"), args[1])
         val operation = args[1].lowercase()
         if (args.size == 3 && operation != "create" && operation !in setOf("list", "reload")) {
             return filter(arenaIds(), args[2])
         }
         if (args.size == 4 && operation in setOf("setspawn", "setcorner")) return filter(listOf("1", "2"), args[3])
         if (args.size == 4 && operation == "setloadouts") return filter(listOf("all", "own", "kit"), args[3])
+        if (args.size >= 4 && operation == "setobjectives") {
+            return filter(listOf("all", "elimination", "koth", "sumo", "boxing", "combo"), args.last())
+        }
         return emptyList()
     }
 
@@ -68,6 +72,7 @@ internal class DuelAdminCommand(
                 }
                 plugin.config.set("$path.enabled", false)
                 plugin.config.set("$path.$ARENA_LOADOUTS_PATH", ArenaLoadoutSelection.ALL.modes.map { it.name })
+                plugin.config.set("$path.$ARENA_OBJECTIVES_PATH", DuelObjectiveType.entries.map { it.name })
                 plugin.saveConfig()
                 sender.sendMessage(message(sender, "admin.arena-created", LocaleService.text("arena", id.value)))
                 player.sendActionBar(message(player, "admin.arena-editing", LocaleService.text("arena", id.value)))
@@ -118,6 +123,7 @@ internal class DuelAdminCommand(
                 sender.sendMessage(message(sender, "admin.hill-saved", LocaleService.text("arena", id.value), LocaleService.text("radius", radius), LocaleService.text("height", height)))
             }
             "setloadouts" -> setLoadouts(sender, args.getOrNull(1), args.getOrNull(2))
+            "setobjectives" -> setObjectives(sender, args.getOrNull(1), args.drop(2))
             "enable" -> setEnabled(sender, args.getOrNull(1), true)
             "disable" -> setEnabled(sender, args.getOrNull(1), false)
             "list" -> list(sender)
@@ -151,6 +157,31 @@ internal class DuelAdminCommand(
                 LocaleService.component("loadout", message(sender, "admin.loadouts-${selection.name.lowercase()}")),
             ),
         )
+    }
+
+    private fun setObjectives(
+        sender: CommandSender,
+        rawId: String?,
+        rawObjectives: List<String>,
+    ) {
+        if (!requireIdle(sender)) return
+        val id = existingId(sender, rawId) ?: return
+        val allObjectives = rawObjectives.size == 1 && rawObjectives.single().equals("all", true)
+        val objectives =
+            if (allObjectives) {
+                DuelObjectiveType.entries.toSet()
+            } else {
+                rawObjectives.mapNotNull(::parseObjective).toSet()
+            }
+        if (rawObjectives.isEmpty() || objectives.isEmpty() || (!allObjectives && objectives.size != rawObjectives.size)) {
+            sender.sendMessage(message(sender, "admin.objectives-invalid"))
+            return
+        }
+        val path = "arenas.${id.value}"
+        plugin.config.set("$path.$ARENA_OBJECTIVES_PATH", objectives.map { it.name })
+        plugin.saveConfig()
+        if (plugin.config.getBoolean("$path.enabled")) arenas.reload(plugin)
+        sender.sendMessage(message(sender, "admin.objectives-saved", LocaleService.text("arena", id.value)))
     }
 
     private fun setEnabled(

@@ -28,18 +28,20 @@ This repository is under active development. The first vertical slice targets:
   arena routing, leaderboard invalidation, and announcements over Redis;
 - a Lands-inspired 45-slot main hub with challenge, queue, mode, kit, statistics,
   help, leaderboard, and administrative branches;
-- elimination, king-of-the-hill, and sumo objectives with BO1/BO3/BO5,
+- elimination, king-of-the-hill, sumo, boxing, and combo objectives with BO1/BO3/BO5,
   ranked play, sudden death, and per-match combat modifiers;
-- six bundled starter kits and Russian/English client-locale presentation;
-- countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
-- bounded arenas with per-arena own-inventory/kit compatibility, scoped
+- seven bundled starter kits and Russian/English client-locale presentation;
+- optional countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
+- bounded arenas with per-arena loadout and objective compatibility, scoped
   internal teleports and protected player inventories;
 - FIFO waiting for a free arena and in-game `/duels admin` GUI and commands;
 - a HuskSync completion barrier before any duel snapshot or inventory mutation;
 - crash-safe, versioned MySQL player-state escrow before any duel mutation,
   with restored snapshots retained in a non-replayable archive for configurable N days;
 - real KOTH capture zones with contested progress, particles, action bars, and
-  objective-compatible arena allocation.
+  objective-compatible arena allocation;
+- resource-pack-neutral GUI roles with optional production ItemsAdder
+  material/CustomModelData overlays.
 
 ## Build
 

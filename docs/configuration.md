@@ -81,6 +81,9 @@ connection loss and unknown commit outcomes are not retried at this layer.
 
 ## Arenas
 
+`countdown-seconds` accepts `0..10`; `0` activates combat immediately after
+both durable snapshots, kit application, and arena teleports have completed.
+
 Each enabled arena requires two isolated spawns in a loaded world. The bundled
 example is disabled deliberately so a fresh install cannot teleport players to
 unsafe placeholder coordinates.
@@ -90,6 +93,7 @@ arenas:
   colosseum:
     enabled: true
     allowed-loadouts: [OWN_INVENTORY, KIT]
+    allowed-objectives: [ELIMINATION, KING_OF_THE_HILL, SUMO, BOXING, COMBO]
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
     second-spawn: { world: duels, x: 8.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
     bounds:
@@ -105,6 +109,12 @@ arenas:
 `OWN_INVENTORY`, `KIT`, or both; omitting it keeps both modes enabled for
 backward compatibility. This lets one network dedicate individual arenas to
 personal items or kits without ArcDuels knowing server names or topology.
+
+`allowed-objectives` independently restricts the combat modes assigned to an
+arena. It accepts `ELIMINATION`, `KING_OF_THE_HILL`, `SUMO`, `BOXING`, and
+`COMBO`; omitting it enables all objectives for backward compatibility. KOTH
+still requires a valid bounded hill zone. The plugin therefore supports a
+network's local arena policy without hard-coding server names.
 
 Arena reservations are exclusive. If all arenas are occupied, accepted pairs
 wait in FIFO order without touching either player's inventory. Queue ownership
@@ -128,6 +138,7 @@ match owns an arena or a pair is waiting.
 /duels admin arena setcorner <id> <1|2>
 /duels admin arena sethill <id> [radius] [height]
 /duels admin arena setloadouts <id> <all|own|kit>
+/duels admin arena setobjectives <id> <all|elimination|koth|sumo|boxing|combo...>
 /duels admin arena enable|disable <id>
 /duels admin arena list
 /duels admin arena info <id>
@@ -136,7 +147,8 @@ match owns an arena or a pair is waiting.
 
 `/duels admin` opens the graphical editor. The commands remain available for
 automation and console operation; the arena editor cycles the same loadout
-policy directly in the arena details screen.
+policy and opens a dedicated objective allowlist directly in the arena details
+screen.
 
 ## Kits
 
@@ -178,8 +190,9 @@ The retention period is bounded to `1..3650` days. Cleanup can run every
 to another network node locks duel state and identifies the originating
 `server-id` instead of applying world data on the wrong server.
 
-The bundled starter kits are `classic`, `axe`, `archer`, `uhc`, `tank`, and
-`sumo`. The UHC selection starts with natural regeneration disabled; every
+The bundled starter kits are `classic`, `axe`, `archer`, `uhc`, `tank`, `sumo`,
+and `boxing`. Sumo and hit-race objectives use their controlled kits only. The
+UHC selection starts with natural regeneration disabled; every
 setting remains visible before the challenge is sent.
 
 `/duel` opens the main hub. The opponent picker includes players from every
@@ -187,7 +200,19 @@ ProxyARC backend and shows their current server. Challenge setup is deliberately
 opponent → objective → loadout → rules → confirmation. Rules include
 BO1/BO3/BO5, ranked kit matches, sudden-death time, projectiles, consumables,
 ender pearls, natural regeneration, and KOTH capture time. The recipient sees
-the selected rules before accepting. Own-inventory matches remain unranked.
+the selected rules before accepting. Boxing ends at a configurable total-hit
+target; Combo ends at a configurable unanswered-hit streak, reset by the
+opponent's next direct melee hit. Both disable health damage, projectiles,
+consumables, pearls, regeneration, and sudden death. Own-inventory matches
+remain unranked.
+
+## GUI item roles
+
+Bundled GUI items are ordinary vanilla materials. Deployments can override
+`gui.items.<role>` with a matching `material` and `custom-model-data` pair. The
+plugin applies model data with Paper's modern data-component API and never
+hard-codes resource-pack numbers. Standard roles include `background`, `back`,
+`previous`, `next`, `info`, `refresh`, and `confirm`.
 
 ## Commands
 

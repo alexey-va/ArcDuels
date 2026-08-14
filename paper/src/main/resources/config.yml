@@ -1,6 +1,8 @@
 # Unique node id used in Redis event origin checks.
 server-id: duels-1
 challenge-timeout-seconds: 45
+# Zero starts immediately after both players are safely prepared and teleported.
+countdown-seconds: 0
 
 locale:
   # ru or en. When enabled, Russian Minecraft clients get ru and all others en.
@@ -51,6 +53,26 @@ redis:
   player-list-ttl-seconds: 5
   # Accepted cross-server challenges are routed to a live compatible arena node.
   transfer-timeout-seconds: 30
+
+# Stable semantic GUI roles. The bundled defaults work without a resource pack.
+# A production overlay may add custom-model-data only together with its matching
+# ItemsAdder base material.
+gui:
+  items:
+    background:
+      material: GRAY_STAINED_GLASS_PANE
+    back:
+      material: BLUE_STAINED_GLASS_PANE
+    previous:
+      material: ARROW
+    next:
+      material: SPECTRAL_ARROW
+    info:
+      material: CLOCK
+    refresh:
+      material: REPEATER
+    confirm:
+      material: LIME_CONCRETE
 
 kits:
   classic:
@@ -123,6 +145,16 @@ kits:
     icon: SLIME_BALL
     items: {}
     armor: {}
+  boxing:
+    display-name: '<gold>Боксинг</gold>'
+    icon: LEATHER_BOOTS
+    items:
+      '0': STONE_SWORD
+    armor:
+      helmet: LEATHER_HELMET
+      chestplate: LEATHER_CHESTPLATE
+      leggings: LEATHER_LEGGINGS
+      boots: LEATHER_BOOTS
 
 # The example is disabled intentionally. Set real isolated coordinates and
 # enable it before accepting production matches.
@@ -132,6 +164,8 @@ arenas:
     # Optional per-arena compatibility. Omit for both modes.
     # Values: OWN_INVENTORY, KIT.
     allowed-loadouts: [OWN_INVENTORY, KIT]
+    # Optional objective allowlist. A KOTH arena also requires a hill section.
+    allowed-objectives: [ELIMINATION, KING_OF_THE_HILL, SUMO, BOXING, COMBO]
     first-spawn:
       world: world
       x: 0.5

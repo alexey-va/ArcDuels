@@ -15,23 +15,24 @@ import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
 data class ArenaModeCapacity(
-    val generalTotal: Int,
-    val generalFree: Int,
-    val kingOfTheHillTotal: Int,
-    val kingOfTheHillFree: Int,
+    val objectives: Map<DuelObjectiveType, ObjectiveCapacity>,
 ) {
     init {
-        require(generalTotal in 0..MAX_ARENAS && generalFree in 0..generalTotal) { "Invalid general arena capacity" }
-        require(kingOfTheHillTotal in 0..generalTotal && kingOfTheHillFree in 0..kingOfTheHillTotal) {
-            "Invalid king-of-the-hill arena capacity"
-        }
+        require(objectives.keys == DuelObjectiveType.entries.toSet()) { "Arena capacity must describe every objective" }
     }
 
-    fun total(objective: DuelObjectiveType): Int =
-        if (objective == DuelObjectiveType.KING_OF_THE_HILL) kingOfTheHillTotal else generalTotal
+    fun total(objective: DuelObjectiveType): Int = objectives.getValue(objective).total
 
-    fun free(objective: DuelObjectiveType): Int =
-        if (objective == DuelObjectiveType.KING_OF_THE_HILL) kingOfTheHillFree else generalFree
+    fun free(objective: DuelObjectiveType): Int = objectives.getValue(objective).free
+}
+
+data class ObjectiveCapacity(
+    val total: Int,
+    val free: Int,
+) {
+    init {
+        require(total in 0..MAX_ARENAS && free in 0..total) { "Invalid objective arena capacity" }
+    }
 
     private companion object {
         const val MAX_ARENAS = 10_000
@@ -166,28 +167,37 @@ class NetworkArenaDirectory(
     }
 
     private data class WireModeCapacity(
-        val generalTotal: Int,
-        val generalFree: Int,
-        val kingOfTheHillTotal: Int,
-        val kingOfTheHillFree: Int,
+        val objectives: Map<String, WireObjectiveCapacity>,
     ) {
-        fun toCapacity(): ArenaModeCapacity =
-            ArenaModeCapacity(generalTotal, generalFree, kingOfTheHillTotal, kingOfTheHillFree)
+        fun toCapacity(): ArenaModeCapacity {
+            require(objectives.keys == DuelObjectiveType.entries.mapTo(linkedSetOf()) { it.name }) {
+                "Arena status must describe every supported objective"
+            }
+            return ArenaModeCapacity(
+                objectives.mapKeys { (name, _) -> DuelObjectiveType.valueOf(name) }
+                    .mapValues { (_, capacity) -> capacity.toCapacity() },
+            )
+        }
 
         companion object {
             fun from(capacity: ArenaModeCapacity): WireModeCapacity =
                 WireModeCapacity(
-                    capacity.generalTotal,
-                    capacity.generalFree,
-                    capacity.kingOfTheHillTotal,
-                    capacity.kingOfTheHillFree,
+                    capacity.objectives.mapKeys { (objective, _) -> objective.name }
+                        .mapValues { (_, value) -> WireObjectiveCapacity(value.total, value.free) },
                 )
         }
     }
 
+    private data class WireObjectiveCapacity(
+        val total: Int,
+        val free: Int,
+    ) {
+        fun toCapacity(): ObjectiveCapacity = ObjectiveCapacity(total, free)
+    }
+
     companion object {
         const val CHANNEL = "arcduels:v1:arenas"
-        private const val WIRE_VERSION = 2
+        private const val WIRE_VERSION = 3
         private const val MAX_MESSAGE_CHARACTERS = 4_096
     }
 }

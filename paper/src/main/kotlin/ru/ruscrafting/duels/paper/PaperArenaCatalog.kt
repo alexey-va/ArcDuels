@@ -66,9 +66,11 @@ data class PaperArena(
     val bounds: ArenaBounds,
     val hill: HillZone? = null,
     val allowedLoadouts: Set<DuelMode> = DuelMode.entries.toSet(),
+    val allowedObjectives: Set<DuelObjectiveType> = DuelObjectiveType.entries.toSet(),
 ) {
     init {
         require(allowedLoadouts.isNotEmpty()) { "Arena must support at least one loadout mode" }
+        require(allowedObjectives.isNotEmpty()) { "Arena must support at least one objective" }
     }
 
     fun supports(rules: DuelRules): Boolean = supports(rules.mode, rules.objective)
@@ -77,7 +79,9 @@ data class PaperArena(
         mode: DuelMode,
         objective: DuelObjectiveType,
     ): Boolean =
-        mode in allowedLoadouts && (objective != DuelObjectiveType.KING_OF_THE_HILL || hill != null)
+        mode in allowedLoadouts &&
+            objective in allowedObjectives &&
+            (objective != DuelObjectiveType.KING_OF_THE_HILL || hill != null)
 }
 
 data class HillZone(
@@ -214,7 +218,16 @@ class PaperArenaCatalog private constructor(
                     require(bounds.contains(first) && bounds.contains(second)) { "Arena $id spawns must be inside its bounds" }
                     val hill = section.getConfigurationSection("hill")?.readHill(plugin)
                     require(hill == null || bounds.contains(hill)) { "Arena $id hill zone must be fully inside its bounds" }
-                    id to PaperArena(id, first, second, bounds, hill, readArenaAllowedLoadouts(section))
+                    id to
+                        PaperArena(
+                            id,
+                            first,
+                            second,
+                            bounds,
+                            hill,
+                            readArenaAllowedLoadouts(section),
+                            readArenaAllowedObjectives(section),
+                        )
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
                 "Arena ids must be unique after lowercase normalization"
@@ -301,6 +314,27 @@ internal fun readArenaAllowedLoadouts(section: ConfigurationSection): Set<DuelMo
 }
 
 internal const val ARENA_LOADOUTS_PATH = "allowed-loadouts"
+internal const val ARENA_OBJECTIVES_PATH = "allowed-objectives"
+
+internal fun readArenaAllowedObjectives(section: ConfigurationSection): Set<DuelObjectiveType> {
+    if (!section.contains(ARENA_OBJECTIVES_PATH)) return DuelObjectiveType.entries.toSet()
+    val configured = section.getStringList(ARENA_OBJECTIVES_PATH)
+    require(configured.isNotEmpty()) { "Arena ${section.currentPath} must allow at least one objective" }
+    return configured.mapTo(linkedSetOf()) { raw ->
+        parseObjective(raw)
+            ?: throw IllegalArgumentException("Arena ${section.currentPath} has invalid objective '$raw'")
+    }
+}
+
+internal fun parseObjective(raw: String): DuelObjectiveType? =
+    when (raw.trim().lowercase()) {
+        "elimination", "classic" -> DuelObjectiveType.ELIMINATION
+        "king_of_the_hill", "king-of-the-hill", "koth" -> DuelObjectiveType.KING_OF_THE_HILL
+        "sumo" -> DuelObjectiveType.SUMO
+        "boxing" -> DuelObjectiveType.BOXING
+        "combo" -> DuelObjectiveType.COMBO
+        else -> null
+    }
 
 internal enum class ArenaLoadoutSelection(
     val modes: Set<DuelMode>,

@@ -46,6 +46,8 @@ internal class ChallengeMessageCodec(
                 naturalRegeneration = message.challenge.rules.modifiers.naturalRegeneration,
                 suddenDeathAfterSeconds = message.challenge.rules.modifiers.suddenDeathAfterSeconds,
                 kingOfTheHillCaptureSeconds = message.challenge.rules.modifiers.kingOfTheHillCaptureSeconds,
+                boxingHitsToWin = message.challenge.rules.modifiers.boxingHitsToWin,
+                comboHitsToWin = message.challenge.rules.modifiers.comboHitsToWin,
             ),
         )
 
@@ -73,6 +75,8 @@ internal class ChallengeMessageCodec(
                         naturalRegeneration = wire.naturalRegeneration,
                         suddenDeathAfterSeconds = wire.suddenDeathAfterSeconds,
                         kingOfTheHillCaptureSeconds = wire.kingOfTheHillCaptureSeconds,
+                        boxingHitsToWin = wire.boxingHitsToWin,
+                        comboHitsToWin = wire.comboHitsToWin,
                     ),
             )
         val challenge =
@@ -126,10 +130,12 @@ internal class ChallengeMessageCodec(
         val naturalRegeneration: Boolean,
         val suddenDeathAfterSeconds: Int,
         val kingOfTheHillCaptureSeconds: Int,
+        val boxingHitsToWin: Int,
+        val comboHitsToWin: Int,
     )
 
     private companion object {
-        const val WIRE_VERSION = 1
+        const val WIRE_VERSION = 2
         const val MAX_MESSAGE_CHARACTERS = 16_384
     }
 }

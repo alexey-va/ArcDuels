@@ -76,7 +76,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     ranked = true,
                     serverId = ServerId("duels-it"),
                     completedAt = Instant.parse("2026-08-13T10:00:00Z"),
-                    objective = DuelObjectiveType.KING_OF_THE_HILL,
+                    objective = DuelObjectiveType.BOXING,
                 )
             repository.rememberPlayerName(winner, "Winner").get()
             repository.rememberPlayerName(loser, "Loser").get()

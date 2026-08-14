@@ -48,6 +48,7 @@ data class MatchOutcome(
         require((mode == DuelMode.KIT) == (kitId != null)) { "Outcome mode and kit do not agree" }
         require(!ranked || mode == DuelMode.KIT) { "Ranked outcome must use a kit" }
         require(objective != DuelObjectiveType.SUMO || mode == DuelMode.KIT) { "SUMO outcome must use a controlled kit" }
+        require(!objective.isHitRace || mode == DuelMode.KIT) { "Hit-race outcome must use a controlled kit" }
     }
 
     /** MySQL stores timestamps at millisecond precision; all adapters share that canonical form. */

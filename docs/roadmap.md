@@ -28,6 +28,13 @@
 - HuskSync-aware pre-start readiness gating;
 - crash-safe MySQL player-state escrow with retained restore history.
 
+## 0.3 — hit-race modes and configurable presentation
+
+- Boxing total-hit and Combo unanswered-streak objectives;
+- per-arena objective allowlists in the admin GUI and Redis capacity routing;
+- controlled boxing kit and objective-specific rule targets;
+- resource-pack-neutral GUI roles with optional ItemsAdder CustomModelData overlays.
+
 ## Next — competitive operations
 
 - ranked queues and ELO seasons;
