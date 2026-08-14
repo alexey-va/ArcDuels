@@ -93,8 +93,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 Duration.ofSeconds(config.getLong("challenge-timeout-seconds", 45L).coerceIn(5L, 600L)),
             )
         val controller = DuelController(this, challenges, sessionManager, statistics, locales)
-        val gui = DuelGuiService(this, kits, statistics, sessionManager, locales, controller::challenge, controller::showStatistics)
         val admin = DuelAdminCommand(this, arenas, sessionManager, locales)
+        val gui = DuelGuiService(this, kits, statistics, sessionManager, locales, admin, controller::challenge, controller::showStatistics)
         val command = DuelCommand(controller, gui, admin, locales)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)

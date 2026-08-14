@@ -62,7 +62,10 @@ class LocaleService private constructor(
     companion object {
         fun load(plugin: JavaPlugin): LocaleService {
             val languages = listOf("ru", "en")
-            languages.forEach { language -> plugin.saveResource("lang/$language.yml", false) }
+            languages.forEach { language ->
+                val localeFile = File(plugin.dataFolder, "lang/$language.yml")
+                if (!localeFile.isFile) plugin.saveResource("lang/$language.yml", false)
+            }
             val bundles =
                 languages.associateWith { language ->
                     val external = YamlConfiguration.loadConfiguration(File(plugin.dataFolder, "lang/$language.yml"))

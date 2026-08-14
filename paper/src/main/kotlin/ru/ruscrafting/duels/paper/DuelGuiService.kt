@@ -2,13 +2,17 @@ package ru.ruscrafting.duels.paper
 
 import io.papermc.paper.datacomponent.DataComponentTypes
 import io.papermc.paper.datacomponent.item.ResolvableProfile
+import io.papermc.paper.event.player.AsyncChatEvent
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.format.TextDecoration
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.InventoryHolder
 import org.bukkit.inventory.ItemFlag
@@ -21,16 +25,20 @@ import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
-class DuelGuiService(
+class DuelGuiService internal constructor(
     private val plugin: JavaPlugin,
     private val kits: KitRegistry,
     private val statistics: StatisticsRepository,
     private val sessions: DuelSessionManager,
     private val locales: LocaleService,
+    private val admin: DuelAdminCommand,
     private val challengeAction: (Player, Player, DuelRules) -> Unit,
     private val statisticsAction: (Player, Player) -> Unit,
 ) : Listener {
+    private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
+
     fun openChallenge(player: Player, target: Player) = openObjectives(player, target)
 
     fun openMain(player: Player) {
@@ -82,6 +90,115 @@ class DuelGuiService(
             )
         }
         if (targets.isEmpty()) inventory.setItem(22, item(player, Material.BARRIER, "menu.targets.empty"))
+        navigation(player, inventory, page, MenuBack.MAIN)
+        player.openInventory(inventory)
+    }
+
+    fun openAdmin(player: Player) {
+        if (!player.hasPermission(ADMIN_PERMISSION)) {
+            player.sendMessage(locales.component(player, "admin.no-permission", LocaleService.text("permission", ADMIN_PERMISSION)))
+            return
+        }
+        pendingArenaNames.remove(player.uniqueId)
+        val inventory = create(AdminMenuHolder(), locales.component(player, "menu.admin.title"))
+        decorate(inventory)
+        val arenaIds = arenaIds()
+        inventory.setItem(11, item(player, Material.FILLED_MAP, "menu.admin.arenas", "menu.admin.arenas-lore", LocaleService.text("arenas", arenaIds.size)))
+        inventory.setItem(
+            13,
+            item(
+                player,
+                Material.CLOCK,
+                "menu.admin.status",
+                "menu.admin.status-lore",
+                LocaleService.text("arenas", arenaIds.count { plugin.config.getBoolean("arenas.$it.enabled") }),
+                LocaleService.text("active", sessions.activeArenaCount()),
+                LocaleService.text("waiting", sessions.queueSize()),
+            ),
+        )
+        inventory.setItem(15, item(player, Material.RECOVERY_COMPASS, "menu.admin.recovery", "menu.admin.recovery-lore", LocaleService.text("players", plugin.server.onlinePlayers.size)))
+        inventory.setItem(29, item(player, Material.NAME_TAG, "menu.admin.create", "menu.admin.create-lore"))
+        inventory.setItem(33, item(player, Material.REPEATER, "menu.admin.reload", "menu.admin.reload-lore"))
+        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        player.openInventory(inventory)
+    }
+
+    private fun openAdminArenas(player: Player, requestedPage: Int = 0) {
+        val ids = arenaIds()
+        val page = pageWindow(ids, requestedPage, CONTENT_SLOTS.size)
+        val holder = AdminArenaListHolder(page.index, page.hasPrevious, page.hasNext)
+        val inventory = create(holder, locales.component(player, "menu.admin-arenas.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
+        decorate(inventory)
+        page.items.forEachIndexed { index, id ->
+            val slot = CONTENT_SLOTS[index]
+            holder.arenas[slot] = id
+            val path = "arenas.$id"
+            val enabled = plugin.config.getBoolean("$path.enabled")
+            val spawn1 = hasLocation("$path.first-spawn")
+            val spawn2 = hasLocation("$path.second-spawn")
+            val corner1 = hasCoordinates("$path.bounds.min")
+            val corner2 = hasCoordinates("$path.bounds.max")
+            val hill = hasLocation("$path.hill.center")
+            val complete = spawn1 && spawn2 && corner1 && corner2
+            val material = if (enabled) Material.LIME_BANNER else if (complete) Material.YELLOW_BANNER else Material.GRAY_BANNER
+            inventory.setItem(
+                slot,
+                item(
+                    player,
+                    material,
+                    "menu.admin-arenas.entry",
+                    "menu.admin-arenas.entry-lore",
+                    LocaleService.text("arena", id),
+                    LocaleService.component("state", state(player, enabled)),
+                    LocaleService.component("spawn1", configured(player, spawn1)),
+                    LocaleService.component("spawn2", configured(player, spawn2)),
+                    LocaleService.component("corner1", configured(player, corner1)),
+                    LocaleService.component("corner2", configured(player, corner2)),
+                    LocaleService.component("hill", configured(player, hill)),
+                ),
+            )
+        }
+        if (ids.isEmpty()) inventory.setItem(22, item(player, Material.PAPER, "menu.admin-arenas.empty", "menu.admin-arenas.empty-lore"))
+        navigation(player, inventory, page, MenuBack.MAIN)
+        player.openInventory(inventory)
+    }
+
+    private fun openAdminArena(player: Player, arenaId: String) {
+        if (!plugin.config.isConfigurationSection("arenas.$arenaId")) return openAdminArenas(player)
+        val path = "arenas.$arenaId"
+        val enabled = plugin.config.getBoolean("$path.enabled")
+        val inventory = create(AdminArenaHolder(arenaId), locales.component(player, "menu.admin-arena.title", LocaleService.text("arena", arenaId)))
+        decorate(inventory)
+        inventory.setItem(10, item(player, Material.MAP, "menu.admin-arena.overview", "menu.admin-arena.overview-lore", LocaleService.text("arena", arenaId), LocaleService.component("state", state(player, enabled))))
+        inventory.setItem(12, item(player, Material.COMPASS, "menu.admin-arena.spawn1", "menu.admin-arena.point-lore", LocaleService.text("value", locationSummary("$path.first-spawn"))))
+        inventory.setItem(14, item(player, Material.COMPASS, "menu.admin-arena.spawn2", "menu.admin-arena.point-lore", LocaleService.text("value", locationSummary("$path.second-spawn"))))
+        inventory.setItem(19, item(player, Material.WOODEN_AXE, "menu.admin-arena.corner1", "menu.admin-arena.point-lore", LocaleService.text("value", coordinateSummary("$path.bounds.min"))))
+        inventory.setItem(21, item(player, Material.GOLDEN_AXE, "menu.admin-arena.corner2", "menu.admin-arena.point-lore", LocaleService.text("value", coordinateSummary("$path.bounds.max"))))
+        inventory.setItem(23, item(player, Material.BEACON, "menu.admin-arena.hill", "menu.admin-arena.hill-lore", LocaleService.text("value", locationSummary("$path.hill.center"))))
+        inventory.setItem(
+            31,
+            item(
+                player,
+                if (enabled) Material.RED_CONCRETE else Material.LIME_CONCRETE,
+                if (enabled) "menu.admin-arena.disable" else "menu.admin-arena.enable",
+                if (enabled) "menu.admin-arena.disable-lore" else "menu.admin-arena.enable-lore",
+            ),
+        )
+        inventory.setItem(BACK_SLOT, item(player, Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        player.openInventory(inventory)
+    }
+
+    private fun openRecoveryPlayers(player: Player, requestedPage: Int = 0) {
+        val players = plugin.server.onlinePlayers.sortedWith { first, second -> String.CASE_INSENSITIVE_ORDER.compare(first.name, second.name) }
+        val page = pageWindow(players, requestedPage, CONTENT_SLOTS.size)
+        val holder = RecoveryMenuHolder(page.index, page.hasPrevious, page.hasNext)
+        val inventory = create(holder, locales.component(player, "menu.admin-recovery.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
+        decorate(inventory)
+        page.items.forEachIndexed { index, target ->
+            val slot = CONTENT_SLOTS[index]
+            holder.players[slot] = target.uniqueId
+            inventory.setItem(slot, playerHead(target, locales.component(player, "menu.admin-recovery.player", LocaleService.text("player", target.name)), locales.lines(player, "menu.admin-recovery.player-lore")))
+        }
         navigation(player, inventory, page, MenuBack.MAIN)
         player.openInventory(inventory)
     }
@@ -235,7 +352,7 @@ class DuelGuiService(
                 31 -> openKits(player)
                 33 -> statisticsAction(player, player)
                 40 -> showHelp(player)
-                44 -> if (player.hasPermission(ADMIN_PERMISSION)) { player.closeInventory(); player.performCommand("duels admin") }
+                44 -> if (player.hasPermission(ADMIN_PERMISSION)) openAdmin(player)
             }
             is TargetMenuHolder -> when (slot) {
                 BACK_SLOT -> openMain(player)
@@ -276,8 +393,117 @@ class DuelGuiService(
                 holder.type == CatalogType.KITS && slot == PREVIOUS_SLOT && holder.hasPrevious -> openKits(player, holder.page - 1)
                 holder.type == CatalogType.KITS && slot == NEXT_SLOT && holder.hasNext -> openKits(player, holder.page + 1)
             }
+            is AdminMenuHolder -> when (slot) {
+                BACK_SLOT -> openMain(player)
+                11 -> openAdminArenas(player)
+                15 -> openRecoveryPlayers(player)
+                29 -> promptArenaName(player)
+                33 -> { admin.execute(player, listOf("arena", "reload")); openAdmin(player) }
+            }
+            is AdminArenaListHolder -> when (slot) {
+                BACK_SLOT -> openAdmin(player)
+                PREVIOUS_SLOT -> if (holder.hasPrevious) openAdminArenas(player, holder.page - 1)
+                NEXT_SLOT -> if (holder.hasNext) openAdminArenas(player, holder.page + 1)
+                else -> holder.arenas[slot]?.let { openAdminArena(player, it) }
+            }
+            is AdminArenaHolder -> when (slot) {
+                BACK_SLOT -> openAdminArenas(player)
+                12 -> executeArenaAction(player, holder.arenaId, "setspawn", "1")
+                14 -> executeArenaAction(player, holder.arenaId, "setspawn", "2")
+                19 -> executeArenaAction(player, holder.arenaId, "setcorner", "1")
+                21 -> executeArenaAction(player, holder.arenaId, "setcorner", "2")
+                23 -> executeArenaAction(player, holder.arenaId, "sethill")
+                31 -> executeArenaAction(player, holder.arenaId, if (plugin.config.getBoolean("arenas.${holder.arenaId}.enabled")) "disable" else "enable")
+            }
+            is RecoveryMenuHolder -> when (slot) {
+                BACK_SLOT -> openAdmin(player)
+                PREVIOUS_SLOT -> if (holder.hasPrevious) openRecoveryPlayers(player, holder.page - 1)
+                NEXT_SLOT -> if (holder.hasNext) openRecoveryPlayers(player, holder.page + 1)
+                else -> holder.players[slot]?.let(plugin.server::getPlayer)?.let { target ->
+                    admin.execute(player, listOf("recover", target.name))
+                    openRecoveryPlayers(player, holder.page)
+                }
+            }
         }
     }
+
+    @EventHandler
+    fun onArenaName(event: AsyncChatEvent) {
+        val player = event.player
+        pendingArenaNames.remove(player.uniqueId) ?: return
+        event.isCancelled = true
+        val raw = PlainTextComponentSerializer.plainText().serialize(event.message()).trim()
+        runSync {
+            if (!player.isOnline) return@runSync
+            if (raw.equals("cancel", true) || raw.equals("отмена", true)) {
+                player.sendMessage(locales.component(player, "menu.admin.create-cancelled"))
+                openAdmin(player)
+                return@runSync
+            }
+            val id = raw.lowercase()
+            val existed = plugin.config.isConfigurationSection("arenas.$id")
+            admin.execute(player, listOf("arena", "create", raw))
+            if (!existed && plugin.config.isConfigurationSection("arenas.$id")) openAdminArena(player, id) else openAdmin(player)
+        }
+    }
+
+    @EventHandler
+    fun onQuit(event: PlayerQuitEvent) {
+        pendingArenaNames.remove(event.player.uniqueId)
+    }
+
+    private fun promptArenaName(player: Player) {
+        player.closeInventory()
+        val token = System.nanoTime()
+        pendingArenaNames[player.uniqueId] = token
+        player.sendMessage(locales.component(player, "menu.admin.create-prompt"))
+        plugin.server.scheduler.runTaskLater(
+            plugin,
+            Runnable {
+                if (pendingArenaNames.remove(player.uniqueId, token) && player.isOnline) {
+                    player.sendMessage(locales.component(player, "menu.admin.create-timeout"))
+                }
+            },
+            ARENA_NAME_TIMEOUT_TICKS,
+        )
+    }
+
+    private fun executeArenaAction(player: Player, arenaId: String, operation: String, vararg arguments: String) {
+        admin.execute(player, listOf("arena", operation, arenaId, *arguments))
+        openAdminArena(player, arenaId)
+    }
+
+    private fun state(player: Player, enabled: Boolean): Component =
+        locales.component(player, if (enabled) "menu.common.enabled" else "menu.common.disabled")
+
+    private fun configured(player: Player, present: Boolean): Component =
+        locales.component(player, if (present) "menu.common.configured" else "menu.common.missing")
+
+    private fun arenaIds(): List<String> =
+        plugin.config.getConfigurationSection("arenas")?.getKeys(false)?.sorted() ?: emptyList()
+
+    private fun locationSummary(path: String): String {
+        if (!hasLocation(path)) return "—"
+        val section = requireNotNull(plugin.config.getConfigurationSection(path))
+        val world = section.getString("world") ?: return "—"
+        return "$world  ${decimal(section.getDouble("x"))}, ${decimal(section.getDouble("y"))}, ${decimal(section.getDouble("z"))}"
+    }
+
+    private fun coordinateSummary(path: String): String {
+        if (!hasCoordinates(path)) return "—"
+        val section = requireNotNull(plugin.config.getConfigurationSection(path))
+        return "${decimal(section.getDouble("x"))}, ${decimal(section.getDouble("y"))}, ${decimal(section.getDouble("z"))}"
+    }
+
+    private fun hasLocation(path: String): Boolean =
+        plugin.config.getConfigurationSection(path)?.let { section ->
+            !section.getString("world").isNullOrBlank() && COORDINATE_KEYS.all(section::contains)
+        } == true
+
+    private fun hasCoordinates(path: String): Boolean =
+        plugin.config.getConfigurationSection(path)?.let { section -> COORDINATE_KEYS.all(section::contains) } == true
+
+    private fun decimal(value: Double): String = "%.1f".format(java.util.Locale.ROOT, value)
 
     private fun handleRulesClick(player: Player, draft: DuelDraft, slot: Int) {
         when (slot) {
@@ -341,8 +567,8 @@ class DuelGuiService(
     private fun item(material: Material, name: Component, lore: List<Component> = emptyList()): ItemStack =
         ItemStack(material).apply {
             itemMeta = itemMeta.apply {
-                displayName(name)
-                lore(lore)
+                displayName(nonItalic(name))
+                lore(lore.map(::nonItalic))
                 addItemFlags(ItemFlag.HIDE_ATTRIBUTES)
             }
         }
@@ -354,8 +580,10 @@ class DuelGuiService(
             val profile = ResolvableProfile.resolvableProfile().uuid(uuid)
             if (profileName != null) profile.name(profileName)
             setData(DataComponentTypes.PROFILE, profile)
-            itemMeta = itemMeta.apply { displayName(name); lore(lore) }
+            itemMeta = itemMeta.apply { displayName(nonItalic(name)); lore(lore.map(::nonItalic)) }
         }
+
+    private fun nonItalic(component: Component): Component = component.decoration(TextDecoration.ITALIC, false)
 
     private fun runSync(block: () -> Unit) {
         if (!plugin.isEnabled) return
@@ -374,6 +602,10 @@ class DuelGuiService(
     private class RulesMenuHolder(val draft: DuelDraft) : MenuHolder()
     private class LeaderboardMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder()
     private class CatalogMenuHolder(val type: CatalogType, val page: Int = 0, val hasPrevious: Boolean = false, val hasNext: Boolean = false) : MenuHolder()
+    private class AdminMenuHolder : MenuHolder()
+    private class AdminArenaListHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val arenas = mutableMapOf<Int, String>() }
+    private class AdminArenaHolder(val arenaId: String) : MenuHolder()
+    private class RecoveryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val players = mutableMapOf<Int, UUID>() }
     private enum class CatalogType { MODES, KITS, QUEUE }
     private enum class MenuBack { MAIN }
 
@@ -385,6 +617,8 @@ class DuelGuiService(
         const val PAGE_SLOT = 40
         const val NEXT_SLOT = 43
         const val ADMIN_PERMISSION = "arcduels.admin"
+        const val ARENA_NAME_TIMEOUT_TICKS = 1_200L
+        val COORDINATE_KEYS = listOf("x", "y", "z")
         val CONTENT_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34)
         val SUMO_MODIFIERS = CombatModifiers(false, false, false, false, 180, 15)
     }

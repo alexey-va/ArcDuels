@@ -14,8 +14,11 @@ import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import net.kyori.adventure.text.format.TextDecoration
 import ru.ruscrafting.duels.domain.ChallengeId
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.LogRecord
 
 @Suppress("DEPRECATION")
 class ArcDuelsPluginTest : StringSpec({
@@ -39,6 +42,25 @@ class ArcDuelsPluginTest : StringSpec({
         KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "classic", "sumo", "tank", "uhc")
         java.io.File(plugin.dataFolder, "lang/ru.yml").isFile shouldBe true
         java.io.File(plugin.dataFolder, "lang/en.yml").isFile shouldBe true
+
+        val localeWarnings = mutableListOf<String>()
+        val handler =
+            object : Handler() {
+                override fun publish(record: LogRecord) {
+                    localeWarnings += record.message
+                }
+
+                override fun flush() = Unit
+
+                override fun close() = Unit
+            }
+        plugin.logger.addHandler(handler)
+        try {
+            LocaleService.load(plugin)
+        } finally {
+            plugin.logger.removeHandler(handler)
+        }
+        localeWarnings.none { "already exists" in it } shouldBe true
     }
 
     "player snapshot restores cursor slot experience and movement state" {
@@ -123,6 +145,8 @@ class ArcDuelsPluginTest : StringSpec({
 
         plugin.config.set("arenas.example.bounds.min.x", 20.0)
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        plugin.config.set("arenas.example.bounds.min.x", -15.0)
+        plugin.config.set("arenas.example.enabled", false)
     }
 
     "invalid explicit challenge ids never fall back to another pending challenge" {
@@ -154,6 +178,8 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.set("arenas.Example.enabled", true)
 
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        plugin.config.set("arenas.Example", null)
+        plugin.config.set("arenas.example.enabled", false)
     }
 
     "main hub follows the challenge submenu path and renders the client language" {
@@ -164,7 +190,9 @@ class ArcDuelsPluginTest : StringSpec({
         player.performCommand("duel") shouldBe true
         player.openInventory.topInventory.size shouldBe 45
         player.openInventory.topInventory.getItem(11)?.type shouldBe Material.NETHERITE_SWORD
-        PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "CHALLENGE A PLAYER"
+        val challengeName = requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())
+        PlainTextComponentSerializer.plainText().serialize(challengeName) shouldBe "Challenge a player"
+        challengeName.decoration(TextDecoration.ITALIC) shouldBe TextDecoration.State.FALSE
 
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
         player.openInventory.topInventory.getItem(10)?.type shouldBe Material.PLAYER_HEAD
@@ -179,6 +207,37 @@ class ArcDuelsPluginTest : StringSpec({
         player.closeInventory()
         player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         player.performCommand("duel") shouldBe true
-        PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "ВЫЗВАТЬ НА БОЙ"
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "Вызвать на бой"
+    }
+
+    "admin command opens a real arena editor and its actions use the current position" {
+        val player = server.addPlayer("ArenaAdmin")
+        player.isOp = true
+        player.setLocale(java.util.Locale.ENGLISH)
+        val world = requireNotNull(server.getWorld("world"))
+
+        player.performCommand("duels admin") shouldBe true
+        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.FILLED_MAP
+        player.openInventory.topInventory.getItem(29)?.type shouldBe Material.NAME_TAG
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
+        player.openInventory.topInventory.getItem(10)?.type shouldBe Material.YELLOW_BANNER
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
+        player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
+        player.openInventory.topInventory.getItem(31)?.type shouldBe Material.LIME_CONCRETE
+
+        player.teleport(Location(world, 7.5, 82.0, -4.5, 45f, 5f))
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 12)
+
+        plugin.config.getDouble("arenas.example.first-spawn.x") shouldBe 7.5
+        plugin.config.getDouble("arenas.example.first-spawn.y") shouldBe 82.0
+        player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
+
+        player.performCommand("duels admin") shouldBe true
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
+        player.chat("gui_arena")
+        server.scheduler.performTicks(2)
+        plugin.config.isConfigurationSection("arenas.gui_arena") shouldBe true
+        player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
+        plugin.config.set("arenas.gui_arena", null)
     }
 })

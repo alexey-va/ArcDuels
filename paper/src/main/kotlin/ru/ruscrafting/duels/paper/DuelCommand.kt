@@ -24,7 +24,7 @@ class DuelCommand internal constructor(
         args: Array<out String>,
     ): Boolean {
         if (args.firstOrNull()?.equals("admin", ignoreCase = true) == true) {
-            admin.execute(sender, args.drop(1))
+            if (sender is Player && args.size == 1) gui.openAdmin(sender) else admin.execute(sender, args.drop(1))
             return true
         }
         val player = sender as? Player
