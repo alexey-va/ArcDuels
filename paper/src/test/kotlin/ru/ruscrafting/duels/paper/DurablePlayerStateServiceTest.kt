@@ -275,6 +275,33 @@ class DurablePlayerStateServiceTest : StringSpec({
         sessions.shutdown()
     }
 
+    "non-inventory restoration runs after teleport listeners normalize player state" {
+        val player = server.addPlayer()
+        player.inventory.setItem(0, ItemStack(Material.EMERALD))
+        player.foodLevel = 13
+        player.noDamageTicks = 7
+        val origin = player.location.clone()
+        val snapshot = PlayerSnapshot.capture(player)
+        val liveItem = player.inventory.getItem(0)
+        player.teleport(origin.clone().add(8.0, 0.0, 0.0))
+        player.foodLevel = 20
+        player.noDamageTicks = 0
+
+        snapshot.restoreWithoutInventory(player) { target, destination ->
+            val teleported = target.teleport(destination)
+            // Represents CMI/HuskSync/other teleport callbacks normalizing
+            // transient state after Bukkit has moved the player.
+            target.foodLevel = 20
+            target.noDamageTicks = 40
+            teleported
+        }
+
+        player.inventory.getItem(0) shouldBe liveItem
+        player.foodLevel shouldBe 13
+        player.noDamageTicks shouldBe 7
+        snapshot.nonInventoryStateMismatches(player) shouldBe emptyList()
+    }
+
     "overlapping archive cleanup runs are coalesced" {
         val repository = GatedEscrowRepository()
         val firstPurge = CompletableFuture<Int>()

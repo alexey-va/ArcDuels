@@ -42,24 +42,20 @@ data class PlayerSnapshot(
 
     fun locationMatches(player: Player): Boolean = player.location.sameLocation(location)
 
-    fun nonInventoryStateMatches(player: Player): Boolean =
-        player.gameMode == gameMode &&
-            player.allowFlight == allowFlight &&
-            player.isFlying == (flying && allowFlight) &&
-            player.foodLevel == foodLevel &&
-            player.saturation == saturation &&
-            player.exhaustion == exhaustion &&
-            player.totalExperience == totalExperience &&
-            player.level == level &&
-            player.exp == experience &&
-            player.fireTicks == fireTicks &&
-            player.fallDistance == fallDistance &&
-            player.remainingAir == remainingAir &&
-            player.noDamageTicks == noDamageTicks &&
-            player.absorptionAmount == absorptionAmount &&
-            player.health == restoredHealth(player) &&
-            player.activePotionEffects.toSet() == potionEffects.toSet() &&
-            player.velocity == velocity
+    fun nonInventoryStateMatches(player: Player): Boolean = nonInventoryStateMismatches(player).isEmpty()
+
+    fun nonInventoryStateMismatches(player: Player): List<String> =
+        buildList {
+            if (player.gameMode != gameMode) add("gameMode")
+            if (player.allowFlight != allowFlight || player.isFlying != (flying && allowFlight)) add("flight")
+            if (player.foodLevel != foodLevel || player.saturation != saturation || player.exhaustion != exhaustion) add("food")
+            if (player.totalExperience != totalExperience || player.level != level || player.exp != experience) add("experience")
+            if (player.fireTicks != fireTicks || player.fallDistance != fallDistance || player.remainingAir != remainingAir) add("movement")
+            if (player.noDamageTicks != noDamageTicks || player.absorptionAmount != absorptionAmount) add("damage")
+            if (player.health != restoredHealth(player)) add("health")
+            if (player.activePotionEffects.toSet() != potionEffects.toSet()) add("potionEffects")
+            if (player.velocity != velocity) add("velocity")
+        }
 
     fun restoreLocation(
         player: Player,
@@ -89,10 +85,10 @@ data class PlayerSnapshot(
         player: Player,
         teleport: (Player, Location) -> Boolean,
     ) {
-        restoreNonInventoryState(player)
         restoreLocation(player, teleport)
-        // Teleport listeners can normalize health and velocity.
-        restoreHealth(player)
+        // Teleport listeners may normalize health, movement, game mode, or
+        // effects. Apply the saved state only after every teleport callback.
+        restoreNonInventoryState(player)
         player.velocity = velocity.clone()
         verifyNonInventoryState(player)
         check(locationMatches(player)) { "Location verification failed" }
@@ -122,12 +118,9 @@ data class PlayerSnapshot(
         player: Player,
         teleport: (Player, Location) -> Boolean,
     ) {
-        restoreState(player)
+        restoreInventory(player)
         restoreLocation(player, teleport)
-        // Teleport listeners may update max-health modifiers or normalize current
-        // health for the destination. Re-apply health against the post-teleport
-        // attribute value before verifying the durable snapshot.
-        restoreHealth(player)
+        restoreNonInventoryState(player)
         player.velocity = velocity.clone()
         verifyRestored(player)
     }
@@ -161,7 +154,8 @@ data class PlayerSnapshot(
     }
 
     private fun verifyNonInventoryState(player: Player) {
-        check(nonInventoryStateMatches(player)) { "Non-inventory state verification failed" }
+        val mismatches = nonInventoryStateMismatches(player)
+        check(mismatches.isEmpty()) { "Non-inventory state verification failed: ${mismatches.joinToString()}" }
     }
 
     private fun restoreHealth(player: Player) {
