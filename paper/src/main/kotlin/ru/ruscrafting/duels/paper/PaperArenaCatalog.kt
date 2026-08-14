@@ -87,6 +87,11 @@ data class HillZone(
     }
 }
 
+data class ArenaCapacity(
+    val total: Int,
+    val free: Int,
+)
+
 class PaperArenaCatalog private constructor(
     initialArenas: Map<ArenaId, PaperArena>,
 ) : ArenaAllocator {
@@ -125,6 +130,15 @@ class PaperArenaCatalog private constructor(
     fun queueSize(): Int = synchronized(lock) { waiting.count { !it.future.isDone } }
 
     fun reservedCount(): Int = synchronized(lock) { reserved.size }
+
+    fun capacity(objective: DuelObjectiveType): ArenaCapacity =
+        synchronized(lock) {
+            val compatible = arenas.values.filter { it.supports(objective) }
+            ArenaCapacity(
+                total = compatible.size,
+                free = compatible.count { it.id !in reserved },
+            )
+        }
 
     fun disable(id: ArenaId): Int =
         synchronized(lock) {

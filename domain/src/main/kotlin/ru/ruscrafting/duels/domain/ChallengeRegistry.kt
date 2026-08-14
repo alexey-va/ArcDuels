@@ -27,6 +27,53 @@ class ChallengeRegistry(
             }
         }
 
+    /**
+     * Imports a challenge received from another server.
+     *
+     * Re-delivery of the exact same challenge is intentionally idempotent. A
+     * conflicting payload with the same id, or a second pending challenge for
+     * the same pair, is rejected instead of silently replacing local state.
+     */
+    fun register(challenge: DuelChallenge): DuelChallenge =
+        synchronized(lock) {
+            expirePending()
+            val existing = challenges[challenge.id]
+            if (existing != null) {
+                require(existing == challenge) { "Challenge id is already registered with different data" }
+                return@synchronized existing
+            }
+            val pair = setOf(challenge.challenger, challenge.target)
+            if (challenge.status == ChallengeStatus.PENDING) {
+                check(pendingByPair[pair] == null) { "These players already have a pending challenge" }
+                pendingByPair[pair] = challenge.id
+            }
+            challenges[challenge.id] = challenge
+            pruneTerminalChallenges()
+            challenge
+        }
+
+    /** Applies an authenticated terminal state received from another server. */
+    fun registerResolution(challenge: DuelChallenge): DuelChallenge =
+        synchronized(lock) {
+            require(challenge.status != ChallengeStatus.PENDING) { "A network resolution must be terminal" }
+            val existing = challenges[challenge.id]
+            if (existing != null) {
+                require(existing.challenger == challenge.challenger && existing.target == challenge.target) {
+                    "Challenge participants do not match the registered challenge"
+                }
+                require(existing.rules == challenge.rules && existing.createdAt == challenge.createdAt && existing.expiresAt == challenge.expiresAt) {
+                    "Challenge resolution does not match the registered challenge"
+                }
+                require(existing.status == ChallengeStatus.PENDING || existing == challenge) {
+                    "Challenge already has a different terminal resolution"
+                }
+            }
+            challenges[challenge.id] = challenge
+            pendingByPair.remove(setOf(challenge.challenger, challenge.target), challenge.id)
+            pruneTerminalChallenges()
+            challenge
+        }
+
     fun resolve(
         id: ChallengeId,
         actor: PlayerId,

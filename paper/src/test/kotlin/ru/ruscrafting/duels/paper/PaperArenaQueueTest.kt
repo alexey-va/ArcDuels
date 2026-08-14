@@ -21,6 +21,13 @@ class PaperArenaQueueTest : StringSpec({
         configureArena(plugin, "queue", "queue-world")
     }
 
+    "capacity reports only arenas compatible with the selected objective" {
+        val catalog = PaperArenaCatalog.load(plugin)
+
+        catalog.capacity(DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
+        catalog.capacity(DuelObjectiveType.KING_OF_THE_HILL) shouldBe ArenaCapacity(0, 0)
+    }
+
     afterSpec { MockBukkit.unmock() }
 
     "arena waiters are FIFO cancelled entries are skipped and reservation stays exclusive" {

@@ -1,6 +1,7 @@
 package ru.ruscrafting.duels.paper
 
 import org.bukkit.plugin.java.JavaPlugin
+import org.bukkit.configuration.file.YamlConfiguration
 import ru.arc.redis.RedisConnection
 import ru.arc.redis.RedisManager
 import ru.arc.redis.ServerIdentity
@@ -19,7 +20,11 @@ import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
+import ru.ruscrafting.duels.redis.ArenaNodeStatus
+import ru.ruscrafting.duels.redis.CrossServerChallengeBus
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
+import ru.ruscrafting.duels.redis.NetworkArenaDirectory
+import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -53,8 +58,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val kits = KitRegistry.load(this)
         val persistence = createPersistence()
         val statistics = persistence.statistics
-        val publisher = createNetwork(serverId, statistics, locales)
-        val coordinator = MatchCoordinator(serverId, arenas, statistics, publisher, Clock.systemUTC())
+        val network = createNetwork(serverId, statistics, locales)
+        val coordinator = MatchCoordinator(serverId, arenas, statistics, network.publisher, Clock.systemUTC())
         val retentionDays = config.getLong("mysql.inventory-snapshots.retention-days", 7L)
         require(retentionDays in 1L..3_650L) { "mysql.inventory-snapshots.retention-days must be between 1 and 3650" }
         val cleanupMinutes = config.getLong("mysql.inventory-snapshots.cleanup-interval-minutes", 60L)
@@ -92,10 +97,27 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 Clock.systemUTC(),
                 Duration.ofSeconds(config.getLong("challenge-timeout-seconds", 45L).coerceIn(5L, 600L)),
             )
-        val controller = DuelController(this, challenges, sessionManager, statistics, locales)
+        val targets = DuelTargetDirectory(this, serverId, network.players)
+        val transfer = network.challenges?.let { ProxyPlayerTransfer(this) }
+        if (transfer != null) closeables += transfer
+        val controller =
+            DuelController(
+                this,
+                challenges,
+                sessionManager,
+                statistics,
+                locales,
+                targets,
+                serverId,
+                network.challenges,
+                network.arenas,
+                transfer,
+                transferTimeout = Duration.ofSeconds(config.getLong("redis.transfer-timeout-seconds", 30L).coerceIn(10L, 120L)),
+            )
+        closeables += controller
         val admin = DuelAdminCommand(this, arenas, sessionManager, locales)
-        val gui = DuelGuiService(this, kits, statistics, sessionManager, locales, admin, controller::challenge, controller::showStatistics)
-        val command = DuelCommand(controller, gui, admin, locales)
+        val gui = DuelGuiService(this, kits, statistics, sessionManager, locales, admin, targets, controller::challenge, controller::showStatistics)
+        val command = DuelCommand(controller, gui, admin, targets, locales)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command
@@ -105,6 +127,24 @@ open class ArcDuelsPlugin : JavaPlugin() {
         server.pluginManager.registerEvents(identities, this)
         server.onlinePlayers.forEach(identities::remember)
         server.onlinePlayers.forEach(sessionManager::handleJoin)
+        network.arenas?.let { directory ->
+            val publishArenaStatus = Runnable {
+                val general = arenas.capacity(ru.ruscrafting.duels.domain.DuelObjectiveType.ELIMINATION)
+                val koth = arenas.capacity(ru.ruscrafting.duels.domain.DuelObjectiveType.KING_OF_THE_HILL)
+                directory.publish(
+                    ArenaNodeStatus(
+                        server = serverId,
+                        generalTotal = general.total,
+                        generalFree = general.free,
+                        kingOfTheHillTotal = koth.total,
+                        kingOfTheHillFree = koth.free,
+                        queuedPairs = arenas.queueSize(),
+                    ),
+                )
+            }
+            publishArenaStatus.run()
+            server.scheduler.runTaskTimer(this, publishArenaStatus, ARENA_HEARTBEAT_TICKS, ARENA_HEARTBEAT_TICKS)
+        }
         logger.info("ArcDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
         if (arenas.size() == 0) logger.warning("No enabled duel arenas are configured; challenges cannot start yet")
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
@@ -149,21 +189,28 @@ open class ArcDuelsPlugin : JavaPlugin() {
         serverId: ServerId,
         statistics: StatisticsRepository,
         locales: LocaleService,
-    ): DuelEventPublisher {
-        if (!config.getBoolean("redis.enabled", false)) return NoOpDuelEventPublisher
-        val username = config.getString("redis.username")?.takeIf(String::isNotBlank)
-        val password = config.getString("redis.password")?.takeIf(String::isNotBlank)
+    ): NetworkRuntime {
+        if (!config.getBoolean("redis.enabled", false)) return NetworkRuntime(NoOpDuelEventPublisher)
+        val redis = redisSettings()
         val manager =
             RedisManager(
                 RedisConnection(
-                    config.getString("redis.host", "127.0.0.1")!!,
-                    config.getInt("redis.port", 6379),
-                    username,
-                    password,
+                    redis.host,
+                    redis.port,
+                    redis.username,
+                    redis.password,
                 ),
                 ServerIdentity { serverId.value },
             )
         val bus = CrossServerDuelBus(manager, serverId)
+        val challengeBus = CrossServerChallengeBus(manager, serverId)
+        val players =
+            NetworkPlayerDirectory(
+                manager,
+                expectedOrigin = ServerId(config.getString("redis.player-list-origin", "proxy")!!),
+                staleAfter = Duration.ofSeconds(config.getLong("redis.player-list-ttl-seconds", 5L).coerceIn(2L, 30L)),
+            )
+        val arenas = NetworkArenaDirectory(manager, serverId)
         if (config.getBoolean("redis.broadcast-wins", true)) {
             bus.subscribe { event ->
                 if (!isEnabled) return@subscribe
@@ -191,16 +238,55 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 }
             }
         }
-        if (!NetworkLifecycle.initialize(manager, bus) { failure ->
-                logger.warning("Redis is unavailable; ArcDuels will continue without cross-server events: ${failure.javaClass.simpleName}")
-            }
-        ) {
-            return NoOpDuelEventPublisher
+        try {
+            manager.init()
+        } catch (failure: Throwable) {
+            runCatching(players::close)
+            runCatching(arenas::close)
+            runCatching(challengeBus::close)
+            runCatching(bus::close)
+            runCatching(manager::close)
+            logger.warning("Redis is unavailable; ArcDuels will continue without cross-server events: ${failure.javaClass.simpleName}")
+            return NetworkRuntime(NoOpDuelEventPublisher)
         }
         closeables += AutoCloseable {
-            NetworkLifecycle.close(bus, manager).getOrThrow()
+            var firstFailure: Throwable? = null
+            listOf(players::close, arenas::close, challengeBus::close, bus::close, manager::close).forEach { close ->
+                runCatching(close).onFailure { failure ->
+                    val existing = firstFailure
+                    if (existing == null) firstFailure = failure else existing.addSuppressed(failure)
+                }
+            }
+            firstFailure?.let { throw it }
         }
-        return bus
+        return NetworkRuntime(bus, players, arenas, challengeBus)
+    }
+
+    private fun redisSettings(): RedisSettings {
+        val configured =
+            RedisSettings(
+                host = config.getString("redis.host", "127.0.0.1")!!,
+                port = config.getInt("redis.port", 6379),
+                username = config.getString("redis.username")?.takeIf(String::isNotBlank),
+                password = config.getString("redis.password")?.takeIf(String::isNotBlank),
+            )
+        if (!config.getBoolean("redis.import-arc-credentials", false)) return configured
+        val arcFolder = dataFolder.parentFile.resolve("ARC")
+        val source =
+            listOf(arcFolder.resolve("modules/redis.yml"), arcFolder.resolve("config.yml"))
+                .firstOrNull(java.io.File::isFile)
+                ?: error("redis.import-arc-credentials is enabled but ARC Redis configuration was not found")
+        val imported = YamlConfiguration.loadConfiguration(source)
+        val prefix = if (imported.isConfigurationSection("redis")) "redis." else ""
+        val host = imported.getString("${prefix}host") ?: imported.getString("${prefix}ip") ?: configured.host
+        val port = imported.getInt("${prefix}port", configured.port)
+        require(host.isNotBlank() && port in 1..65_535) { "Imported ARC Redis endpoint is invalid" }
+        return RedisSettings(
+            host = host,
+            port = port,
+            username = imported.getString("${prefix}username")?.takeIf(String::isNotBlank) ?: configured.username,
+            password = imported.getString("${prefix}password")?.takeIf(String::isNotBlank) ?: configured.password,
+        )
     }
 
     private fun closeResources() {
@@ -214,6 +300,20 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val statistics: StatisticsRepository,
         val playerStates: PlayerStateEscrowRepository,
         val durable: Boolean,
+    )
+
+    private data class NetworkRuntime(
+        val publisher: DuelEventPublisher,
+        val players: NetworkPlayerDirectory? = null,
+        val arenas: NetworkArenaDirectory? = null,
+        val challenges: CrossServerChallengeBus? = null,
+    )
+
+    private data class RedisSettings(
+        val host: String,
+        val port: Int,
+        val username: String?,
+        val password: String?,
     )
 
     private object UnavailablePlayerStateEscrowRepository : PlayerStateEscrowRepository {
@@ -238,5 +338,9 @@ open class ArcDuelsPlugin : JavaPlugin() {
         ): CompletableFuture<Boolean> = unavailable()
 
         override fun purgeRetained(cutoff: Instant): CompletableFuture<Int> = unavailable()
+    }
+
+    private companion object {
+        const val ARENA_HEARTBEAT_TICKS = 40L
     }
 }

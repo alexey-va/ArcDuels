@@ -32,7 +32,7 @@ menu:
   targets:
     title: '<dark_gray>Opponent · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
-    player-lore: ['<dark_gray>✖</dark_gray> <white>This player is available.</white>', '', '<aqua>Left click</aqua> <gray>Choose an objective</gray>']
+    player-lore: ['<gray>Server:</gray> <white><server></white>', '<dark_gray>✖</dark_gray> <white>This player is available.</white>', '', '<aqua>Left click</aqua> <gray>Choose an objective</gray>']
     empty: '<red>No available players</red>'
   objectives:
     title: '<dark_gray>Objective · <player></dark_gray>'
@@ -160,6 +160,11 @@ controller:
   busy: '<red>One of the players is already queued, fighting, or awaiting recovery.</red>'
   sent: '<green>Challenge sent to <white><player></white>.</green>'
   failed: '<red>Could not process the duel challenge.</red>'
+  network-unavailable: '<red>Network challenges are currently unavailable.</red>'
+  no-network-arena: '<red>No live server currently has an arena compatible with this objective.</red>'
+  network-transfer: '<gray>Challenge accepted. Moving you to arena server</gray> <white><server></white><gray>…</gray>'
+  network-return: '<gray>Your state is restored. Returning you to server</gray> <white><server></white><gray>…</gray>'
+  network-timeout: '<red>Both players did not reach the arena server in time.</red>'
   expired: '<red>This challenge has expired.</red>'
   start-failed: '<red>Could not start the duel: <reason></red>'
   wait-cancelled: '<gray>arena wait was cancelled</gray>'

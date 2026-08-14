@@ -32,6 +32,7 @@ import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 class DuelSessionManager internal constructor(
     private val plugin: JavaPlugin,
@@ -50,6 +51,12 @@ class DuelSessionManager internal constructor(
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val internalTeleports = InternalTeleportAuthorizer()
     private val celebrationEffects = CelebrationEffects(plugin)
+    private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
+
+    fun onCompleted(listener: (DuelMatch) -> Unit): AutoCloseable {
+        completionListeners += listener
+        return AutoCloseable { completionListeners -= listener }
+    }
 
     fun start(challenge: DuelChallenge): CompletableFuture<DuelMatch> {
         check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
@@ -625,6 +632,14 @@ class DuelSessionManager internal constructor(
         sessions.remove(match.id, session)
         session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
         runCatching { coordinator.releaseCompleted(match.id) }
+            .onSuccess { released ->
+                if (released) {
+                    completionListeners.forEach { listener ->
+                        runCatching { listener(match) }
+                            .onFailure { plugin.logger.warning("Duel completion listener failed for ${match.id}: ${it.message}") }
+                    }
+                }
+            }
             .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
     }
 

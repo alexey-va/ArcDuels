@@ -32,7 +32,7 @@ menu:
   targets:
     title: '<dark_gray>Соперник · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
-    player-lore: ['<dark_gray>✖</dark_gray> <white>Игрок свободен для боя.</white>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
+    player-lore: ['<gray>Сервер:</gray> <white><server></white>', '<dark_gray>✖</dark_gray> <white>Игрок свободен для боя.</white>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
     empty: '<red>Нет свободных игроков</red>'
   objectives:
     title: '<dark_gray>Режим · <player></dark_gray>'
@@ -160,6 +160,11 @@ controller:
   busy: '<red>Один из игроков уже в очереди, в бою или ожидает восстановления.</red>'
   sent: '<green>Вызов отправлен игроку <white><player></white>.</green>'
   failed: '<red>Не удалось обработать вызов на дуэль.</red>'
+  network-unavailable: '<red>Сетевые вызовы сейчас недоступны.</red>'
+  no-network-arena: '<red>Сейчас нет доступного сервера с ареной для этого режима.</red>'
+  network-transfer: '<gray>Вызов принят. Перевожу тебя на сервер арены</gray> <white><server></white><gray>…</gray>'
+  network-return: '<gray>Состояние восстановлено. Возвращаю тебя на сервер</gray> <white><server></white><gray>…</gray>'
+  network-timeout: '<red>Не удалось собрать обоих игроков на сервере арены вовремя.</red>'
   expired: '<red>Этот вызов уже истёк.</red>'
   start-failed: '<red>Не удалось начать дуэль: <reason></red>'
   wait-cancelled: '<gray>ожидание арены отменено</gray>'

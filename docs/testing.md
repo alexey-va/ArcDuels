@@ -17,8 +17,9 @@ The suite covers:
 - queued player ownership, FIFO arena handoff, cancellation, and overlapping persistence completion;
 - local statistics idempotency under concurrent duplicate writes;
 - long result sequences, rating bounds, streaks, revisions, and leaderboards;
-- Redis codec validation, authenticated origins, listener isolation, dedupe,
-  source collisions, and TTL expiry;
+- Redis event and challenge codec validation, authenticated origins, listener
+  isolation, dedupe, source collisions, player-snapshot TTL expiry, blank
+  backend handling, and dynamic objective-compatible arena-node selection;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
   arena and kit validation, pagination matrices, teleport authorization, and
   damage-free celebration entities, default-kit presence, and strict Russian /
@@ -43,7 +44,7 @@ double.
 
 ## Artifact gate
 
-The deployable artifact is `paper/build/libs/ArcDuels-0.2.3.jar`.
+The deployable artifact is `paper/build/libs/ArcDuels-0.2.4.jar`.
 Before distribution, verify it is a valid shadow JAR containing ArcDuels,
 Kotlin, `arc-core-sql`, `arc-core-redis`, HikariCP, Connector/J, and Jedis while
 excluding Paper and MockBukkit classes.

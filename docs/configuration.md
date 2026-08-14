@@ -19,11 +19,23 @@ RusCrafting uses the shared `common` database. ArcDuels owns only namespaced
 the database and account; plugin startup creates and migrates every table
 automatically. No administrator should run ArcDuels table DDL by hand.
 
-Enable `redis.enabled` independently for cross-server win announcements and
-leaderboard invalidation events. Redis transport is presentation-only and
-fail-soft; MySQL remains the durable source of truth. If Redis is unavailable
-at startup, ArcDuels closes the partial network resources, logs a bounded
-warning, and continues locally without cross-server announcements.
+Enable `redis.enabled` for the network player picker, cross-server challenges,
+live arena routing, win announcements, and leaderboard invalidation. ProxyARC's
+authenticated `arc.proxy_player_list` snapshot is the authoritative online
+directory; entries expire locally when the proxy heartbeat becomes stale.
+Every ArcDuels node also publishes its objective-compatible arena capacity,
+free slots, and queue depth. When a challenge is accepted, the plugin chooses
+a live compatible node by free capacity and load, then transfers both players
+there through the proxy. No fixed arena server is configured or assumed. Once
+the match result is durable and both inventory snapshots have been restored
+and released, each participant is returned to the backend they came from.
+
+Redis remains fail-soft and MySQL remains the durable source of truth. If Redis
+is unavailable at startup, ArcDuels closes every partial network resource,
+logs a bounded warning, and continues with same-server challenges only. On
+RusCrafting nodes, `redis.import-arc-credentials: true` securely reuses the
+local ARC Redis endpoint and credentials from `plugins/ARC/modules/redis.yml`
+or the legacy `plugins/ARC/config.yml`; the secret is never logged.
 
 Every network node needs a unique `server-id` containing only letters, digits,
 dot, underscore, or hyphen.
@@ -95,6 +107,12 @@ inside the bounds and use the same loaded world. Leaving the bounds loses the
 round; only scoped ArcDuels teleports and in-bounds combat teleports are
 accepted while a player owns an arena.
 
+Network arena heartbeats distinguish ordinary/sumo arenas from arenas that
+contain a valid KOTH hill. A KOTH challenge is never routed to a node that only
+has ordinary arenas. Stale or spoofed heartbeats are ignored; a capacity race
+is still safe because the destination's normal exclusive FIFO allocator is the
+final authority.
+
 Operators can configure arenas in game. Any point edit disables the arena until
 the full definition validates again; edits and reloads are rejected while a
 match owns an arena or a pair is waiting.
@@ -149,7 +167,8 @@ The bundled starter kits are `classic`, `axe`, `archer`, `uhc`, `tank`, and
 `sumo`. The UHC selection starts with natural regeneration disabled; every
 setting remains visible before the challenge is sent.
 
-`/duel` opens the main hub. Challenge setup is deliberately hierarchical:
+`/duel` opens the main hub. The opponent picker includes players from every
+ProxyARC backend and shows their current server. Challenge setup is deliberately hierarchical:
 opponent → objective → loadout → rules → confirmation. Rules include
 BO1/BO3/BO5, ranked kit matches, sudden-death time, projectiles, consumables,
 ender pearls, natural regeneration, and KOTH capture time. The recipient sees
@@ -162,7 +181,7 @@ the selected rules before accepting. Own-inventory matches remain unranked.
 - `/duel accept [challenge-id]`, `/duel deny [challenge-id]`;
 - `/duel cancel`;
 - `/duel leave` — forfeit the current match;
-- `/duel stats [online-player]`;
+- `/duel stats [network-online-player]`;
 - `/duel top` — open the global leaderboard.
 - `/duels admin status` — active arenas and FIFO waiters;
 - `/duels admin recover <online-player>` — retry an exact pending recovery.

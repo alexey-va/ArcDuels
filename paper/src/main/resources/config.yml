@@ -38,11 +38,19 @@ mysql:
 
 redis:
   enabled: false
+  # RusCrafting nodes can reuse the already provisioned local ARC connection
+  # without duplicating its password in this file.
+  import-arc-credentials: false
   host: 127.0.0.1
   port: 6379
   username: ''
   password: ''
   broadcast-wins: true
+  # ProxyARC publishes the authoritative network player snapshot once a second.
+  player-list-origin: proxy
+  player-list-ttl-seconds: 5
+  # Accepted cross-server challenges are routed to a live compatible arena node.
+  transfer-timeout-seconds: 30
 
 kits:
   classic:

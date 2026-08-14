@@ -7,12 +7,14 @@ import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
 import org.bukkit.entity.Player
 import ru.ruscrafting.duels.domain.ChallengeId
+import ru.ruscrafting.duels.domain.ServerId
 import java.util.UUID
 
 class DuelCommand internal constructor(
     private val controller: DuelController,
     private val gui: DuelGuiService,
     private val admin: DuelAdminCommand,
+    private val targets: DuelTargetDirectory? = null,
     private val locales: LocaleService? = null,
 ) : CommandExecutor, TabCompleter {
     private val miniMessage = MiniMessage.miniMessage()
@@ -50,18 +52,18 @@ class DuelCommand internal constructor(
             "stats", "статы" -> {
                 val target =
                     if (args.size > 1) {
-                        player.server.getPlayerExact(args[1]) ?: run {
+                        resolveTarget(player, args[1]) ?: run {
                             player.sendMessage(message(player, "error.player-left", "<red>Player not found.</red>"))
                             return true
                         }
                     } else {
-                        player
+                        targets?.local(player) ?: localTarget(player)
                     }
                 controller.showStatistics(player, target)
             }
             "top", "топ" -> gui.openLeaderboard(player)
             else -> {
-                val target = player.server.getPlayerExact(args[0])
+                val target = resolveTarget(player, args[0])
                 if (target == null || target.uniqueId == player.uniqueId) {
                     player.sendMessage(message(player, "error.player-left", "<red>Player not found.</red>"))
                 } else {
@@ -85,7 +87,9 @@ class DuelCommand internal constructor(
         val prefix = args[0].lowercase()
         val commands = mutableListOf("accept", "deny", "cancel", "leave", "stats", "top")
         if (sender.hasPermission("arcduels.admin")) commands += "admin"
-        return (commands + sender.server.onlinePlayers.map(Player::getName))
+        val playerNames = targets?.players()?.map(DuelTarget::name) ?: sender.server.onlinePlayers.map(Player::getName)
+        return (commands + playerNames)
+            .distinctBy { it.lowercase() }
             .filter { it.lowercase().startsWith(prefix) }
             .sorted()
     }
@@ -102,4 +106,10 @@ class DuelCommand internal constructor(
 
     private fun message(player: Player, key: String, fallback: String) =
         locales?.component(player, key) ?: miniMessage.deserialize(fallback)
+
+    private fun resolveTarget(player: Player, name: String): DuelTarget? =
+        targets?.find(name) ?: player.server.getPlayerExact(name)?.let(::localTarget)
+
+    private fun localTarget(player: Player): DuelTarget =
+        DuelTarget(player.uniqueId, player.name, ServerId("local"), local = true)
 }

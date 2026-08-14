@@ -34,12 +34,13 @@ class DuelGuiService internal constructor(
     private val sessions: DuelSessionManager,
     private val locales: LocaleService,
     private val admin: DuelAdminCommand,
-    private val challengeAction: (Player, Player, DuelRules) -> Unit,
-    private val statisticsAction: (Player, Player) -> Unit,
+    private val targets: DuelTargetDirectory,
+    private val challengeAction: (Player, DuelTarget, DuelRules) -> Unit,
+    private val statisticsAction: (Player, DuelTarget) -> Unit,
 ) : Listener {
     private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
 
-    fun openChallenge(player: Player, target: Player) = openObjectives(player, target)
+    fun openChallenge(player: Player, target: DuelTarget) = openObjectives(player, target)
 
     fun openMain(player: Player) {
         val holder = MainMenuHolder()
@@ -69,27 +70,31 @@ class DuelGuiService internal constructor(
     }
 
     fun openTargets(player: Player, requestedPage: Int = 0) {
-        val targets =
-            plugin.server.onlinePlayers
-                .filter { it.uniqueId != player.uniqueId && !sessions.isEngaged(it) && !sessions.isStateLocked(it) }
-                .sortedWith { first, second -> String.CASE_INSENSITIVE_ORDER.compare(first.name, second.name) }
-        val page = pageWindow(targets, requestedPage, CONTENT_SLOTS.size)
+        val availableTargets =
+            targets.players()
+                .filter { target ->
+                    if (target.uniqueId == player.uniqueId) return@filter false
+                    val local = plugin.server.getPlayer(target.uniqueId) ?: return@filter true
+                    !sessions.isEngaged(local) && !sessions.isStateLocked(local)
+                }
+        val page = pageWindow(availableTargets, requestedPage, CONTENT_SLOTS.size)
         val holder = TargetMenuHolder(page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.targets.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
         decorate(inventory)
         page.items.forEachIndexed { index, target ->
             val slot = CONTENT_SLOTS[index]
-            holder.targets[slot] = target.uniqueId
+            holder.targets[slot] = target
             inventory.setItem(
                 slot,
                 playerHead(
-                    target,
+                    target.uniqueId,
+                    target.name,
                     locales.component(player, "menu.targets.player", LocaleService.text("player", target.name)),
-                    locales.lines(player, "menu.targets.player-lore"),
+                    locales.lines(player, "menu.targets.player-lore", LocaleService.text("server", target.server.value)),
                 ),
             )
         }
-        if (targets.isEmpty()) inventory.setItem(22, item(player, Material.BARRIER, "menu.targets.empty"))
+        if (availableTargets.isEmpty()) inventory.setItem(22, item(player, Material.BARRIER, "menu.targets.empty"))
         navigation(player, inventory, page, MenuBack.MAIN)
         player.openInventory(inventory)
     }
@@ -242,8 +247,8 @@ class DuelGuiService internal constructor(
         }
     }
 
-    private fun openObjectives(player: Player, target: Player) {
-        val holder = ObjectiveMenuHolder(target.uniqueId)
+    private fun openObjectives(player: Player, target: DuelTarget) {
+        val holder = ObjectiveMenuHolder(target)
         val inventory = create(holder, locales.component(player, "menu.objectives.title", LocaleService.text("player", target.name)))
         decorate(inventory)
         objectiveItem(player, DuelObjectiveType.ELIMINATION, Material.DIAMOND_SWORD)?.let { inventory.setItem(11, it) }
@@ -253,11 +258,11 @@ class DuelGuiService internal constructor(
         player.openInventory(inventory)
     }
 
-    private fun openLoadouts(player: Player, target: Player, objective: DuelObjectiveType, requestedPage: Int = 0) {
+    private fun openLoadouts(player: Player, target: DuelTarget, objective: DuelObjectiveType, requestedPage: Int = 0) {
         val availableKits = if (objective == DuelObjectiveType.SUMO) kits.all().filter { it.id.value == "sumo" } else kits.all()
         val kitSlots = if (objective == DuelObjectiveType.SUMO) CONTENT_SLOTS else CONTENT_SLOTS.filter { it != 32 }
         val page = pageWindow(availableKits, requestedPage, kitSlots.size)
-        val holder = LoadoutMenuHolder(target.uniqueId, objective, page.index, page.hasPrevious, page.hasNext)
+        val holder = LoadoutMenuHolder(target, objective, page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.loadouts.title"))
         decorate(inventory)
         page.items.forEachIndexed { index, kit ->
@@ -276,7 +281,7 @@ class DuelGuiService internal constructor(
     }
 
     private fun openRules(player: Player, draft: DuelDraft) {
-        val target = plugin.server.getPlayer(draft.target)
+        val target = targets.find(draft.target.uniqueId)
         if (target == null) {
             player.closeInventory()
             player.sendMessage(locales.component(player, "error.player-left"))
@@ -350,7 +355,7 @@ class DuelGuiService internal constructor(
                 15 -> openLeaderboard(player)
                 29 -> openModes(player)
                 31 -> openKits(player)
-                33 -> statisticsAction(player, player)
+                33 -> statisticsAction(player, targets.local(player))
                 40 -> showHelp(player)
                 44 -> if (player.hasPermission(ADMIN_PERMISSION)) openAdmin(player)
             }
@@ -358,17 +363,19 @@ class DuelGuiService internal constructor(
                 BACK_SLOT -> openMain(player)
                 PREVIOUS_SLOT -> if (holder.hasPrevious) openTargets(player, holder.page - 1)
                 NEXT_SLOT -> if (holder.hasNext) openTargets(player, holder.page + 1)
-                else -> holder.targets[slot]?.let { id ->
-                    plugin.server.getPlayer(id)?.let { openObjectives(player, it) } ?: player.sendMessage(locales.component(player, "error.player-left"))
+                else -> holder.targets[slot]?.let { selected ->
+                    targets.find(selected.uniqueId)?.let { openObjectives(player, it) }
+                        ?: player.sendMessage(locales.component(player, "error.player-left"))
                 }
             }
             is ObjectiveMenuHolder -> {
                 if (slot == BACK_SLOT) return openTargets(player)
                 val objective = when (slot) { 11 -> DuelObjectiveType.ELIMINATION; 13 -> DuelObjectiveType.KING_OF_THE_HILL; 15 -> DuelObjectiveType.SUMO; else -> null } ?: return
-                plugin.server.getPlayer(holder.target)?.let { openLoadouts(player, it, objective) } ?: player.sendMessage(locales.component(player, "error.player-left"))
+                targets.find(holder.target.uniqueId)?.let { openLoadouts(player, it, objective) }
+                    ?: player.sendMessage(locales.component(player, "error.player-left"))
             }
             is LoadoutMenuHolder -> {
-                val target = plugin.server.getPlayer(holder.target) ?: run { player.closeInventory(); player.sendMessage(locales.component(player, "error.player-left")); return }
+                val target = targets.find(holder.target.uniqueId) ?: run { player.closeInventory(); player.sendMessage(locales.component(player, "error.player-left")); return }
                 if (slot == BACK_SLOT) return openObjectives(player, target)
                 if (slot == PREVIOUS_SLOT && holder.hasPrevious) return openLoadouts(player, target, holder.objective, holder.page - 1)
                 if (slot == NEXT_SLOT && holder.hasNext) return openLoadouts(player, target, holder.objective, holder.page + 1)
@@ -380,7 +387,7 @@ class DuelGuiService internal constructor(
                         kit?.value == "uhc" -> CombatModifiers(naturalRegeneration = false)
                         else -> CombatModifiers()
                     }
-                openRules(player, DuelDraft(holder.target, holder.objective, mode, kit, modifiers = modifiers))
+                openRules(player, DuelDraft(target, holder.objective, mode, kit, modifiers = modifiers))
             }
             is RulesMenuHolder -> handleRulesClick(player, holder.draft, slot)
             is LeaderboardMenuHolder -> when (slot) {
@@ -507,7 +514,7 @@ class DuelGuiService internal constructor(
 
     private fun handleRulesClick(player: Player, draft: DuelDraft, slot: Int) {
         when (slot) {
-            BACK_SLOT -> plugin.server.getPlayer(draft.target)?.let { openLoadouts(player, it, draft.objective) }
+            BACK_SLOT -> targets.find(draft.target.uniqueId)?.let { openLoadouts(player, it, draft.objective) }
                 ?: run { player.closeInventory(); player.sendMessage(locales.component(player, "error.player-left")) }
             10 -> if (draft.mode == DuelMode.KIT) openRules(player, draft.copy(ranked = !draft.ranked))
             12 -> openRules(player, draft.copy(bestOf = when (draft.bestOf) { 1 -> 3; 3 -> 5; else -> 1 }))
@@ -518,7 +525,7 @@ class DuelGuiService internal constructor(
             25 -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(naturalRegeneration = !draft.modifiers.naturalRegeneration)))
             31 -> if (draft.objective == DuelObjectiveType.KING_OF_THE_HILL) openRules(player, draft.copy(modifiers = draft.modifiers.copy(kingOfTheHillCaptureSeconds = nextOf(draft.modifiers.kingOfTheHillCaptureSeconds, listOf(10, 15, 30, 45)))))
             40 -> {
-                val target = plugin.server.getPlayer(draft.target)
+                val target = targets.find(draft.target.uniqueId)
                 player.closeInventory()
                 if (target == null) player.sendMessage(locales.component(player, "error.player-left"))
                 else challengeAction(player, target, DuelRules(draft.mode, draft.kitId, draft.ranked, draft.bestOf, draft.objective, draft.modifiers))
@@ -596,9 +603,9 @@ class DuelGuiService internal constructor(
         override fun getInventory(): Inventory = inventory
     }
     private class MainMenuHolder : MenuHolder()
-    private class TargetMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val targets = mutableMapOf<Int, UUID>() }
-    private class ObjectiveMenuHolder(val target: UUID) : MenuHolder()
-    private class LoadoutMenuHolder(val target: UUID, val objective: DuelObjectiveType, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val kits = mutableMapOf<Int, KitId>(); var ownInventorySlot = -1 }
+    private class TargetMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val targets = mutableMapOf<Int, DuelTarget>() }
+    private class ObjectiveMenuHolder(val target: DuelTarget) : MenuHolder()
+    private class LoadoutMenuHolder(val target: DuelTarget, val objective: DuelObjectiveType, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val kits = mutableMapOf<Int, KitId>(); var ownInventorySlot = -1 }
     private class RulesMenuHolder(val draft: DuelDraft) : MenuHolder()
     private class LeaderboardMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder()
     private class CatalogMenuHolder(val type: CatalogType, val page: Int = 0, val hasPrevious: Boolean = false, val hasNext: Boolean = false) : MenuHolder()
@@ -627,7 +634,7 @@ class DuelGuiService internal constructor(
 private val DuelObjectiveType.key: String get() = name.lowercase().replace("king_of_the_hill", "koth")
 
 private data class DuelDraft(
-    val target: UUID,
+    val target: DuelTarget,
     val objective: DuelObjectiveType,
     val mode: DuelMode,
     val kitId: KitId?,
