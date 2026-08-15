@@ -34,6 +34,19 @@ class LocaleService private constructor(
     ): Component = miniMessage.deserialize(raw(normalize(language), key), *resolvers)
 
     /**
+     * Renders opt-in feedback without producing an empty Adventure component.
+     * A blank locale value deliberately disables that feedback surface.
+     */
+    fun optionalComponent(
+        audience: CommandSender?,
+        key: String,
+        vararg resolvers: TagResolver,
+    ): Component? =
+        raw(language(audience), key)
+            .takeIf(String::isNotBlank)
+            ?.let { miniMessage.deserialize(it, *resolvers) }
+
+    /**
      * Renders a top-level player-facing chat notice. GUI labels, titles and
      * action bars intentionally keep using [component] so the chat frame never
      * leaks into other Adventure surfaces.
@@ -43,6 +56,12 @@ class LocaleService private constructor(
         key: String,
         vararg resolvers: TagResolver,
     ): Component = frameNotice(audience, component(audience, key, *resolvers))
+
+    fun optionalNotice(
+        audience: CommandSender?,
+        key: String,
+        vararg resolvers: TagResolver,
+    ): Component? = optionalComponent(audience, key, *resolvers)?.let { frameNotice(audience, it) }
 
     fun frameNotice(
         audience: CommandSender?,

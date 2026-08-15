@@ -9,7 +9,7 @@ import org.bukkit.configuration.file.YamlConfiguration
 import java.io.InputStreamReader
 
 class LocaleParityTest : StringSpec({
-    "Russian and English bundles have identical nonblank translatable leaves" {
+    "Russian and English bundles have identical leaves with only declared feedback blank" {
         val ru = loadBundle("ru")
         val en = loadBundle("en")
         val ruLeaves = leaves(ru)
@@ -19,8 +19,13 @@ class LocaleParityTest : StringSpec({
         val miniMessage = MiniMessage.builder().strict(true).build()
         for ((key, values) in ruLeaves) {
             values.size shouldBe enLeaves.getValue(key).size
-            values.any(String::isNotBlank) shouldBe true
-            enLeaves.getValue(key).any(String::isNotBlank) shouldBe true
+            if (key in OPTIONAL_FEEDBACK_KEYS) {
+                values shouldBe listOf("")
+                enLeaves.getValue(key) shouldBe listOf("")
+            } else {
+                values.any(String::isNotBlank) shouldBe true
+                enLeaves.getValue(key).any(String::isNotBlank) shouldBe true
+            }
             (values + enLeaves.getValue(key)).forEach { value ->
                 if (value.isNotBlank()) miniMessage.deserialize(replacePlaceholders(value))
             }
@@ -83,6 +88,12 @@ class LocaleParityTest : StringSpec({
             }
     }
 })
+
+private val OPTIONAL_FEEDBACK_KEYS =
+    setOf(
+        "controller.network-return",
+        "session.restored",
+    )
 
 private fun loadBundle(language: String): YamlConfiguration {
     val stream = requireNotNull(LocaleParityTest::class.java.getResourceAsStream("/lang/$language.yml"))

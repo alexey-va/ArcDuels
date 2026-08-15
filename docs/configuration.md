@@ -89,6 +89,13 @@ clients receive English; `locale.default` is used for the console and when
 client detection is disabled. External locale files can override any bundled
 key while newly introduced keys continue to fall back to the JAR defaults.
 
+Successful return feedback is opt-in to keep routine duel cleanup quiet.
+`controller.network-return` controls the framed chat notice before a transfer
+to the origin server, and `session.restored` controls the inventory-restored
+action bar. Both are blank by default; set either locale value to nonblank
+MiniMessage text to enable it. Recovery failures and snapshot-safety warnings
+remain mandatory and are not suppressed by these settings.
+
 ## Winner celebration
 
 Winner particles, sounds, and titles are always shown. Real firework rockets

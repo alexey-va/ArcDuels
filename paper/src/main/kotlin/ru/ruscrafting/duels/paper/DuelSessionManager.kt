@@ -1719,7 +1719,7 @@ class DuelSessionManager internal constructor(
                     preparingPlayers -= player.uniqueId
                     restoringPlayers -= player.uniqueId
                     if (player.isOnline && stored.escrow.inventoryReplaced && !alreadyMatches) {
-                        player.sendActionBar(locales.component(player, "session.restored"))
+                        locales.optionalComponent(player, "session.restored")?.let { player.sendActionBar(it) }
                     }
                 } else {
                     plugin.logger.severe(

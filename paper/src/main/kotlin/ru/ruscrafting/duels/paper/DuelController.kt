@@ -271,13 +271,13 @@ class DuelController(
             }
             return
         }
-        player.sendMessage(
-            locales.notice(
-                player,
-                "controller.network-return",
-                LocaleService.component("server", serverNames.display(offer.destination)),
-            ),
-        )
+        locales.optionalNotice(
+            player,
+            "controller.network-return",
+            LocaleService.component("server", serverNames.display(offer.destination)),
+        )?.let {
+            player.sendMessage(it)
+        }
         transfer?.connect(player, offer.destination)
     }
 
@@ -887,13 +887,11 @@ class DuelController(
             if (sessions.isStateLocked(player)) return@forEach
             val request = match.id to playerId
             if (returnRequests.add(request)) {
-                player.sendMessage(
-                    locales.notice(
-                        player,
-                        "controller.network-return",
-                        LocaleService.component("server", serverNames.display(destination)),
-                    ),
-                )
+                locales.optionalNotice(
+                    player,
+                    "controller.network-return",
+                    LocaleService.component("server", serverNames.display(destination)),
+                )?.let { player.sendMessage(it) }
                 transfer?.connect(player, destination)
             }
         }

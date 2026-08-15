@@ -129,6 +129,39 @@ class ArcDuelsPluginTest : StringSpec({
         notice.containsRunCommand("/duel return") shouldBe true
     }
 
+    "blank optional feedback stays silent and a nonblank locale override enables it" {
+        val player = server.addPlayer("OptNotice")
+        player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        val defaults = LocaleService.load(plugin)
+
+        defaults.optionalNotice(
+            player,
+            "controller.network-return",
+            LocaleService.text("server", "Выживание"),
+        ) shouldBe null
+        defaults.optionalComponent(player, "session.restored") shouldBe null
+
+        val localeFile = java.io.File(plugin.dataFolder, "lang/ru.yml")
+        val locale = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(localeFile)
+        try {
+            locale.set("controller.network-return", "<#e6fff3>Возврат на <server>.</#e6fff3>")
+            locale.save(localeFile)
+
+            val overridden = LocaleService.load(plugin)
+            val notice = requireNotNull(
+                overridden.optionalNotice(
+                    player,
+                    "controller.network-return",
+                    LocaleService.text("server", "Выживание"),
+                ),
+            )
+            PlainTextComponentSerializer.plainText().serialize(notice) shouldBe "\n  ⚔ • Возврат на Выживание.\n"
+        } finally {
+            locale.set("controller.network-return", "")
+            locale.save(localeFile)
+        }
+    }
+
     "challenge card is readable and both players are told when it expires" {
         var now = Instant.parse("2026-08-15T00:00:00Z")
         val clock =
