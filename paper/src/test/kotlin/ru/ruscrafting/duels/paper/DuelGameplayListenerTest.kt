@@ -116,6 +116,34 @@ class DuelGameplayListenerTest : StringSpec({
         verify(exactly = 1) { sessions.recordMeleeHit(attacker, victim) }
     }
 
+    "accepted duel damage clears external combat tags for both participants" {
+        val attacker = mockk<Player>(relaxed = true)
+        val victim = mockk<Player>(relaxed = true)
+        val attackerId = PlayerId(UUID.randomUUID())
+        val victimId = PlayerId(UUID.randomUUID())
+        every { attacker.uniqueId } returns attackerId.value
+        every { victim.uniqueId } returns victimId.value
+        val match =
+            DuelMatch.reserve(
+                attackerId,
+                victimId,
+                ArenaId("classic"),
+                ServerId("test"),
+                DuelRules(DuelMode.OWN_INVENTORY),
+                Instant.EPOCH,
+            ).beginCountdown().activate(Instant.EPOCH)
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.matchFor(victim) } returns match
+        val event = mockk<EntityDamageByEntityEvent>(relaxed = true)
+        every { event.entity } returns victim
+        every { event.damager } returns attacker
+        val listener = DuelGameplayListener(sessions, mockk(relaxed = true))
+
+        listener.onAcceptedDamageTrace(event)
+
+        verify(exactly = 1) { sessions.clearExternalCombatTags(match, "damage-accepted") }
+    }
+
     "command bypass permission skips duel command restrictions while state is locked" {
         val player = mockk<Player>(relaxed = true)
         every { player.hasPermission("arcduels.bypass") } returns true

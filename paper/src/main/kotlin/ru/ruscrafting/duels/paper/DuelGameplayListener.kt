@@ -99,6 +99,7 @@ internal class DuelGameplayListener(
             event.finalDamage,
             victim.health,
         )
+        sessions.clearExternalCombatTags(match, "damage-accepted")
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

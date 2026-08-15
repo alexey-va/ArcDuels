@@ -51,6 +51,7 @@ class DuelSessionManager internal constructor(
     private val playerDataSaver: (Player) -> Unit = Player::saveData,
     private val syncProvider: PlayerDataSyncProvider = PlayerDataSyncProvider.NONE,
     private val celebrationDurationTicks: Long = 80L,
+    private val externalCombatTagClear: (Player, MatchId, String) -> Unit = { _, _, _ -> },
 ) {
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
@@ -772,6 +773,13 @@ class DuelSessionManager internal constructor(
         return cause in PLAYER_COMBAT_TELEPORTS && arenas.get(match.arenaId).bounds.contains(destination)
     }
 
+    internal fun clearExternalCombatTags(
+        match: DuelMatch,
+        reason: String,
+    ) {
+        participants(match).forEach { player -> externalCombatTagClear(player, match.id, reason) }
+    }
+
     fun retryCompletion(matchId: MatchId) {
         coordinator.retryCompletion(matchId).whenComplete { completed, failure ->
             runSync {
@@ -911,6 +919,7 @@ class DuelSessionManager internal constructor(
             first.world.name,
             second.world.name,
         )
+        clearExternalCombatTags(match, "round-prepared")
         first.sendActionBar(scoreLine(match, first))
         second.sendActionBar(scoreLine(match, second))
         showCountdownDisplay(match, countdownSeconds)
@@ -1294,6 +1303,7 @@ class DuelSessionManager internal constructor(
             match.endReason,
             celebrationDurationTicks,
         )
+        clearExternalCombatTags(match, "match-complete")
         countdownTasks.remove(match.id)?.cancel()
         objectiveTasks.remove(match.id)?.cancel()
         matchDisplayTasks.remove(match.id)?.cancel()
@@ -1338,6 +1348,7 @@ class DuelSessionManager internal constructor(
 
     private fun finalizeMatch(match: DuelMatch, session: PaperSession) {
         if (sessions[match.id] !== session) return
+        clearExternalCombatTags(match, "match-finalize")
         DuelLog.debug(
             "match-finalize-attempt",
             match.id,

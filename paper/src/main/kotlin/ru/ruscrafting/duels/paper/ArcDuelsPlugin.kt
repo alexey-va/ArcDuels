@@ -121,6 +121,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
         require(countdownSeconds in 0..10) { "countdown-seconds must be between 0 and 10" }
         val celebrationDurationTicks = config.getLong("celebration.duration-ticks", 80L)
         require(celebrationDurationTicks in 0L..200L) { "celebration.duration-ticks must be between 0 and 200" }
+        val cmiCombatTags = CmiCombatTagIntegration(this)
+        closeables += cmiCombatTags
         val recoveryApplyDelayTicks =
             if (config.contains("player-data-sync.settle-delay-ticks")) {
                 config.getLong("player-data-sync.settle-delay-ticks")
@@ -142,6 +144,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 recoveryApplyDelayTicks = recoveryApplyDelayTicks,
                 syncProvider = syncProvider,
                 celebrationDurationTicks = celebrationDurationTicks,
+                externalCombatTagClear = cmiCombatTags::clear,
             )
         sessions = sessionManager
         val challenges =
