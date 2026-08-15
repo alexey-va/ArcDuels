@@ -121,13 +121,24 @@ internal class CmiCombatTagIntegration(
         private val getUser: Method,
         private val removePlayerFromCombat: Method,
         private val isInCombatWithPlayer: Method,
+        private val setGotLastDamageAt: Method?,
+        private val setGotLastDamageFromPlayer: Method?,
+        private val setDidLastDamageToPlayer: Method?,
     ) {
         fun remove(player: Player) {
+            expireCombatTimestamps(player.uniqueId)
             val user = getUser.invoke(null, player) ?: error("CMI did not return a user for ${player.uniqueId}")
             removePlayerFromCombat.invoke(manager, user)
+            expireCombatTimestamps(player.uniqueId)
         }
 
         fun isTagged(playerId: UUID): Boolean = isInCombatWithPlayer.invoke(manager, playerId) as Boolean
+
+        private fun expireCombatTimestamps(playerId: UUID) {
+            setGotLastDamageAt?.invoke(manager, playerId, EXPIRED_TIMESTAMP)
+            setGotLastDamageFromPlayer?.invoke(manager, playerId, EXPIRED_TIMESTAMP)
+            setDidLastDamageToPlayer?.invoke(manager, playerId, EXPIRED_TIMESTAMP)
+        }
 
         companion object {
             fun create(
@@ -142,8 +153,20 @@ internal class CmiCombatTagIntegration(
                     getUser = userClass.getMethod("getUser", Player::class.java),
                     removePlayerFromCombat = manager.javaClass.getMethod("removePlayerFromCombat", userClass),
                     isInCombatWithPlayer = manager.javaClass.getMethod("isInCombatWithPlayer", UUID::class.java),
+                    setGotLastDamageAt = optionalTimestampSetter(manager, "setGotLastDamageAt"),
+                    setGotLastDamageFromPlayer =
+                        optionalTimestampSetter(manager, "setGotLastDamageFromPlayer"),
+                    setDidLastDamageToPlayer =
+                        optionalTimestampSetter(manager, "setDidLastDamageToPlayer"),
                 )
             }
+
+            private fun optionalTimestampSetter(
+                manager: Any,
+                name: String,
+            ): Method? = runCatching {
+                manager.javaClass.getMethod(name, UUID::class.java, Long::class.javaObjectType)
+            }.getOrNull()
         }
     }
 
@@ -151,5 +174,6 @@ internal class CmiCombatTagIntegration(
         const val CMI_PLUGIN_NAME = "CMI"
         const val CMI_USER_CLASS = "com.Zrips.CMI.Containers.CMIUser"
         const val SETTLE_DELAY_TICKS = 1L
+        const val EXPIRED_TIMESTAMP = 0L
     }
 }

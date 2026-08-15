@@ -9,7 +9,7 @@ import org.bukkit.entity.Player
 import java.util.UUID
 
 class CmiCombatTagIntegrationTest : StringSpec({
-    "reflective bridge matches CMI combat-manager contract and removes only the requested player" {
+    "reflective bridge expires both CMI combat timestamps and removes only the requested player" {
         val firstId = UUID.randomUUID()
         val secondId = UUID.randomUUID()
         val manager = FakePlayerCombatManager(mutableSetOf(firstId, secondId))
@@ -26,6 +26,8 @@ class CmiCombatTagIntegrationTest : StringSpec({
 
         bridge.isTagged(firstId) shouldBe false
         bridge.isTagged(secondId) shouldBe true
+        manager.timestampResetCount shouldBe 6
+        manager.removeCount shouldBe 1
     }
 })
 
@@ -39,11 +41,33 @@ private class FakeCmi(
 private class FakePlayerCombatManager(
     private val taggedPlayers: MutableSet<UUID>,
 ) {
+    var timestampResetCount: Int = 0
+        private set
+    var removeCount: Int = 0
+        private set
+
     @Suppress("unused")
     fun removePlayerFromCombat(user: CMIUser) {
-        taggedPlayers -= user.playerId
+        check(user.playerId in taggedPlayers || timestampResetCount > 0)
+        removeCount += 1
     }
 
     @Suppress("unused")
     fun isInCombatWithPlayer(playerId: UUID): Boolean = playerId in taggedPlayers
+
+    @Suppress("unused")
+    fun setGotLastDamageAt(playerId: UUID, timestamp: Long?) = expire(playerId, timestamp)
+
+    @Suppress("unused")
+    fun setGotLastDamageFromPlayer(playerId: UUID, timestamp: Long?) = expire(playerId, timestamp)
+
+    @Suppress("unused")
+    fun setDidLastDamageToPlayer(playerId: UUID, timestamp: Long?) = expire(playerId, timestamp)
+
+    private fun expire(playerId: UUID, timestamp: Long?) {
+        if (timestamp == 0L) {
+            timestampResetCount += 1
+            taggedPlayers -= playerId
+        }
+    }
 }

@@ -65,7 +65,7 @@ class DuelSessionManager internal constructor(
     private val remoteRecoveryTokens = ConcurrentHashMap<UUID, UUID>()
     private val restoringPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val expectedNetworkPlayers = ConcurrentHashMap.newKeySet<UUID>()
-    private val networkLobbyPlayers = ConcurrentHashMap.newKeySet<UUID>()
+    private val networkLobbyPlayers = ConcurrentHashMap<UUID, MatchId>()
     private val internalTeleports = InternalTeleportAuthorizer()
     private val celebrationEffects = CelebrationEffects(plugin)
     private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
@@ -338,10 +338,19 @@ class DuelSessionManager internal constructor(
 
     fun isStateLocked(player: Player): Boolean =
         preparingPlayers.contains(player.uniqueId) ||
-            (playerStates.isPending(player.uniqueId) && player.uniqueId !in networkLobbyPlayers) ||
+            (playerStates.isPending(player.uniqueId) && !networkLobbyPlayers.containsKey(player.uniqueId)) ||
             matchFor(player) != null
 
     fun isPreparing(player: Player): Boolean = preparingPlayers.contains(player.uniqueId)
+
+    fun isPostMatchWaiting(player: Player): Boolean = networkLobbyPlayers.containsKey(player.uniqueId)
+
+    fun clearPostMatchCombatTag(
+        player: Player,
+        reason: String,
+    ) {
+        networkLobbyPlayers[player.uniqueId]?.let { matchId -> externalCombatTagClear(player, matchId, reason) }
+    }
 
     fun queueSize(): Int = arenas.queueSize()
 
@@ -1444,7 +1453,7 @@ class DuelSessionManager internal constructor(
                 playerDataSaver(player)
                 val destination = postMatchDestination(arena, match, PlayerId(playerId))
                 check(teleportInternally(player, destination)) { "Could not move ${player.uniqueId} to the post-match waiting point" }
-                networkLobbyPlayers += player.uniqueId
+                networkLobbyPlayers[player.uniqueId] = match.id
                 session.postMatchMovedPlayers += playerId
             }.onFailure { failure ->
                 moved = false

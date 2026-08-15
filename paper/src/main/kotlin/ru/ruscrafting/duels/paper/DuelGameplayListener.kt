@@ -52,6 +52,12 @@ internal class DuelGameplayListener(
     fun onPlayerDamage(event: EntityDamageByEntityEvent) {
         val victim = event.entity as? Player ?: return
         val attacker = event.damager.attackingPlayer()
+        if (sessions.isPostMatchWaiting(victim) || (attacker != null && sessions.isPostMatchWaiting(attacker))) {
+            event.isCancelled = true
+            sessions.clearPostMatchCombatTag(victim, "post-match-damage-blocked")
+            attacker?.let { sessions.clearPostMatchCombatTag(it, "post-match-damage-blocked") }
+            return
+        }
         val victimMatch = sessions.matchFor(victim)
         val attackerMatch = attacker?.let(sessions::matchFor)
         if (victimMatch == null && attackerMatch == null) {
@@ -60,11 +66,13 @@ internal class DuelGameplayListener(
         }
         if (victimMatch == null || attackerMatch?.id != victimMatch.id) {
             event.isCancelled = true
+            victimMatch?.let { sessions.clearExternalCombatTags(it, "foreign-damage-blocked") }
             return
         }
         val expectedAttacker = victimMatch.opponentOf(PlayerId(victim.uniqueId))
         if (attacker.uniqueId != expectedAttacker.value || victimMatch.state != MatchState.ACTIVE) {
             event.isCancelled = true
+            sessions.clearExternalCombatTags(victimMatch, "inactive-damage-blocked")
             return
         }
         if (event.damager is Projectile && !sessions.allowsProjectiles(attacker)) {
@@ -109,6 +117,11 @@ internal class DuelGameplayListener(
             return
         }
         val player = event.entity as? Player ?: return
+        if (sessions.isPostMatchWaiting(player)) {
+            event.isCancelled = true
+            sessions.clearPostMatchCombatTag(player, "post-match-damage-blocked")
+            return
+        }
         val match = sessions.matchFor(player)
         if (match == null) {
             if (sessions.isStateLocked(player)) event.isCancelled = true

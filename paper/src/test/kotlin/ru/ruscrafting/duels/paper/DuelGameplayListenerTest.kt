@@ -144,6 +144,38 @@ class DuelGameplayListenerTest : StringSpec({
         verify(exactly = 1) { sessions.clearExternalCombatTags(match, "damage-accepted") }
     }
 
+    "post-match waiting players cannot damage each other and have CMI tags cleared" {
+        val attacker = mockk<Player>(relaxed = true)
+        val victim = mockk<Player>(relaxed = true)
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.isPostMatchWaiting(victim) } returns true
+        every { sessions.isPostMatchWaiting(attacker) } returns true
+        val event = mockk<EntityDamageByEntityEvent>(relaxed = true)
+        every { event.entity } returns victim
+        every { event.damager } returns attacker
+        val listener = DuelGameplayListener(sessions, mockk(relaxed = true))
+
+        listener.onPlayerDamage(event)
+
+        verify(exactly = 1) { event.isCancelled = true }
+        verify(exactly = 1) { sessions.clearPostMatchCombatTag(victim, "post-match-damage-blocked") }
+        verify(exactly = 1) { sessions.clearPostMatchCombatTag(attacker, "post-match-damage-blocked") }
+    }
+
+    "post-match waiting players are protected from environmental damage" {
+        val player = mockk<Player>(relaxed = true)
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.isPostMatchWaiting(player) } returns true
+        val event = mockk<EntityDamageEvent>(relaxed = true)
+        every { event.entity } returns player
+        val listener = DuelGameplayListener(sessions, mockk(relaxed = true))
+
+        listener.onLethalDamage(event)
+
+        verify(exactly = 1) { event.isCancelled = true }
+        verify(exactly = 1) { sessions.clearPostMatchCombatTag(player, "post-match-damage-blocked") }
+    }
+
     "command bypass permission skips duel command restrictions while state is locked" {
         val player = mockk<Player>(relaxed = true)
         every { player.hasPermission("arcduels.bypass") } returns true
