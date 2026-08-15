@@ -25,6 +25,8 @@ menu:
     kits-lore: ['<dark_gray>✖</dark_gray> <white>Готовое снаряжение для боя.</white>', '', '<aqua>ЛКМ</aqua> <gray>Посмотреть наборы</gray>']
     stats: '<gold>Моя статистика</gold>'
     stats-lore: ['<dark_gray>✖</dark_gray> <white>Рейтинг, победы и серии.</white>', '', '<aqua>ЛКМ</aqua> <gray>Показать статистику</gray>']
+    history: '<gold>История боёв</gold>'
+    history-lore: ['<dark_gray>✖</dark_gray> <white>Последние результаты и счёт</white>', '   <white>личных встреч с соперниками.</white>', '', '<aqua>ЛКМ</aqua> <gray>Открыть историю</gray>']
     help: '<gold>Как проходят дуэли</gold>'
     help-lore: ['<dark_gray>✖</dark_gray> <white>Правила и защита инвентаря.</white>', '', '<aqua>ЛКМ</aqua> <gray>Открыть справку</gray>']
     recovery: '<gold>Забрать свои вещи</gold>'
@@ -68,6 +70,8 @@ menu:
     arena-auto-lore: ['<gray>Система выберет подходящую арену</gray>', '<gray>с наименьшей очередью на всей сети.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать арену вручную</gray>']
     arena-selected: '<gold>Арена: <arena></gold>'
     arena-selected-lore: ['<gray>Сервер:</gray> <server>', '<gray>Вызов закреплён за этой ареной.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить выбор</gray>']
+    presets: '<gold>Сохранённые наборы правил</gold>'
+    presets-lore: ['<gray>Необязательные ярлыки для частых настроек.</gray>', '<gray>Обычный путь создания боя не меняется.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Открыть сохранённые настройки</gray>']
     confirm: '<green>Отправить вызов</green>'
     confirm-lore: ['<dark_gray>✖</dark_gray> <white>Все параметры выбраны.</white>', '', '<aqua>ЛКМ</aqua> <gray>Подтвердить</gray>']
   arenas:
@@ -86,6 +90,49 @@ menu:
     entry: '<gold>#<position> · <player></gold>'
     entry-lore: ['<gray>Рейтинг:</gray> <yellow><rating></yellow>', '<gray>Победы:</gray> <green><wins></green>', '<gray>Поражения:</gray> <red><losses></red>']
     empty: '<gray>Матчей пока нет</gray>'
+  history:
+    loading: '<gray>Загружаю историю боёв…</gray>'
+    title: '<dark_gray>История · <page>/<pages></dark_gray>'
+    empty: '<gold>Завершённых боёв пока нет</gold>'
+    empty-lore: ['<gray>Здесь появятся результаты твоих дуэлей.</gray>']
+    win: '<green>Победа</green> <dark_gray>·</dark_gray> <white><player></white>'
+    loss: '<red>Поражение</red> <dark_gray>·</dark_gray> <white><player></white>'
+    entry-lore: ['<gray>Счёт:</gray> <white><score></white>  <gray>Формат:</gray> <white>BO<bestof></white>', '<gray>Режим:</gray> <objective>', '<gray>Снаряжение:</gray> <loadout>  <ranked>', '<gray>Арена:</gray> <white><arena></white>', '<gray>Сервер:</gray> <server>', '<gray>Завершён:</gray> <white><time></white>', '<gray>Причина:</gray> <reason>', '<gray>Рейтинг после боя:</gray> <aqua><rating></aqua>', '', '<aqua>ЛКМ</aqua> <gray>Открыть счёт личных встреч</gray>']
+    legacy-arena: 'старая арена'
+    reason:
+      elimination: '<white>победа в бою</white>'
+      objective: '<white>цель выполнена</white>'
+      forfeit: '<white>соперник сдался</white>'
+      disconnect: '<white>соперник вышел</white>'
+  h2h:
+    title: '<dark_gray>Против <player></dark_gray>'
+    you: '<gold>Ты</gold>'
+    opponent: '<gold><player></gold>'
+    player-lore: ['<gray>Побед в этой паре:</gray> <green><wins></green>']
+    matches: '<gold>Матчей: <matches></gold>'
+    matches-lore: ['<gray>Твои победы:</gray> <green><first></green>', '<gray>Победы соперника:</gray> <red><second></red>']
+    offline: '<gray>Соперник не в сети</gray>'
+    offline-lore: ['<gray>Его можно будет вызвать после возвращения.</gray>']
+    challenge: '<green>Вызвать <player></green>'
+    challenge-lore: ['<gray>Открыть обычную настройку дуэли.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать правила</gray>']
+  presets:
+    loading: '<gray>Загружаю сохранённые настройки…</gray>'
+    title: '<dark_gray>Сохранённые настройки</dark_gray>'
+    empty: '<gold>Ячейка <slot> · Пусто</gold>'
+    empty-lore: ['<gray>Сохранить сюда текущие правила.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Сохранить</gray>']
+    auto-arena: 'автовыбор'
+    entry: '<gold>Настройка <slot></gold>'
+    entry-lore: ['<gray>Режим:</gray> <objective>', '<gray>Снаряжение:</gray> <loadout>', '<gray>Формат:</gray> <white>BO<bestof></white>', '<gray>Арена:</gray> <white><arena></white>', '<gray>Состояние:</gray> <state>', '']
+    ready: '<green>Готово</green>'
+    arena-missing: '<yellow>Сохранённая арена недоступна</yellow>'
+    kit-missing: '<red>Сохранённый кит недоступен</red>'
+    ready-actions: ['<aqua>ЛКМ</aqua> <gray>Применить</gray>', '<aqua>Shift + ЛКМ</aqua> <gray>Перезаписать</gray>', '<red>Shift + ПКМ</red> <gray>Удалить</gray>']
+    arena-missing-actions: ['<aqua>ПКМ</aqua> <gray>Применить с автовыбором арены</gray>', '<aqua>Shift + ЛКМ</aqua> <gray>Перезаписать</gray>', '<red>Shift + ПКМ</red> <gray>Удалить</gray>']
+    kit-missing-actions: ['<aqua>Shift + ЛКМ</aqua> <gray>Перезаписать</gray>', '<red>Shift + ПКМ</red> <gray>Удалить</gray>']
+    kit-unavailable: '<#c42323>В этой настройке указан кит, которого больше нет.</#c42323>'
+    arena-unavailable: '<#ffb347>Сохранённая арена недоступна. Нажми ПКМ, чтобы включить автовыбор.</#ffb347>'
+    saved: '<#2bba43>Настройка <slot> сохранена.</#2bba43>'
+    deleted: '<#8c8c8c>Настройка <slot> удалена.</#8c8c8c>'
   modes:
     title: '<dark_gray>Режимы боя</dark_gray>'
   kits:
@@ -210,6 +257,9 @@ error:
   player-left: '<#c42323>Игрок уже вышел или начал другой бой.</#c42323>'
   leaderboard: '<#c42323>Не удалось загрузить рейтинг.</#c42323>'
   invalid-challenge-id: '<#c42323>Некорректный идентификатор вызова.</#c42323>'
+  invalid-match-id: '<#c42323>Некорректный идентификатор боя.</#c42323>'
+  history: '<#c42323>Не удалось загрузить историю боёв.</#c42323>'
+  presets: '<#c42323>Не удалось загрузить сохранённые настройки.</#c42323>'
 
 controller:
   busy: '<#c42323>Один из игроков уже в очереди, в бою или восстанавливает состояние.</#c42323>'
@@ -220,6 +270,19 @@ controller:
   network-transfer: '<#fff4d6>Вызов принят.</#fff4d6><newline><#9aa7b5>Перемещаю на арену:</#9aa7b5> <server>'
   network-return: '<#fff4d6>Возвращаю тебя на исходный сервер.</#fff4d6><newline><#9aa7b5>Сервер:</#9aa7b5> <server>'
   rematch-return: '<#e6fff3>Новый бой принят.</#e6fff3><newline><#8c8c8c>Сначала безопасно восстановлю состояние на</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, затем отправлю на арену.</#8c8c8c>'
+  rematch-unavailable: '<#c42323>Этот бой недоступен для реванша.</#c42323>'
+  rematch-expired: '<#8c8c8c>Время для реванша истекло.</#8c8c8c>'
+  rematch-arena-unavailable: '<#c42323>Исходная арена не записана, поэтому безопасно повторить бой нельзя.</#c42323>'
+  rematch-arena-missing: '<#ffb347>Исходная арена сейчас недоступна.</#ffb347><newline><action>'
+  rematch-choose: '<#92bed8>Выбрать другую арену</#92bed8>'
+  rematch-choose-hover: '<#8c8c8c>Открыть обычную настройку дуэли с этим соперником</#8c8c8c>'
+  rematch-pending: '<#8c8c8c>Запрос на реванш уже ожидает ответа соперника.</#8c8c8c>'
+  rematch-offer: |-
+    <#e6fff3>Реванш с <player>?</#e6fff3>
+    <#8c8c8c>Те же правила и арена доступны ещё <seconds> с.</#8c8c8c>
+    <action>
+  rematch-action: '<#92bed8>⚔ Предложить реванш</#92bed8>'
+  rematch-hover: '<#8c8c8c>Соперник подтверждает реванш той же кнопкой</#8c8c8c>'
   return-offer: |-
     <#e6fff3>Бой завершён. Твои вещи защищены.</#e6fff3>
     <#8c8c8c>Исходный сервер:</#8c8c8c> <#92bed8><server></#92bed8>

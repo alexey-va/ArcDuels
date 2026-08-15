@@ -12,6 +12,7 @@ import ru.ruscrafting.duels.domain.ChallengeRegistry
 import ru.ruscrafting.duels.domain.DuelEventPublisher
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.DuelPresetRepository
 import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
 import ru.ruscrafting.duels.domain.MatchCompletedEvent
 import ru.ruscrafting.duels.domain.MatchCoordinator
@@ -125,6 +126,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
         }
         val countdownSeconds = config.getInt("countdown-seconds", 3)
         require(countdownSeconds in 0..10) { "countdown-seconds must be between 0 and 10" }
+        val teleportStabilizationTicks = config.getLong("teleport-stabilization-ticks", 3L)
+        require(teleportStabilizationTicks in 0L..20L) { "teleport-stabilization-ticks must be between 0 and 20" }
         val celebrationDurationTicks = config.getLong("celebration.duration-ticks", 80L)
         require(celebrationDurationTicks in 0L..200L) { "celebration.duration-ticks must be between 0 and 200" }
         val shutdownRecoveryTimeoutMillis = config.getLong("shutdown.recovery-timeout-ms", 5_000L)
@@ -149,6 +152,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 playerStates,
                 locales,
                 countdownSeconds,
+                teleportStabilizationTicks = teleportStabilizationTicks,
                 serverNames = serverNames,
                 remoteRecoveryTransfer = transfer?.let { gateway -> { player, destination -> gateway.connect(player, destination) } },
                 playerDataReady = playerDataSync::isReady,
@@ -181,6 +185,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 playerDataReady = playerDataSync::isReady,
                 transferTimeout = Duration.ofSeconds(config.getLong("redis.transfer-timeout-seconds", 30L).coerceIn(10L, 120L)),
                 returnPolicy = PostMatchReturnPolicy.parse(config.getString("post-match.return-policy", "PROMPT")!!),
+                rematchWindow = Duration.ofSeconds(config.getLong("rematch-window-seconds", 180L).coerceIn(30L, 900L)),
+                arenaChoices = { rules -> network.arenas?.choices(rules) ?: arenas.choices(serverId, rules) },
             )
         closeables += controller
         val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames)
@@ -189,6 +195,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 this,
                 kits,
                 statistics,
+                persistence.presets,
                 sessionManager,
                 locales,
                 admin,
@@ -250,7 +257,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     private fun createPersistence(): Persistence {
         if (!config.getBoolean("mysql.enabled", false)) {
-            return Persistence(InMemoryStatisticsRepository(), UnavailablePlayerStateEscrowRepository, durable = false)
+            val repository = InMemoryStatisticsRepository()
+            return Persistence(repository, repository, UnavailablePlayerStateEscrowRepository, durable = false)
         }
         val sslMode =
             runCatching { SqlSslMode.valueOf(config.getString("mysql.ssl-mode", "VERIFY_IDENTITY")!!.uppercase()) }
@@ -280,7 +288,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             throw IllegalStateException("MySQL is enabled but its schema could not be prepared", failure)
         }
         closeables += repository
-        return Persistence(repository, repository, durable = true)
+        return Persistence(repository, repository, repository, durable = true)
     }
 
     private fun createNetwork(
@@ -411,6 +419,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     private data class Persistence(
         val statistics: StatisticsRepository,
+        val presets: DuelPresetRepository,
         val playerStates: PlayerStateEscrowRepository,
         val durable: Boolean,
     )

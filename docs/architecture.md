@@ -33,6 +33,10 @@ deadlock victims and lock-wait rollbacks receive a bounded asynchronous retry
 with backoff; connection failures and other SQL errors remain visible and are
 never retried blindly. Match timestamps are canonicalized to MySQL's declared
 millisecond precision before idempotency comparison.
+The same receipt stores the complete accepted rules, exact arena, perspective
+score, completion reason, and rating results. History, head-to-head aggregation,
+exact rematches, and per-player rule presets are read models over those durable
+rows; none participates in authoritative match transitions.
 
 Redis is presentation-only. Startup failure closes both bus and client and
 falls back to local operation. Event deduplication is scoped by source server,
@@ -60,6 +64,9 @@ Join-time recovery also waits for that event and a configured post-sync delay.
 It compares the loaded inventory to the origin snapshot first and applies
 nothing when they already match. A `NONE` arena node restores only its local
 pre-fight state before moving players to its lobby; it never claims an origin row.
+After each arena teleport, the assigned spawn remains the server-authoritative
+movement anchor for a bounded stabilization window. This is separate from
+inventory recovery and from the combat-state command lock.
 
 Completed matches retain player and arena ownership until Paper has applied and
 verified and saved both online snapshots. Only then does the coordinator release

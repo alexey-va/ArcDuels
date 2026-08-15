@@ -14,8 +14,10 @@ class MySqlDuelMigrationsTest : StringSpec({
         val objective = migrations[3]
         val archive = migrations[4]
         val inventoryMode = migrations[5]
+        val history = migrations[6]
+        val presets = migrations[7]
 
-        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5, 6)
+        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5, 6, 7, 8)
         initial.statements shouldHaveSize 4
         initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
         initial.statements[2] shouldContain "INSERT IGNORE"
@@ -39,5 +41,12 @@ class MySqlDuelMigrationsTest : StringSpec({
         inventoryMode.statements[0] shouldContain "`arcduels_player_state_escrow`"
         inventoryMode.statements[0] shouldContain "ADD COLUMN `inventory_replaced`"
         inventoryMode.statements[4] shouldContain "`arcduels_player_state_archive`"
+        history.statements shouldHaveSize 54
+        history.statements.first() shouldContain "ADD COLUMN `arena_id`"
+        history.statements[51] shouldContain "DEALLOCATE PREPARE arcduels_migration_7_13_statement"
+        history.statements[52] shouldContain "WHERE `objective` IN ('BOXING', 'COMBO')"
+        history.statements[53] shouldContain "WHERE `objective` = 'KING_OF_THE_HILL'"
+        presets.statements.single() shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_rule_presets`"
+        presets.statements.single() shouldContain "PRIMARY KEY (`player_id`, `slot`)"
     }
 })

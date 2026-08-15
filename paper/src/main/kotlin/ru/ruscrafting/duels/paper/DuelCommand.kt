@@ -7,6 +7,7 @@ import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
 import org.bukkit.entity.Player
 import ru.ruscrafting.duels.domain.ChallengeId
+import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.ServerId
 import java.util.UUID
 
@@ -63,6 +64,16 @@ class DuelCommand internal constructor(
                 controller.showStatistics(player, target)
             }
             "top", "топ" -> gui.openLeaderboard(player)
+            "history", "история" -> gui.openHistory(player)
+            "rematch", "реванш" -> {
+                val matchId =
+                    args.getOrNull(1)?.let { raw ->
+                        runCatching { MatchId(UUID.fromString(raw)) }
+                            .onFailure { player.sendMessage(message(player, "error.invalid-match-id", "<red>Invalid match identifier.</red>")) }
+                            .getOrNull() ?: return true
+                    }
+                controller.rematch(player, matchId)
+            }
             else -> {
                 val target = resolveTarget(player, args[0])
                 if (target == null || target.uniqueId == player.uniqueId) {
@@ -86,7 +97,7 @@ class DuelCommand internal constructor(
         }
         if (args.size != 1) return emptyList()
         val prefix = args[0].lowercase()
-        val commands = mutableListOf("accept", "deny", "cancel", "leave", "return", "stats", "top")
+        val commands = mutableListOf("accept", "deny", "cancel", "leave", "return", "stats", "top", "history", "rematch")
         if (sender.hasPermission("arcduels.admin")) commands += "admin"
         val playerNames = targets?.players()?.map(DuelTarget::name) ?: sender.server.onlinePlayers.map(Player::getName)
         return (commands + playerNames)

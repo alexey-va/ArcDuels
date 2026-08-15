@@ -5,9 +5,12 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.bukkit.entity.Player
+import org.bukkit.Location
+import org.bukkit.World
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
+import org.bukkit.event.player.PlayerMoveEvent
 import net.kyori.adventure.text.Component
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
@@ -22,6 +25,38 @@ import java.time.Instant
 import java.util.UUID
 
 class DuelGameplayListenerTest : StringSpec({
+    "countdown movement is anchored to the arena spawn instead of a stale client position" {
+        val player = mockk<Player>(relaxed = true)
+        val playerId = PlayerId(UUID.randomUUID())
+        every { player.uniqueId } returns playerId.value
+        val world = mockk<World>(relaxed = true)
+        val anchor = Location(world, 10.5, 70.0, -4.5)
+        val from = Location(world, 120.0, 70.0, 120.0)
+        val attempted = Location(world, 121.0, 70.0, 120.0, 90f, 10f)
+        val match =
+            DuelMatch.reserve(
+                playerId,
+                PlayerId(UUID.randomUUID()),
+                ArenaId("stabilized"),
+                ServerId("test"),
+                DuelRules(DuelMode.OWN_INVENTORY),
+                Instant.EPOCH,
+            ).beginCountdown()
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.matchFor(player) } returns match
+        every { sessions.countdownAnchor(player) } returns anchor
+        val event = mockk<PlayerMoveEvent>(relaxed = true)
+        every { event.player } returns player
+        every { event.from } returns from
+        every { event.to } returns attempted
+
+        DuelGameplayListener(sessions, mockk(relaxed = true)).onMove(event)
+
+        verify(exactly = 1) {
+            event.to = match { it.x == anchor.x && it.y == anchor.y && it.z == anchor.z && it.yaw == attempted.yaw }
+        }
+    }
+
     "sumo suppresses lethal and environmental damage independently of damage-listener ordering" {
         val player = mockk<Player>(relaxed = true)
         val playerId = PlayerId(UUID.randomUUID())

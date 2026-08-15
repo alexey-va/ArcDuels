@@ -21,6 +21,7 @@ import ru.ruscrafting.duels.redis.ChallengeMessageType
 import ru.ruscrafting.duels.redis.CrossServerChallengeBus
 import ru.ruscrafting.duels.redis.CrossServerChallengeMessage
 import ru.ruscrafting.duels.redis.NetworkArenaDirectory
+import ru.ruscrafting.duels.redis.ArenaChoice
 import java.time.Clock
 import java.time.Duration
 import java.util.UUID
@@ -44,6 +45,8 @@ class DuelController(
     private val clock: Clock = Clock.systemUTC(),
     private val transferTimeout: Duration = Duration.ofSeconds(30),
     private val returnPolicy: PostMatchReturnPolicy = PostMatchReturnPolicy.PROMPT,
+    private val rematchWindow: Duration = Duration.ofMinutes(3),
+    private val arenaChoices: ((DuelRules) -> List<ArenaChoice>)? = arenaDirectory?.let { directory -> directory::choices },
 ) : AutoCloseable {
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
     private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
@@ -63,6 +66,9 @@ class DuelController(
 
     init {
         require(!transferTimeout.isNegative && !transferTimeout.isZero) { "Network transfer timeout must be positive" }
+        require(!rematchWindow.isNegative && !rematchWindow.isZero && rematchWindow <= Duration.ofMinutes(15)) {
+            "Rematch window must be between 1 millisecond and 15 minutes"
+        }
         require(challengeBus == null || (arenaDirectory != null && transfer != null)) {
             "Cross-server challenges require arena discovery and a player transfer gateway"
         }
@@ -305,6 +311,87 @@ class DuelController(
                         LocaleService.text("best", stats.bestWinStreak),
                     ),
                 )
+            }
+        }
+    }
+
+    fun rematch(
+        player: Player,
+        matchId: MatchId? = null,
+    ) {
+        val playerId = PlayerId(player.uniqueId)
+        val lookup =
+            matchId?.let(statistics::findMatch)
+                ?: statistics.recentMatches(playerId, 1).thenApply { matches -> matches.firstOrNull() }
+        lookup.whenComplete { recorded, failure ->
+            runSync {
+                if (!player.isOnline) return@runSync
+                if (failure != null || recorded == null) {
+                    DuelLog.warn("rematch-lookup-failed", matchId, player, "error={}", failure?.message ?: "match-not-found")
+                    player.sendMessage(locales.notice(player, "controller.rematch-unavailable"))
+                    return@runSync
+                }
+                val outcome = recorded.outcome
+                if (playerId != outcome.winner && playerId != outcome.loser) {
+                    DuelLog.warn("rematch-access-denied", outcome.matchId, player, "player={}", player.name)
+                    player.sendMessage(locales.notice(player, "controller.rematch-unavailable"))
+                    return@runSync
+                }
+                if (clock.instant().isAfter(outcome.completedAt.plus(rematchWindow))) {
+                    player.sendMessage(locales.notice(player, "controller.rematch-expired"))
+                    return@runSync
+                }
+                val opponentId = recorded.opponentOf(playerId)
+                val target = targets.find(opponentId.value)
+                if (target == null) {
+                    player.sendMessage(locales.notice(player, "error.player-left"))
+                    return@runSync
+                }
+                val arenaId = outcome.arenaId
+                if (arenaId == null) {
+                    player.sendMessage(locales.notice(player, "controller.rematch-arena-unavailable"))
+                    return@runSync
+                }
+                val selection = ArenaSelection(outcome.serverId, arenaId)
+                if (arenaChoices?.invoke(outcome.rules)?.none { it.selection == selection } == true) {
+                    val choose =
+                        locales.component(player, "controller.rematch-choose")
+                            .clickEvent(ClickEvent.runCommand("/duel ${target.name}"))
+                            .hoverEvent(HoverEvent.showText(locales.component(player, "controller.rematch-choose-hover")))
+                    player.sendMessage(
+                        locales.notice(
+                            player,
+                            "controller.rematch-arena-missing",
+                            LocaleService.component("action", choose),
+                        ),
+                    )
+                    return@runSync
+                }
+                val pending =
+                    challenges.pendingFor(playerId).firstOrNull { challenge ->
+                        setOf(challenge.challenger, challenge.target) == setOf(playerId, opponentId) &&
+                            challenge.rules == outcome.rules && challenge.arenaSelection == selection
+                    }
+                if (pending != null) {
+                    if (pending.target == playerId) {
+                        DuelLog.info("rematch-mutual-confirm", outcome.matchId, player, "challenge={}", pending.id)
+                        accept(player, pending.id)
+                    } else {
+                        player.sendMessage(locales.notice(player, "controller.rematch-pending"))
+                    }
+                    return@runSync
+                }
+                DuelLog.info(
+                    "rematch-request",
+                    outcome.matchId,
+                    player,
+                    "player={} opponent={} arena={}:{}",
+                    player.name,
+                    target.name,
+                    selection.serverId.value,
+                    selection.arenaId.value,
+                )
+                challenge(player, target, outcome.rules, selection)
             }
         }
     }
@@ -714,6 +801,7 @@ class DuelController(
         }
 
     private fun onMatchCompleted(match: DuelMatch) {
+        offerRematch(match)
         val routes = returnRoutes.remove(match.id) ?: return
         if (returnPolicy == PostMatchReturnPolicy.PROMPT) {
             offerReturns(match, routes)
@@ -728,6 +816,32 @@ class DuelController(
                 NETWORK_MATCH_POLL_TICKS,
             )
         returnTasks.putIfAbsent(match.id, task)?.let { task.cancel() }
+    }
+
+    private fun offerRematch(match: DuelMatch) {
+        listOf(match.firstPlayer, match.secondPlayer).forEach { playerId ->
+            val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
+            val opponentId = match.opponentOf(playerId)
+            val opponentName = resolveName(opponentId)
+            playerComponents.load(player, opponentId.value, opponentName).whenComplete { opponent, _ ->
+                runSync {
+                    if (!player.isOnline) return@runSync
+                    val action =
+                        locales.component(player, "controller.rematch-action")
+                            .clickEvent(ClickEvent.runCommand("/duel rematch ${match.id}"))
+                            .hoverEvent(HoverEvent.showText(locales.component(player, "controller.rematch-hover")))
+                    player.sendMessage(
+                        locales.notice(
+                            player,
+                            "controller.rematch-offer",
+                            LocaleService.component("player", requireNotNull(opponent)),
+                            LocaleService.component("action", action),
+                            LocaleService.text("seconds", rematchWindow.seconds.coerceAtLeast(1L)),
+                        ),
+                    )
+                }
+            }
+        }
     }
 
     private fun offerReturns(

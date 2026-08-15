@@ -7,9 +7,13 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import org.bukkit.Material
+import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
+import ru.ruscrafting.duels.domain.DuelChallenge
+import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.PlayerId
@@ -147,6 +151,45 @@ class DurablePlayerStateServiceTest : StringSpec({
 
         stored.getValue(first.uniqueId).escrow.inventoryReplaced shouldBe false
         stored.getValue(second.uniqueId).escrow.inventoryReplaced shouldBe false
+    }
+
+    "origin inventory freezes before its asynchronous MySQL commit completes" {
+        val repository = GatedEscrowRepository()
+        val service = DurablePlayerStateService(plugin, ServerId("origin"), repository)
+        val player = server.addPlayer()
+        val peer = server.addPlayer()
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataSaver = {},
+            )
+        val challenge =
+            DuelChallenge.create(
+                PlayerId(player.uniqueId),
+                PlayerId(peer.uniqueId),
+                DuelRules(DuelMode.OWN_INVENTORY),
+                Instant.parse("2026-08-15T13:00:00Z"),
+                Duration.ofSeconds(30),
+            )
+
+        val stored = sessions.storeOriginSnapshot(challenge, player)
+
+        sessions.isPreparing(player) shouldBe true
+        val heldSlotChange = PlayerItemHeldEvent(player, 0, 1)
+        DuelGameplayListener(sessions, LocaleService.load(plugin)).onHeldSlotChange(heldSlotChange)
+        heldSlotChange.isCancelled shouldBe true
+
+        repository.commit.complete(Unit)
+        stored.get()
+        sessions.isPreparing(player) shouldBe false
+        sessions.isStateLocked(player) shouldBe true
+        sessions.shutdown()
     }
 
     "join recovery waits for player-data readiness and the configured settle window" {

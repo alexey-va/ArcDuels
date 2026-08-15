@@ -33,6 +33,8 @@ This repository is under active development. The first vertical slice targets:
   ranked play, sudden death, and per-match combat modifiers;
 - seven bundled starter kits and Russian/English client-locale presentation;
 - optional countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
+- short server-authoritative arena-teleport stabilization that absorbs stale
+  movement packets before combat begins;
 - bounded arenas with per-arena loadout and objective compatibility, scoped
   internal teleports and protected player inventories;
 - FIFO waiting for a free arena and in-game `/duels admin` GUI and commands;
@@ -51,6 +53,8 @@ This repository is under active development. The first vertical slice targets:
   material/CustomModelData overlays.
 - interactive player names in chat: hover for current duel statistics and click
   to open that player's challenge setup.
+- complete match history with head-to-head records, exact-arena rematches, and
+  five optional saved rule setups without adding a step to the normal challenge flow.
 
 ## Build
 

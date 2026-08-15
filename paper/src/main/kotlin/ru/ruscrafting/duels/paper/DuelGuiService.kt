@@ -20,13 +20,21 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.CombatModifiers
 import ru.ruscrafting.duels.domain.ArenaSelection
+import ru.ruscrafting.duels.domain.DuelPreset
+import ru.ruscrafting.duels.domain.DuelPresetRepository
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
+import ru.ruscrafting.duels.domain.MAX_DUEL_PRESETS
+import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.redis.ArenaChoice
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -34,6 +42,7 @@ class DuelGuiService internal constructor(
     private val plugin: JavaPlugin,
     private val kits: KitRegistry,
     private val statistics: StatisticsRepository,
+    private val presets: DuelPresetRepository,
     private val sessions: DuelSessionManager,
     private val locales: LocaleService,
     private val admin: DuelAdminCommand,
@@ -68,6 +77,7 @@ class DuelGuiService internal constructor(
         inventory.setItem(29, item(player, Material.TARGET, "menu.main.modes", "menu.main.modes-lore"))
         inventory.setItem(31, item(player, Material.ENDER_CHEST, "menu.main.kits", "menu.main.kits-lore"))
         inventory.setItem(33, playerHead(player, locales.component(player, "menu.main.stats"), locales.lines(player, "menu.main.stats-lore")))
+        inventory.setItem(38, item(player, Material.BOOK, "menu.main.history", "menu.main.history-lore"))
         inventory.setItem(40, item(player, Material.WRITABLE_BOOK, "menu.main.help", "menu.main.help-lore"))
         if (sessions.hasPendingRecovery(player)) {
             inventory.setItem(42, item(player, Material.RECOVERY_COMPASS, "menu.main.recovery", "menu.main.recovery-lore"))
@@ -309,6 +319,151 @@ class DuelGuiService internal constructor(
         }
     }
 
+    fun openHistory(player: Player, requestedPage: Int = 0) {
+        player.sendActionBar(locales.component(player, "menu.history.loading"))
+        val playerId = PlayerId(player.uniqueId)
+        statistics.recentMatches(playerId, MAX_HISTORY_ENTRIES).whenComplete { matches, failure ->
+            runSync {
+                if (!player.isOnline) return@runSync
+                if (failure != null) {
+                    player.sendMessage(locales.notice(player, "error.history"))
+                    return@runSync
+                }
+                val page = pageWindow(requireNotNull(matches), requestedPage, CONTENT_SLOTS.size)
+                val holder = HistoryMenuHolder(page.index, page.hasPrevious, page.hasNext)
+                val inventory =
+                    create(
+                        holder,
+                        locales.component(
+                            player,
+                            "menu.history.title",
+                            LocaleService.text("page", page.index + 1),
+                            LocaleService.text("pages", page.totalPages),
+                        ),
+                    )
+                decorate(inventory)
+                page.items.forEachIndexed { index, match ->
+                    val slot = CONTENT_SLOTS[index]
+                    holder.matches[slot] = match
+                    inventory.setItem(slot, historyItem(player, playerId, match))
+                }
+                if (matches.isEmpty()) inventory.setItem(22, item(player, Material.PAPER, "menu.history.empty", "menu.history.empty-lore"))
+                navigation(player, inventory, page, MenuBack.MAIN)
+                player.openInventory(inventory)
+            }
+        }
+    }
+
+    private fun openHeadToHead(
+        player: Player,
+        recorded: RecordedMatch,
+        historyPage: Int,
+    ) {
+        val playerId = PlayerId(player.uniqueId)
+        val opponentId = recorded.opponentOf(playerId)
+        val opponentName = recorded.opponentNameOf(playerId) ?: targets.find(opponentId.value)?.name ?: opponentId.toString().take(8)
+        statistics.headToHead(playerId, opponentId).whenComplete { comparison, failure ->
+            runSync {
+                if (!player.isOnline) return@runSync
+                if (failure != null) {
+                    player.sendMessage(locales.notice(player, "error.history"))
+                    return@runSync
+                }
+                val holder = HeadToHeadMenuHolder(opponentId.value, opponentName, historyPage)
+                val inventory = create(holder, locales.component(player, "menu.h2h.title", LocaleService.text("player", opponentName)))
+                decorate(inventory)
+                inventory.setItem(
+                    11,
+                    playerHead(
+                        player,
+                        locales.component(player, "menu.h2h.you"),
+                        locales.lines(player, "menu.h2h.player-lore", LocaleService.text("wins", requireNotNull(comparison).winsFor(playerId))),
+                    ),
+                )
+                inventory.setItem(
+                    15,
+                    playerHead(
+                        opponentId.value,
+                        opponentName,
+                        locales.component(player, "menu.h2h.opponent", LocaleService.text("player", opponentName)),
+                        locales.lines(player, "menu.h2h.player-lore", LocaleService.text("wins", comparison.winsFor(opponentId))),
+                    ),
+                )
+                inventory.setItem(
+                    13,
+                    item(
+                        player,
+                        Material.CLOCK,
+                        "menu.h2h.matches",
+                        "menu.h2h.matches-lore",
+                        LocaleService.text("matches", comparison.matches),
+                        LocaleService.text("first", comparison.winsFor(playerId)),
+                        LocaleService.text("second", comparison.winsFor(opponentId)),
+                    ),
+                )
+                val target = targets.find(opponentId.value)
+                if (target == null) {
+                    inventory.setItem(31, item(player, Material.BARRIER, "menu.h2h.offline", "menu.h2h.offline-lore"))
+                } else {
+                    inventory.setItem(
+                        31,
+                        item(
+                            player,
+                            Material.NETHERITE_SWORD,
+                            "menu.h2h.challenge",
+                            "menu.h2h.challenge-lore",
+                            LocaleService.text("player", target.name),
+                        ),
+                    )
+                }
+                inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+                player.openInventory(inventory)
+            }
+        }
+    }
+
+    private fun openPresets(
+        player: Player,
+        draft: DuelDraft,
+    ) {
+        player.sendActionBar(locales.component(player, "menu.presets.loading"))
+        presets.presets(PlayerId(player.uniqueId)).whenComplete { saved, failure ->
+            runSync {
+                if (!player.isOnline) return@runSync
+                if (failure != null) {
+                    player.sendMessage(locales.notice(player, "error.presets"))
+                    return@runSync
+                }
+                val holder = PresetMenuHolder(draft)
+                val inventory = create(holder, locales.component(player, "menu.presets.title"))
+                decorate(inventory)
+                val bySlot = requireNotNull(saved).associateBy(DuelPreset::slot)
+                PRESET_GUI_SLOTS.forEachIndexed { index, inventorySlot ->
+                    val presetSlot = index + 1
+                    val preset = bySlot[presetSlot]
+                    holder.presetSlots[inventorySlot] = presetSlot
+                    if (preset == null) {
+                        inventory.setItem(
+                            inventorySlot,
+                            item(
+                                player,
+                                Material.LIGHT_GRAY_DYE,
+                                "menu.presets.empty",
+                                "menu.presets.empty-lore",
+                                LocaleService.text("slot", presetSlot),
+                            ),
+                        )
+                    } else {
+                        holder.presets[presetSlot] = preset
+                        inventory.setItem(inventorySlot, presetItem(player, preset))
+                    }
+                }
+                inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+                player.openInventory(inventory)
+            }
+        }
+    }
+
     private fun openObjectives(player: Player, target: DuelTarget) {
         val holder = ObjectiveMenuHolder(target)
         val inventory = create(holder, locales.component(player, "menu.objectives.title", LocaleService.text("player", target.name)))
@@ -394,6 +549,7 @@ class DuelGuiService internal constructor(
         if (draft.objective == DuelObjectiveType.KING_OF_THE_HILL) {
             inventory.setItem(31, item(player, Material.BEACON, "menu.rules.capture", "menu.rules.capture-lore", LocaleService.text("seconds", draft.modifiers.kingOfTheHillCaptureSeconds)))
         }
+        inventory.setItem(38, item(player, Material.ENCHANTED_BOOK, "menu.rules.presets", "menu.rules.presets-lore"))
         inventory.setItem(40, roleItem(player, "confirm", Material.LIME_CONCRETE, "menu.rules.confirm", "menu.rules.confirm-lore"))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         player.openInventory(inventory)
@@ -488,6 +644,7 @@ class DuelGuiService internal constructor(
                 29 -> openModes(player)
                 31 -> openKits(player)
                 33 -> statisticsAction(player, targets.local(player))
+                38 -> openHistory(player)
                 40 -> showHelp(player)
                 42 -> if (sessions.hasPendingRecovery(player)) {
                     player.closeInventory()
@@ -540,6 +697,22 @@ class DuelGuiService internal constructor(
                 BACK_SLOT -> openMain(player)
                 PREVIOUS_SLOT -> if (holder.hasPrevious) openLeaderboard(player, holder.page - 1)
                 NEXT_SLOT -> if (holder.hasNext) openLeaderboard(player, holder.page + 1)
+            }
+            is HistoryMenuHolder -> when (slot) {
+                BACK_SLOT -> openMain(player)
+                PREVIOUS_SLOT -> if (holder.hasPrevious) openHistory(player, holder.page - 1)
+                NEXT_SLOT -> if (holder.hasNext) openHistory(player, holder.page + 1)
+                else -> holder.matches[slot]?.let { openHeadToHead(player, it, holder.page) }
+            }
+            is HeadToHeadMenuHolder -> when (slot) {
+                BACK_SLOT -> openHistory(player, holder.historyPage)
+                31 -> targets.find(holder.opponentId)?.let { openChallenge(player, it) }
+            }
+            is PresetMenuHolder -> when {
+                slot == BACK_SLOT -> openRules(player, holder.draft)
+                else -> holder.presetSlots[slot]?.let { presetSlot ->
+                    handlePresetClick(player, holder, presetSlot, event.isShiftClick, event.isRightClick)
+                }
             }
             is CatalogMenuHolder -> when {
                 slot == BACK_SLOT -> openMain(player)
@@ -704,6 +877,7 @@ class DuelGuiService internal constructor(
             23 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(enderPearls = !draft.modifiers.enderPearls)))
             25 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(naturalRegeneration = !draft.modifiers.naturalRegeneration)))
             31 -> if (draft.objective == DuelObjectiveType.KING_OF_THE_HILL) openRules(player, draft.copy(modifiers = draft.modifiers.copy(kingOfTheHillCaptureSeconds = nextOf(draft.modifiers.kingOfTheHillCaptureSeconds, listOf(10, 15, 30, 45)))))
+            38 -> openPresets(player, draft)
             40 -> {
                 val target = targets.find(draft.target.uniqueId)
                 player.closeInventory()
@@ -712,6 +886,208 @@ class DuelGuiService internal constructor(
             }
         }
     }
+
+    private fun historyItem(
+        player: Player,
+        playerId: PlayerId,
+        match: RecordedMatch,
+    ): ItemStack {
+        val won = match.wonBy(playerId)
+        val opponentId = match.opponentOf(playerId)
+        val opponentName = match.opponentNameOf(playerId) ?: targets.find(opponentId.value)?.name ?: opponentId.toString().take(8)
+        val (ownScore, opponentScore) = match.scoreFor(playerId)
+        val rules = match.outcome.rules
+        val arena =
+            match.outcome.arenaId?.let { arenaId ->
+                val selection = ArenaSelection(match.outcome.serverId, arenaId)
+                arenaChoices(rules).firstOrNull { it.selection == selection }?.displayName ?: arenaId.value
+            } ?: PlainTextComponentSerializer.plainText().serialize(locales.component(player, "menu.history.legacy-arena"))
+        return item(
+            if (won) Material.LIME_DYE else Material.RED_DYE,
+            locales.component(
+                player,
+                if (won) "menu.history.win" else "menu.history.loss",
+                LocaleService.text("player", opponentName),
+            ),
+            locales.lines(
+                player,
+                "menu.history.entry-lore",
+                LocaleService.text("score", "$ownScore:$opponentScore"),
+                LocaleService.component("objective", objectiveName(player, rules.objective)),
+                LocaleService.component("loadout", loadoutName(player, rules)),
+                LocaleService.text("bestof", rules.bestOf),
+                LocaleService.component("ranked", locales.component(player, if (rules.ranked) "controller.ranked" else "controller.unranked")),
+                LocaleService.component("server", serverNames.display(match.outcome.serverId)),
+                LocaleService.text("arena", arena),
+                LocaleService.text("time", HISTORY_TIME_FORMAT.format(match.outcome.completedAt.atZone(ZoneId.systemDefault()))),
+                LocaleService.component("reason", locales.component(player, "menu.history.reason.${match.outcome.endReason.name.lowercase()}")),
+                LocaleService.text("rating", match.ratingAfter(playerId)),
+            ),
+        )
+    }
+
+    private fun presetItem(
+        player: Player,
+        preset: DuelPreset,
+    ): ItemStack {
+        val availability = presetAvailability(preset)
+        val arena =
+            preset.arenaSelection?.let { selection ->
+                arenaChoices(preset.rules).firstOrNull { it.selection == selection }?.displayName ?: selection.arenaId.value
+            } ?: PlainTextComponentSerializer.plainText().serialize(locales.component(player, "menu.presets.auto-arena"))
+        val status =
+            locales.component(
+                player,
+                when (availability) {
+                    PresetAvailability.READY -> "menu.presets.ready"
+                    PresetAvailability.ARENA_MISSING -> "menu.presets.arena-missing"
+                    PresetAvailability.KIT_MISSING -> "menu.presets.kit-missing"
+                },
+            )
+        val interactions =
+            when (availability) {
+                PresetAvailability.READY -> "menu.presets.ready-actions"
+                PresetAvailability.ARENA_MISSING -> "menu.presets.arena-missing-actions"
+                PresetAvailability.KIT_MISSING -> "menu.presets.kit-missing-actions"
+            }
+        val lore =
+            locales.lines(
+                player,
+                "menu.presets.entry-lore",
+                LocaleService.component("objective", objectiveName(player, preset.rules.objective)),
+                LocaleService.component("loadout", loadoutName(player, preset.rules)),
+                LocaleService.text("bestof", preset.rules.bestOf),
+                LocaleService.text("arena", arena),
+                LocaleService.component("state", status),
+            ) + locales.lines(player, interactions)
+        val material =
+            when (availability) {
+                PresetAvailability.READY -> Material.ENCHANTED_BOOK
+                PresetAvailability.ARENA_MISSING -> Material.MAP
+                PresetAvailability.KIT_MISSING -> Material.BARRIER
+            }
+        return item(
+            material,
+            locales.component(player, "menu.presets.entry", LocaleService.text("slot", preset.slot)),
+            lore,
+        )
+    }
+
+    private fun handlePresetClick(
+        player: Player,
+        holder: PresetMenuHolder,
+        slot: Int,
+        shiftClick: Boolean,
+        rightClick: Boolean,
+    ) {
+        val existing = holder.presets[slot]
+        if (existing == null) {
+            if (!rightClick) savePreset(player, holder.draft, slot)
+            return
+        }
+        if (shiftClick && !rightClick) {
+            savePreset(player, holder.draft, slot)
+            return
+        }
+        if (shiftClick && rightClick) {
+            deletePreset(player, holder.draft, slot)
+            return
+        }
+        when (presetAvailability(existing)) {
+            PresetAvailability.KIT_MISSING -> player.sendMessage(locales.notice(player, "menu.presets.kit-unavailable"))
+            PresetAvailability.ARENA_MISSING -> {
+                if (rightClick) {
+                    applyPreset(player, holder.draft.target, existing.copy(arenaSelection = null))
+                } else {
+                    player.sendMessage(locales.notice(player, "menu.presets.arena-unavailable"))
+                }
+            }
+            PresetAvailability.READY -> if (!rightClick) applyPreset(player, holder.draft.target, existing)
+        }
+    }
+
+    private fun savePreset(
+        player: Player,
+        draft: DuelDraft,
+        slot: Int,
+    ) {
+        val preset = DuelPreset(PlayerId(player.uniqueId), slot, draft.rules(), draft.arenaSelection, Instant.now())
+        presets.savePreset(preset).whenComplete { _, failure ->
+            runSync {
+                if (!player.isOnline) return@runSync
+                if (failure != null) {
+                    player.sendMessage(locales.notice(player, "error.presets"))
+                } else {
+                    player.sendActionBar(locales.component(player, "menu.presets.saved", LocaleService.text("slot", slot)))
+                    openPresets(player, draft)
+                }
+            }
+        }
+    }
+
+    private fun deletePreset(
+        player: Player,
+        draft: DuelDraft,
+        slot: Int,
+    ) {
+        presets.deletePreset(PlayerId(player.uniqueId), slot).whenComplete { _, failure ->
+            runSync {
+                if (!player.isOnline) return@runSync
+                if (failure != null) {
+                    player.sendMessage(locales.notice(player, "error.presets"))
+                } else {
+                    player.sendActionBar(locales.component(player, "menu.presets.deleted", LocaleService.text("slot", slot)))
+                    openPresets(player, draft)
+                }
+            }
+        }
+    }
+
+    private fun applyPreset(
+        player: Player,
+        originalTarget: DuelTarget,
+        preset: DuelPreset,
+    ) {
+        val target = targets.find(originalTarget.uniqueId)
+        if (target == null) {
+            player.closeInventory()
+            player.sendMessage(locales.notice(player, "error.player-left"))
+            return
+        }
+        openRules(
+            player,
+            DuelDraft(
+                target = target,
+                objective = preset.rules.objective,
+                mode = preset.rules.mode,
+                kitId = preset.rules.kitId,
+                ranked = preset.rules.ranked,
+                bestOf = preset.rules.bestOf,
+                modifiers = preset.rules.modifiers,
+                arenaSelection = preset.arenaSelection,
+            ),
+        )
+    }
+
+    private fun presetAvailability(preset: DuelPreset): PresetAvailability {
+        if (preset.rules.mode == DuelMode.KIT && kits.all().none { it.id == preset.rules.kitId }) {
+            return PresetAvailability.KIT_MISSING
+        }
+        if (preset.arenaSelection != null && arenaChoices(preset.rules).none { it.selection == preset.arenaSelection }) {
+            return PresetAvailability.ARENA_MISSING
+        }
+        return PresetAvailability.READY
+    }
+
+    private fun objectiveName(player: Player, objective: DuelObjectiveType): Component =
+        locales.component(player, "objective.${objective.key}.name")
+
+    private fun loadoutName(player: Player, rules: DuelRules): Component =
+        rules.kitId?.let { kitId ->
+            val key = "kit.${kitId.value}.name"
+            val name = if (locales.hasKey(locales.language(player), key)) locales.component(player, key) else Component.text(kitId.value)
+            locales.component(player, "controller.loadout-kit", LocaleService.component("kit", name))
+        } ?: locales.component(player, "controller.loadout-own")
 
     private fun objectiveItem(player: Player, objective: DuelObjectiveType, material: Material): ItemStack? =
         item(player, material, "objective.${objective.key}.name", "objective.${objective.key}.description")
@@ -824,6 +1200,14 @@ class DuelGuiService internal constructor(
         val choices = mutableMapOf<Int, ArenaSelection>()
     }
     private class LeaderboardMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder()
+    private class HistoryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() {
+        val matches = mutableMapOf<Int, RecordedMatch>()
+    }
+    private class HeadToHeadMenuHolder(val opponentId: UUID, val opponentName: String, val historyPage: Int) : MenuHolder()
+    private class PresetMenuHolder(val draft: DuelDraft) : MenuHolder() {
+        val presetSlots = mutableMapOf<Int, Int>()
+        val presets = mutableMapOf<Int, DuelPreset>()
+    }
     private class CatalogMenuHolder(val type: CatalogType, val page: Int = 0, val hasPrevious: Boolean = false, val hasNext: Boolean = false) : MenuHolder()
     private class AdminMenuHolder : MenuHolder()
     private class AdminArenaListHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val arenas = mutableMapOf<Int, String>() }
@@ -832,10 +1216,12 @@ class DuelGuiService internal constructor(
     private class RecoveryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val players = mutableMapOf<Int, UUID>() }
     private enum class CatalogType { MODES, KITS, QUEUE }
     private enum class MenuBack { MAIN }
+    private enum class PresetAvailability { READY, ARENA_MISSING, KIT_MISSING }
 
     private companion object {
         const val MENU_SIZE = 45
         const val MAX_LEADERBOARD_ENTRIES = 100
+        const val MAX_HISTORY_ENTRIES = 100
         const val BACK_SLOT = 36
         const val PREVIOUS_SLOT = 37
         const val PAGE_SLOT = 40
@@ -845,6 +1231,8 @@ class DuelGuiService internal constructor(
         const val ARENA_NAME_TIMEOUT_TICKS = 1_200L
         val COORDINATE_KEYS = listOf("x", "y", "z")
         val CONTENT_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34)
+        val PRESET_GUI_SLOTS = (11 until 11 + MAX_DUEL_PRESETS).toList()
+        val HISTORY_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
         val SUMO_MODIFIERS =
             CombatModifiers(
                 projectiles = false,

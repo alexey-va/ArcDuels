@@ -87,6 +87,14 @@ class MatchCoordinatorTest : StringSpec({
                     CompletableFuture.failedFuture<PersistedMatchResult>(IllegalStateException("database unavailable"))
 
                 override fun leaderboard(limit: Int) = CompletableFuture.completedFuture(emptyList<LeaderboardEntry>())
+
+                override fun findMatch(matchId: MatchId) = CompletableFuture.completedFuture<RecordedMatch?>(null)
+
+                override fun recentMatches(playerId: PlayerId, limit: Int) =
+                    CompletableFuture.completedFuture(emptyList<RecordedMatch>())
+
+                override fun headToHead(firstPlayer: PlayerId, secondPlayer: PlayerId) =
+                    CompletableFuture.completedFuture(HeadToHeadRecord(firstPlayer, secondPlayer, 0, 0, null))
             }
         val failClosed =
             MatchCoordinator(
@@ -236,6 +244,14 @@ class MatchCoordinatorTest : StringSpec({
                 override fun findPlayerName(playerId: PlayerId) = CompletableFuture.completedFuture<String?>(null)
                 override fun find(playerId: PlayerId) = CompletableFuture.completedFuture(PlayerStatistics(playerId))
                 override fun leaderboard(limit: Int) = CompletableFuture.completedFuture(emptyList<LeaderboardEntry>())
+
+                override fun findMatch(matchId: MatchId) = CompletableFuture.completedFuture<RecordedMatch?>(null)
+
+                override fun recentMatches(playerId: PlayerId, limit: Int) =
+                    CompletableFuture.completedFuture(emptyList<RecordedMatch>())
+
+                override fun headToHead(firstPlayer: PlayerId, secondPlayer: PlayerId) =
+                    CompletableFuture.completedFuture(HeadToHeadRecord(firstPlayer, secondPlayer, 0, 0, null))
 
                 override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> =
                     CompletableFuture<PersistedMatchResult>().also(writes::add)

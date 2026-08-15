@@ -22,9 +22,17 @@ import net.kyori.adventure.text.format.TextDecoration
 import io.papermc.paper.datacomponent.DataComponentTypes
 import ru.ruscrafting.duels.domain.ChallengeId
 import ru.ruscrafting.duels.domain.ChallengeRegistry
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
+import ru.ruscrafting.duels.domain.KitId
+import ru.ruscrafting.duels.domain.MatchEndReason
+import ru.ruscrafting.duels.domain.MatchId
+import ru.ruscrafting.duels.domain.MatchOutcome
+import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Duration
@@ -54,6 +62,8 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.isEnabled shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
         plugin.config.getInt("countdown-seconds") shouldBe 3
+        plugin.config.getLong("teleport-stabilization-ticks") shouldBe 3L
+        plugin.config.getLong("rematch-window-seconds") shouldBe 180L
         plugin.config.getLong("celebration.duration-ticks") shouldBe 80L
         plugin.config.getString("player-data-sync.provider") shouldBe "AUTO"
         plugin.config.getLong("player-data-sync.settle-delay-ticks") shouldBe 40L
@@ -338,6 +348,78 @@ class ArcDuelsPluginTest : StringSpec({
         val id = ChallengeId(UUID.randomUUID())
         executor.onCommand(player, command, "duel", arrayOf("accept", id.toString()))
         verify(exactly = 1) { controller.accept(player, id) }
+
+        executor.onCommand(player, command, "duel", arrayOf("rematch", "not-a-uuid"))
+        verify(exactly = 0) { controller.rematch(player, any()) }
+    }
+
+    "rematch keeps the exact rules and arena without adding setup clicks" {
+        val now = Instant.parse("2026-08-15T13:00:30Z")
+        val clock = Clock.fixed(now, ZoneOffset.UTC)
+        val registry = ChallengeRegistry(clock)
+        val statistics = InMemoryStatisticsRepository()
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val first = server.addPlayer("RematchFirst")
+        val second = server.addPlayer("RematchSecond")
+        val rules = DuelRules(DuelMode.KIT, KitId("classic"), ranked = true, bestOf = 3, objective = DuelObjectiveType.ELIMINATION)
+        val outcome =
+            MatchOutcome(
+                MatchId(UUID.randomUUID()),
+                PlayerId(first.uniqueId),
+                PlayerId(second.uniqueId),
+                rules.mode,
+                rules.kitId,
+                rules.ranked,
+                ServerId("spawn"),
+                now.minusSeconds(30),
+                rules.objective,
+                ArenaId("kit-test"),
+                rules.bestOf,
+                rules.modifiers,
+                2,
+                1,
+                MatchEndReason.ELIMINATION,
+            )
+        statistics.record(outcome).get()
+        val controller =
+            DuelController(
+                plugin,
+                registry,
+                sessions,
+                statistics,
+                LocaleService.load(plugin),
+                DuelTargetDirectory(plugin, ServerId("spawn"), null),
+                ServerId("spawn"),
+                clock = clock,
+            )
+
+        controller.rematch(first, outcome.matchId)
+
+        registry.pendingFor(PlayerId(first.uniqueId)).single().let { challenge ->
+            challenge.challenger shouldBe PlayerId(first.uniqueId)
+            challenge.target shouldBe PlayerId(second.uniqueId)
+            challenge.rules shouldBe rules
+            challenge.arenaSelection shouldBe ArenaSelection(ServerId("spawn"), ArenaId("kit-test"))
+        }
+        controller.close()
+
+        val missingRegistry = ChallengeRegistry(clock)
+        val missingArenaController =
+            DuelController(
+                plugin,
+                missingRegistry,
+                sessions,
+                statistics,
+                LocaleService.load(plugin),
+                DuelTargetDirectory(plugin, ServerId("spawn"), null),
+                ServerId("spawn"),
+                clock = clock,
+                arenaChoices = { emptyList() },
+            )
+        missingArenaController.rematch(first, outcome.matchId)
+        missingRegistry.pendingFor(PlayerId(first.uniqueId)) shouldBe emptyList()
+        missingArenaController.close()
     }
 
     "case-normalized kit and arena ids cannot silently overwrite each other" {
@@ -364,9 +446,15 @@ class ArcDuelsPluginTest : StringSpec({
         player.performCommand("duel") shouldBe true
         player.openInventory.topInventory.size shouldBe 45
         player.openInventory.topInventory.getItem(11)?.type shouldBe Material.NETHERITE_SWORD
+        player.openInventory.topInventory.getItem(38)?.type shouldBe Material.BOOK
         val challengeName = requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())
         PlainTextComponentSerializer.plainText().serialize(challengeName) shouldBe "Challenge a player"
         challengeName.decoration(TextDecoration.ITALIC) shouldBe TextDecoration.State.FALSE
+
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 38)
+        player.openInventory.topInventory.getItem(22)?.type shouldBe Material.PAPER
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 36)
+        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.NETHERITE_SWORD
 
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
         player.openInventory.topInventory.getItem(10)?.type shouldBe Material.PLAYER_HEAD
@@ -376,6 +464,15 @@ class ArcDuelsPluginTest : StringSpec({
         player.openInventory.topInventory.getItem(10)?.type shouldBe Material.BOW
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
         player.openInventory.topInventory.getItem(31)?.type shouldBe Material.BEACON
+        player.openInventory.topInventory.getItem(38)?.type shouldBe Material.ENCHANTED_BOOK
+        player.openInventory.topInventory.getItem(40)?.type shouldBe Material.LIME_CONCRETE
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 38)
+        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.LIGHT_GRAY_DYE
+        player.simulateInventoryClick(player.openInventory, ClickType.RIGHT, 11)
+        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.LIGHT_GRAY_DYE
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
+        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.ENCHANTED_BOOK
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
         player.openInventory.topInventory.getItem(40)?.type shouldBe Material.LIME_CONCRETE
 
         player.closeInventory()

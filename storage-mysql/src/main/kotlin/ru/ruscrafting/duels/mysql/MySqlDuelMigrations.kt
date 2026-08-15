@@ -160,6 +160,88 @@ object MySqlDuelMigrations {
                         "DEALLOCATE PREPARE arcduels_migration_6_archive_statement",
                     ),
             ),
+            SqlMigration(
+                version = 7,
+                description = "store complete replayable duel history",
+                statements =
+                    listOf(
+                        migration7Column(1, "arena_id", "VARCHAR(48) NULL AFTER `server_id`"),
+                        migration7Column(2, "best_of", "INT UNSIGNED NOT NULL DEFAULT 1 AFTER `ranked`"),
+                        migration7Column(3, "projectiles", "BOOLEAN NOT NULL DEFAULT TRUE AFTER `best_of`"),
+                        migration7Column(4, "consumables", "BOOLEAN NOT NULL DEFAULT TRUE AFTER `projectiles`"),
+                        migration7Column(5, "ender_pearls", "BOOLEAN NOT NULL DEFAULT TRUE AFTER `consumables`"),
+                        migration7Column(6, "natural_regeneration", "BOOLEAN NOT NULL DEFAULT TRUE AFTER `ender_pearls`"),
+                        migration7Column(7, "sudden_death_seconds", "INT UNSIGNED NOT NULL DEFAULT 300 AFTER `natural_regeneration`"),
+                        migration7Column(8, "koth_capture_seconds", "INT UNSIGNED NOT NULL DEFAULT 15 AFTER `sudden_death_seconds`"),
+                        migration7Column(9, "boxing_hits_to_win", "INT UNSIGNED NOT NULL DEFAULT 100 AFTER `koth_capture_seconds`"),
+                        migration7Column(10, "combo_hits_to_win", "INT UNSIGNED NOT NULL DEFAULT 10 AFTER `boxing_hits_to_win`"),
+                        migration7Column(11, "winner_score", "INT UNSIGNED NOT NULL DEFAULT 1 AFTER `loser_rating_after`"),
+                        migration7Column(12, "loser_score", "INT UNSIGNED NOT NULL DEFAULT 0 AFTER `winner_score`"),
+                        migration7Column(13, "end_reason", "VARCHAR(32) NOT NULL DEFAULT 'ELIMINATION' AFTER `loser_score`"),
+                    ).flatMapIndexed { index, setup ->
+                        val suffix = index + 1
+                        listOf(
+                            setup,
+                            "PREPARE arcduels_migration_7_${suffix}_statement FROM @arcduels_migration_7_$suffix",
+                            "EXECUTE arcduels_migration_7_${suffix}_statement",
+                            "DEALLOCATE PREPARE arcduels_migration_7_${suffix}_statement",
+                        )
+                    } +
+                        listOf(
+                            // Versions before 7 did not persist combat modifiers. The
+                            // generic defaults are invalid for hit-race objectives, so
+                            // normalize legacy rows before the new reader sees them.
+                            """
+                            UPDATE `arcduels_matches`
+                            SET `projectiles` = FALSE,
+                                `consumables` = FALSE,
+                                `ender_pearls` = FALSE,
+                                `natural_regeneration` = FALSE,
+                                `end_reason` = 'OBJECTIVE'
+                            WHERE `objective` IN ('BOXING', 'COMBO')
+                            """.trimIndent(),
+                            """
+                            UPDATE `arcduels_matches`
+                            SET `end_reason` = 'OBJECTIVE'
+                            WHERE `objective` = 'KING_OF_THE_HILL'
+                              AND `end_reason` = 'ELIMINATION'
+                            """.trimIndent(),
+                        ),
+            ),
+            SqlMigration(
+                version = 8,
+                description = "create saved duel rule presets",
+                statements =
+                    listOf(
+                        """
+                        CREATE TABLE IF NOT EXISTS `arcduels_rule_presets` (
+                            `player_id` BINARY(16) NOT NULL,
+                            `slot` TINYINT UNSIGNED NOT NULL,
+                            `mode` VARCHAR(32) NOT NULL,
+                            `objective` VARCHAR(32) NOT NULL,
+                            `kit_id` VARCHAR(48) NULL,
+                            `ranked` BOOLEAN NOT NULL,
+                            `best_of` INT UNSIGNED NOT NULL,
+                            `projectiles` BOOLEAN NOT NULL,
+                            `consumables` BOOLEAN NOT NULL,
+                            `ender_pearls` BOOLEAN NOT NULL,
+                            `natural_regeneration` BOOLEAN NOT NULL,
+                            `sudden_death_seconds` INT UNSIGNED NOT NULL,
+                            `koth_capture_seconds` INT UNSIGNED NOT NULL,
+                            `boxing_hits_to_win` INT UNSIGNED NOT NULL,
+                            `combo_hits_to_win` INT UNSIGNED NOT NULL,
+                            `selected_arena_server` VARCHAR(48) NULL,
+                            `selected_arena_id` VARCHAR(48) NULL,
+                            `updated_at` DATETIME(3) NOT NULL,
+                            PRIMARY KEY (`player_id`, `slot`),
+                            CONSTRAINT `chk_arcduels_preset_slot` CHECK (`slot` BETWEEN 1 AND 5),
+                            CONSTRAINT `chk_arcduels_preset_arena_pair` CHECK (
+                                (`selected_arena_server` IS NULL) = (`selected_arena_id` IS NULL)
+                            )
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """.trimIndent(),
+                    ),
+            ),
         )
 
     private fun migration6Column(table: String, variable: String): String =
@@ -178,4 +260,28 @@ object MySqlDuelMigrations {
             )
         )
         """.trimIndent()
+
+    private fun migration7Column(
+        variable: Int,
+        column: String,
+        definition: String,
+    ): String {
+        val escapedDefinition = definition.replace("'", "''")
+        return """
+            SET @arcduels_migration_7_$variable = (
+                SELECT IF(
+                    EXISTS(
+                        SELECT 1
+                        FROM `information_schema`.`COLUMNS`
+                        WHERE `TABLE_SCHEMA` = DATABASE()
+                          AND `TABLE_NAME` = 'arcduels_matches'
+                          AND `COLUMN_NAME` = '$column'
+                    ),
+                    'SELECT 1',
+                    'ALTER TABLE `arcduels_matches` ADD COLUMN `$column` $escapedDefinition'
+                )
+            )
+        """.trimIndent()
+    }
+
 }

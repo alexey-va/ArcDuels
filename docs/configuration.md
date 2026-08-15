@@ -124,6 +124,11 @@ connection loss and unknown commit outcomes are not retried at this layer.
 
 `countdown-seconds` accepts `0..10`; `0` activates combat immediately after
 both durable snapshots, kit application, and arena teleports have completed.
+`teleport-stabilization-ticks` accepts `0..20` and defaults to `3`. During this
+short window ArcDuels treats the assigned arena spawn as authoritative, clears
+stale velocity, and reanchors a player only if another movement source displaced
+them. Countdown activation is delayed by the same number of ticks, including
+when `countdown-seconds` is zero.
 
 Each enabled arena requires two isolated spawns in a loaded world. The bundled
 example is disabled deliberately so a fresh install cannot teleport players to
@@ -293,6 +298,20 @@ losses, win rate, and streak; clicking runs `/duel <player>` and opens that
 player's challenge setup. Untrusted names are inserted as plain text, never as
 MiniMessage markup or command syntax.
 
+The main menu has one separate history entry. It records the complete accepted
+rules, exact server and arena, score, completion reason, ratings, and last-known
+names. Selecting a result opens the head-to-head record. For
+`rematch-window-seconds` (default `180`, bounded to `30..900`) either participant
+can request the exact same rules and arena; the other participant confirms with
+the same action. A removed arena never silently falls back to another one.
+
+The final rules screen has an optional saved-setups entry. Each player owns five
+MySQL-backed slots. An empty slot saves the current draft; existing slots can be
+applied, overwritten, or deleted. A missing kit blocks application. A missing
+exact arena requires an explicit right click to switch that setup to automatic
+arena selection. The ordinary opponent → objective → loadout → rules → confirm
+path receives no extra page or required click.
+
 ## GUI item roles
 
 Bundled GUI items are ordinary vanilla materials. Deployments can override
@@ -311,6 +330,8 @@ hard-codes resource-pack numbers. Standard roles include `background`, `back`,
 - `/duel return` — accept the pending post-match return to the origin backend;
 - `/duel stats [network-online-player]`;
 - `/duel top` — open the global leaderboard.
+- `/duel history` — open personal match history and head-to-head records;
+- `/duel rematch [match-id]` — request the latest or selected exact rematch;
 - `/duels admin status` — active arenas and FIFO waiters;
 - `/duels admin recover <online-player>` — claim an exact pending recovery, or
   replay the newest claimed snapshot as an administrator.

@@ -12,6 +12,11 @@ import ru.arc.sql.SqlRuntime
 import ru.arc.sql.SqlSslMode
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.DuelPreset
+import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.CombatModifiers
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
@@ -35,8 +40,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
         beforeSpec {
             mysql.start()
             repository = openRepository("arcduels-it")
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
         }
 
         afterSpec {
@@ -58,6 +63,12 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                     serverId = ServerId("duels-it"),
                     completedAt = Instant.parse("2026-08-13T10:00:00Z"),
                     objective = DuelObjectiveType.BOXING,
+                    arenaId = ArenaId("boxing-one"),
+                    bestOf = 3,
+                    modifiers = CombatModifiers(false, false, false, false, boxingHitsToWin = 50),
+                    winnerScore = 2,
+                    loserScore = 1,
+                    endReason = ru.ruscrafting.duels.domain.MatchEndReason.OBJECTIVE,
                 )
             repository.rememberPlayerName(winner, "Winner").get()
             repository.rememberPlayerName(loser, "Loser").get()
@@ -74,6 +85,47 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             repository.findPlayerName(winner).get() shouldBe "Winner"
             repository.leaderboard(10).get().map { it.playerId } shouldContainExactly listOf(winner, loser)
             repository.leaderboard(10).get().map { it.playerName } shouldContainExactly listOf("Winner", "Loser")
+            repository.findMatch(outcome.matchId).get()?.outcome shouldBe outcome
+            repository.recentMatches(winner, 10).get().single().winnerName shouldBe "Winner"
+            repository.recentMatches(loser, 10).get().single().loserName shouldBe "Loser"
+            repository.headToHead(winner, loser).get().firstWins shouldBe 1
+            repository.headToHead(winner, loser).get().secondWins shouldBe 0
+        }
+
+        "saved rule presets preserve exact rules and arena selection" {
+            val player = PlayerId(UUID.fromString("00000000-0000-0000-0000-000000000020"))
+            val first =
+                DuelPreset(
+                    player,
+                    2,
+                    DuelRules(
+                        DuelMode.KIT,
+                        KitId("boxing"),
+                        ranked = true,
+                        bestOf = 5,
+                        objective = DuelObjectiveType.COMBO,
+                        modifiers = CombatModifiers(false, false, false, false, comboHitsToWin = 15),
+                    ),
+                    ArenaSelection(ServerId("spawn"), ArenaId("kit-test")),
+                    Instant.parse("2026-08-13T10:00:00.123456Z"),
+                )
+
+            repository.savePreset(first).get()
+            repository.savePreset(first).get()
+            repository.presets(player).get().single() shouldBe
+                first.copy(updatedAt = Instant.parse("2026-08-13T10:00:00.123Z"))
+
+            val updated =
+                first.copy(
+                    rules = DuelRules(DuelMode.OWN_INVENTORY, bestOf = 3),
+                    arenaSelection = null,
+                    updatedAt = Instant.parse("2026-08-13T10:01:00Z"),
+                )
+            repository.savePreset(updated).get()
+            repository.presets(player).get() shouldContainExactly listOf(updated)
+            repository.deletePreset(player, 2).get() shouldBe true
+            repository.deletePreset(player, 2).get() shouldBe false
+            repository.presets(player).get() shouldContainExactly emptyList()
         }
 
         "same match id with a different outcome is rejected" {
@@ -298,7 +350,34 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             }
 
             repository.migrate().get().appliedVersions shouldContainExactly listOf(4)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
+        }
+
+        "history and preset migrations converge after ddl committed before journal" {
+            mysql.createConnection("").use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(
+                        """
+                        UPDATE `arcduels_matches`
+                        SET `projectiles` = TRUE, `consumables` = TRUE,
+                            `ender_pearls` = TRUE, `natural_regeneration` = TRUE,
+                            `end_reason` = 'ELIMINATION'
+                        WHERE `objective` = 'BOXING'
+                        """.trimIndent(),
+                    )
+                    statement.executeUpdate("DELETE FROM `arcduels_schema_history` WHERE `version` IN (7, 8)")
+                }
+            }
+
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(7, 8)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
+            repository.findMatch(MatchId(UUID.fromString("00000000-0000-0000-0000-000000000010"))).get()?.outcome?.let {
+                it.modifiers.projectiles shouldBe false
+                it.modifiers.consumables shouldBe false
+                it.modifiers.enderPearls shouldBe false
+                it.modifiers.naturalRegeneration shouldBe false
+                it.endReason shouldBe ru.ruscrafting.duels.domain.MatchEndReason.OBJECTIVE
+            }
         }
     }
 

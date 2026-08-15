@@ -170,7 +170,7 @@ internal class DuelGameplayListener(
         when (match.state) {
             MatchState.COUNTDOWN, MatchState.COMPLETING, MatchState.COMPLETED -> {
                 if (event.from.x != destination.x || event.from.y != destination.y || event.from.z != destination.z) {
-                    event.to = event.from.clone().apply {
+                    event.to = (sessions.countdownAnchor(event.player) ?: event.from).clone().apply {
                         yaw = destination.yaw
                         pitch = destination.pitch
                     }

@@ -35,11 +35,17 @@ data class PlayerSnapshot(
     val potionEffects: Collection<PotionEffect>,
 ) {
     fun inventoryMatches(player: Player): Boolean =
-        player.inventory.storageContents.sameItems(storage) &&
-            player.inventory.armorContents.sameItems(armor) &&
-            player.inventory.itemInOffHand.sameItem(offHand) &&
-            player.itemOnCursor.sameItem(cursor) &&
-            player.inventory.heldItemSlot == heldItemSlot
+        inventoryMismatches(player).isEmpty()
+
+    /** Returns bounded field names only; inventory contents must never enter logs. */
+    fun inventoryMismatches(player: Player): List<String> =
+        buildList {
+            if (!player.inventory.storageContents.sameItems(storage)) add("storage")
+            if (!player.inventory.armorContents.sameItems(armor)) add("armor")
+            if (!player.inventory.itemInOffHand.sameItem(offHand)) add("offHand")
+            if (!player.itemOnCursor.sameItem(cursor)) add("cursor")
+            if (player.inventory.heldItemSlot != heldItemSlot) add("heldSlot")
+        }
 
     fun locationMatches(player: Player): Boolean = player.location.sameLocation(location)
 

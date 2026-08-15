@@ -194,6 +194,12 @@ class MatchCoordinator(
                 serverId = match.serverId,
                 completedAt = requireNotNull(match.completedAt).truncatedTo(ChronoUnit.MILLIS),
                 objective = match.rules.objective,
+                arenaId = match.arenaId,
+                bestOf = match.rules.bestOf,
+                modifiers = match.rules.modifiers,
+                winnerScore = if (winner == match.firstPlayer) match.score.first else match.score.second,
+                loserScore = if (winner == match.firstPlayer) match.score.second else match.score.first,
+                endReason = requireNotNull(match.endReason),
             )
         return statistics.record(outcome).thenApply { persisted ->
             val (completed, firstCompletion) =

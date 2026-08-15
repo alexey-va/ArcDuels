@@ -17,6 +17,8 @@ The suite covers:
   controlled-objective/loadout combinations;
 - queued player ownership, FIFO arena handoff, cancellation, and overlapping persistence completion;
 - local statistics idempotency under concurrent duplicate writes;
+- complete in-memory and MySQL match-history round trips, perspective scoring,
+  head-to-head aggregation, exact-arena rematches, and five-slot preset CRUD;
 - long result sequences, rating bounds, streaks, revisions, and leaderboards;
 - Redis event and challenge codec validation, authenticated origins, listener
   isolation, dedupe, source collisions, player-snapshot TTL expiry, blank
@@ -26,6 +28,7 @@ The suite covers:
   arena and kit validation, explicit sync-provider detection, origin-before-transfer
   single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
   modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization,
+  server-authoritative countdown anchoring and pre-countdown teleport stabilization,
   WorldGuard participant-only PvP overrides, immutable return routing, command
   bypass behavior, damage-free celebration entities, default-kit presence,
   player-facing network server names, BO1 boss bars without a meaningless
@@ -52,7 +55,8 @@ escrow, exact active-to-archive transfer, idempotent replay after an unknown
 archival outcome, retention deadlines, bounded expiry cleanup, checksum
 matching, claimed-snapshot lookup, recovery metadata, and rollback on a participant conflict. It also deletes a committed
 migration-history row and proves that replay converges when MySQL DDL committed
-before its journal write. A crash-boundary scenario closes the writer after the
+before its journal write, including the replayable-history and preset migrations.
+A crash-boundary scenario closes the writer after the
 pair commit, reopens a fresh repository, acknowledges only one participant,
 closes again, and proves another fresh repository still exposes exactly the
 unclaimed participant while retaining the claimed snapshot idempotently. It is

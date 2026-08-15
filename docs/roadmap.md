@@ -38,7 +38,7 @@
 ## Next — competitive operations
 
 - ranked queues and ELO seasons;
-- rematches, spectators and match history;
+- spectators;
 - PlaceholderAPI expansion and moderation/audit commands;
 - orphaned-match reconciliation and recovery audit history.
 

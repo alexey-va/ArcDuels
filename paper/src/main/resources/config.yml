@@ -10,6 +10,11 @@ server-display-names:
 challenge-timeout-seconds: 45
 # Starts only after both players are safely prepared and teleported.
 countdown-seconds: 3
+# For a few ticks after an arena teleport, keep the server-authoritative spawn
+# position and clear stale velocity. This absorbs late movement packets and
+# avoids client/anticheat rubber-banding before the countdown begins.
+teleport-stabilization-ticks: 3
+rematch-window-seconds: 180
 
 player-data-sync:
   # AUTO detects HuskSync. Use HUSKSYNC or NONE to declare the node contract

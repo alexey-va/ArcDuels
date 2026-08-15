@@ -3,10 +3,11 @@ package ru.ruscrafting.duels.domain
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
-class InMemoryStatisticsRepository : StatisticsRepository {
+class InMemoryStatisticsRepository : StatisticsRepository, DuelPresetRepository {
     private val statistics = ConcurrentHashMap<PlayerId, PlayerStatistics>()
     private val playerNames = ConcurrentHashMap<PlayerId, String>()
     private val recordedMatches = ConcurrentHashMap<MatchId, PersistedMatchResult>()
+    private val savedPresets = ConcurrentHashMap<Pair<PlayerId, Int>, DuelPreset>()
     private val writeLock = Any()
     private var leaderboardRevision = 0L
 
@@ -97,4 +98,80 @@ class InMemoryStatisticsRepository : StatisticsRepository {
             }
         return CompletableFuture.completedFuture(entries)
     }
+
+    override fun findMatch(matchId: MatchId): CompletableFuture<RecordedMatch?> =
+        CompletableFuture.completedFuture(
+            synchronized(writeLock) { recordedMatches[matchId]?.toRecordedMatch() },
+        )
+
+    override fun recentMatches(
+        playerId: PlayerId,
+        limit: Int,
+    ): CompletableFuture<List<RecordedMatch>> {
+        require(limit in 1..100) { "Match history limit must be between 1 and 100" }
+        val matches =
+            synchronized(writeLock) {
+                recordedMatches.values
+                    .asSequence()
+                    .filter { it.outcome.winner == playerId || it.outcome.loser == playerId }
+                    .sortedWith(compareByDescending<PersistedMatchResult> { it.outcome.completedAt }.thenBy { it.outcome.matchId.toString() })
+                    .take(limit)
+                    .map { it.toRecordedMatch() }
+                    .toList()
+            }
+        return CompletableFuture.completedFuture(matches)
+    }
+
+    override fun headToHead(
+        firstPlayer: PlayerId,
+        secondPlayer: PlayerId,
+    ): CompletableFuture<HeadToHeadRecord> {
+        require(firstPlayer != secondPlayer) { "Head-to-head players must be different" }
+        val outcomes =
+            synchronized(writeLock) {
+                recordedMatches.values.map(PersistedMatchResult::outcome).filter { outcome ->
+                    (outcome.winner == firstPlayer && outcome.loser == secondPlayer) ||
+                        (outcome.winner == secondPlayer && outcome.loser == firstPlayer)
+                }
+            }
+        return CompletableFuture.completedFuture(
+            HeadToHeadRecord(
+                firstPlayer = firstPlayer,
+                secondPlayer = secondPlayer,
+                firstWins = outcomes.count { it.winner == firstPlayer }.toLong(),
+                secondWins = outcomes.count { it.winner == secondPlayer }.toLong(),
+                lastCompletedAt = outcomes.maxOfOrNull(MatchOutcome::completedAt),
+            ),
+        )
+    }
+
+    override fun presets(playerId: PlayerId): CompletableFuture<List<DuelPreset>> =
+        CompletableFuture.completedFuture(
+            synchronized(writeLock) {
+                savedPresets.values.filter { it.playerId == playerId }.sortedBy(DuelPreset::slot)
+            },
+        )
+
+    override fun savePreset(preset: DuelPreset): CompletableFuture<Unit> {
+        val canonical = preset.copy(updatedAt = preset.updatedAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
+        synchronized(writeLock) { savedPresets[canonical.playerId to canonical.slot] = canonical }
+        return CompletableFuture.completedFuture(Unit)
+    }
+
+    override fun deletePreset(
+        playerId: PlayerId,
+        slot: Int,
+    ): CompletableFuture<Boolean> {
+        require(slot in 1..MAX_DUEL_PRESETS) { "Preset slot must be between 1 and $MAX_DUEL_PRESETS" }
+        return CompletableFuture.completedFuture(synchronized(writeLock) { savedPresets.remove(playerId to slot) != null })
+    }
+
+    private fun PersistedMatchResult.toRecordedMatch(): RecordedMatch =
+        RecordedMatch(
+            outcome,
+            winnerRatingAfter,
+            loserRatingAfter,
+            playerNames[outcome.winner],
+            playerNames[outcome.loser],
+        )
 }

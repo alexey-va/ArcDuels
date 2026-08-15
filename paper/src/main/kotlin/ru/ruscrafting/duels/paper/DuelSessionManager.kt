@@ -45,6 +45,7 @@ class DuelSessionManager internal constructor(
     private val playerStates: DurablePlayerStateService,
     private val locales: LocaleService,
     private val countdownSeconds: Int,
+    private val teleportStabilizationTicks: Long = 3L,
     private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
     private val remoteRecoveryTransfer: ((Player, ServerId) -> Unit)? = null,
     private val playerDataReady: (Player) -> Boolean = { true },
@@ -61,6 +62,7 @@ class DuelSessionManager internal constructor(
     private val objectiveTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val matchDisplayTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val finaleTasks = ConcurrentHashMap<MatchId, BukkitTask>()
+    private val teleportStabilizationTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val pendingStarts = ConcurrentHashMap<UUID, CompletableFuture<DuelMatch>>()
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val recoveryTokens = ConcurrentHashMap<UUID, UUID>()
@@ -74,6 +76,7 @@ class DuelSessionManager internal constructor(
 
     init {
         require(recoveryApplyDelayTicks in 0L..1_200L) { "Player data settle delay must be between 0 and 1200 ticks" }
+        require(teleportStabilizationTicks in 0L..20L) { "Arena teleport stabilization must be between 0 and 20 ticks" }
         require(celebrationDurationTicks in 0L..200L) { "Celebration duration must be between 0 and 200 ticks" }
         require(shutdownRecoveryTimeoutMillis in 100L..30_000L) { "Shutdown recovery timeout must be between 100 and 30000 ms" }
     }
@@ -243,12 +246,30 @@ class DuelSessionManager internal constructor(
     internal fun storeOriginSnapshot(
         challenge: DuelChallenge,
         player: Player,
-    ): CompletableFuture<StoredPlayerSnapshot> =
-        playerStates.store(
+    ): CompletableFuture<StoredPlayerSnapshot> {
+        check(plugin.server.isPrimaryThread) { "Origin snapshots must be captured on the Paper primary thread" }
+        preparingPlayers += player.uniqueId
+        DuelLog.debug(
+            "origin-snapshot-freeze",
             MatchId(challenge.id.value),
             player,
-            inventoryReplaced = challenge.rules.mode == DuelMode.KIT,
+            "player={} locked_before_capture=true",
+            player.name,
         )
+        val future =
+            runCatching {
+                playerStates.store(
+                    MatchId(challenge.id.value),
+                    player,
+                    inventoryReplaced = challenge.rules.mode == DuelMode.KIT,
+                )
+            }.getOrElse { failure ->
+                preparingPlayers -= player.uniqueId
+                throw failure
+            }
+        future.whenComplete { _, _ -> runSync { preparingPlayers -= player.uniqueId } }
+        return future
+    }
 
     fun hasOriginSnapshot(
         player: Player,
@@ -358,6 +379,12 @@ class DuelSessionManager internal constructor(
             matchFor(player) != null
 
     fun isPreparing(player: Player): Boolean = preparingPlayers.contains(player.uniqueId)
+
+    fun countdownAnchor(player: Player): org.bukkit.Location? {
+        val match = matchFor(player) ?: return null
+        if (match.state != MatchState.COUNTDOWN) return null
+        return sessions[match.id]?.arenaAnchors?.get(player.uniqueId)?.clone()
+    }
 
     fun isPostMatchWaiting(player: Player): Boolean = networkLobbyPlayers.containsKey(player.uniqueId)
 
@@ -838,6 +865,8 @@ class DuelSessionManager internal constructor(
         )
         countdownTasks.values.forEach(BukkitTask::cancel)
         countdownTasks.clear()
+        teleportStabilizationTasks.values.forEach(BukkitTask::cancel)
+        teleportStabilizationTasks.clear()
         objectiveTasks.values.forEach(BukkitTask::cancel)
         objectiveTasks.clear()
         matchDisplayTasks.values.forEach(BukkitTask::cancel)
@@ -943,6 +972,7 @@ class DuelSessionManager internal constructor(
                 failure.message,
             )
             hideMatchDisplay(session)
+            teleportStabilizationTasks.remove(match.id)?.cancel()
             sessions.remove(match.id)
             session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
             if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) restore(session)
@@ -971,15 +1001,39 @@ class DuelSessionManager internal constructor(
             match.rules.mode,
         )
         if (match.rules.mode == DuelMode.OWN_INVENTORY && session.roundsPrepared == 0) {
-            check(session.snapshots.getValue(first.uniqueId).state.inventoryMatches(first)) {
+            val firstMismatches = session.snapshots.getValue(first.uniqueId).state.inventoryMismatches(first)
+            val secondMismatches = session.snapshots.getValue(second.uniqueId).state.inventoryMismatches(second)
+            if (firstMismatches.isNotEmpty()) {
+                DuelLog.warn(
+                    "snapshot-inventory-mismatch",
+                    match.id,
+                    first,
+                    "player={} role=first fields={}",
+                    first.name,
+                    firstMismatches.joinToString(","),
+                )
+            }
+            if (secondMismatches.isNotEmpty()) {
+                DuelLog.warn(
+                    "snapshot-inventory-mismatch",
+                    match.id,
+                    second,
+                    "player={} role=second fields={}",
+                    second.name,
+                    secondMismatches.joinToString(","),
+                )
+            }
+            check(firstMismatches.isEmpty()) {
                 "The first player's synchronized inventory no longer matches its protected snapshot"
             }
-            check(session.snapshots.getValue(second.uniqueId).state.inventoryMatches(second)) {
+            check(secondMismatches.isEmpty()) {
                 "The second player's synchronized inventory no longer matches its protected snapshot"
             }
         }
         resetPlayer(first, match.rules.mode, match.rules.kitId)
         resetPlayer(second, match.rules.mode, match.rules.kitId)
+        session.arenaAnchors[first.uniqueId] = arena.firstSpawn.clone()
+        session.arenaAnchors[second.uniqueId] = arena.secondSpawn.clone()
         check(teleportInternally(first, arena.firstSpawn)) { "Could not teleport the first player to the arena" }
         check(teleportInternally(second, arena.secondSpawn)) { "Could not teleport the second player to the arena" }
         DuelLog.info(
@@ -991,6 +1045,7 @@ class DuelSessionManager internal constructor(
             second.world.name,
         )
         clearExternalCombatTags(match, "round-prepared")
+        scheduleTeleportStabilization(match, session)
         first.sendActionBar(scoreLine(match, first))
         second.sendActionBar(scoreLine(match, second))
         showCountdownDisplay(match, countdownSeconds)
@@ -1084,8 +1139,58 @@ class DuelSessionManager internal constructor(
                     countdownTasks.remove(matchId)
                     cancel()
                 }
-            }.runTaskTimer(plugin, 0L, 20L)
+            }.runTaskTimer(plugin, teleportStabilizationTicks, 20L)
         countdownTasks[matchId] = task
+    }
+
+    private fun scheduleTeleportStabilization(
+        match: DuelMatch,
+        session: PaperSession,
+    ) {
+        teleportStabilizationTasks.remove(match.id)?.cancel()
+        if (teleportStabilizationTicks == 0L) return
+        val task =
+            object : BukkitRunnable() {
+                var ticksRemaining = teleportStabilizationTicks
+
+                override fun run() {
+                    val current = coordinator.find(match.id)
+                    if (current == null || current.state != MatchState.COUNTDOWN || ticksRemaining-- <= 0L) {
+                        teleportStabilizationTasks.remove(match.id)
+                        cancel()
+                        return
+                    }
+                    session.arenaAnchors.forEach { (playerId, anchor) ->
+                        val player = plugin.server.getPlayer(playerId) ?: return@forEach
+                        player.velocity = Vector()
+                        player.fallDistance = 0f
+                        val currentLocation = player.location
+                        val displaced = currentLocation.world?.uid != anchor.world?.uid || currentLocation.distanceSquared(anchor) > 0.25
+                        if (displaced) {
+                            DuelLog.warn(
+                                "arena-teleport-reanchor",
+                                match.id,
+                                player,
+                                "player={} stabilization_tick={} from_world={} to_world={}",
+                                player.name,
+                                teleportStabilizationTicks - ticksRemaining,
+                                currentLocation.world?.name,
+                                anchor.world?.name,
+                            )
+                            if (!teleportInternally(player, anchor)) {
+                                DuelLog.warn(
+                                    "arena-teleport-reanchor-failed",
+                                    match.id,
+                                    player,
+                                    "player={}",
+                                    player.name,
+                                )
+                            }
+                        }
+                    }
+                }
+            }.runTaskTimer(plugin, 1L, 1L)
+        teleportStabilizationTasks[match.id] = task
     }
 
     private fun scheduleObjective(match: DuelMatch) {
@@ -1376,6 +1481,7 @@ class DuelSessionManager internal constructor(
         )
         clearExternalCombatTags(match, "match-complete")
         countdownTasks.remove(match.id)?.cancel()
+        teleportStabilizationTasks.remove(match.id)?.cancel()
         objectiveTasks.remove(match.id)?.cancel()
         matchDisplayTasks.remove(match.id)?.cancel()
         val winnerId = requireNotNull(match.winner)
@@ -1707,6 +1813,7 @@ class DuelSessionManager internal constructor(
         val snapshots: Map<UUID, StoredPlayerSnapshot>,
         val recoveryOwner: RecoveryOwner,
         val arenaBaselines: Map<UUID, PlayerSnapshot>,
+        val arenaAnchors: MutableMap<UUID, org.bukkit.Location> = ConcurrentHashMap(),
         val restoredPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val hillCapture: HillCaptureTracker = HillCaptureTracker(),
         val hitRace: HitRaceTracker = HitRaceTracker(),

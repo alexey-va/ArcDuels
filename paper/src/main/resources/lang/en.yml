@@ -25,6 +25,8 @@ menu:
     kits-lore: ['<dark_gray>✖</dark_gray> <white>Ready-made equipment for a match.</white>', '', '<aqua>Left click</aqua> <gray>Browse kits</gray>']
     stats: '<gold>My statistics</gold>'
     stats-lore: ['<dark_gray>✖</dark_gray> <white>Rating, wins, and streaks.</white>', '', '<aqua>Left click</aqua> <gray>View statistics</gray>']
+    history: '<gold>Match history</gold>'
+    history-lore: ['<dark_gray>✖</dark_gray> <white>Recent results and head-to-head</white>', '   <white>records with your opponents.</white>', '', '<aqua>Left click</aqua> <gray>Open history</gray>']
     help: '<gold>How duels work</gold>'
     help-lore: ['<dark_gray>✖</dark_gray> <white>Rules and inventory protection.</white>', '', '<aqua>Left click</aqua> <gray>Open help</gray>']
     recovery: '<gold>Retrieve your items</gold>'
@@ -68,6 +70,8 @@ menu:
     arena-auto-lore: ['<gray>Choose a compatible arena with</gray>', '<gray>the shortest queue across the network.</gray>', '', '<aqua>Left click</aqua> <gray>Choose manually</gray>']
     arena-selected: '<gold>Arena: <arena></gold>'
     arena-selected-lore: ['<gray>Server:</gray> <server>', '<gray>This challenge is pinned to the arena.</gray>', '', '<aqua>Left click</aqua> <gray>Change selection</gray>']
+    presets: '<gold>Saved setups</gold>'
+    presets-lore: ['<gray>Optional shortcuts for rules you use often.</gray>', '<gray>The normal setup flow stays unchanged.</gray>', '', '<aqua>Left click</aqua> <gray>Open saved setups</gray>']
     confirm: '<green>Send challenge</green>'
     confirm-lore: ['<dark_gray>✖</dark_gray> <white>All match options are ready.</white>', '', '<aqua>Left click</aqua> <gray>Confirm</gray>']
   arenas:
@@ -86,6 +90,49 @@ menu:
     entry: '<gold>#<position> · <player></gold>'
     entry-lore: ['<gray>Rating:</gray> <yellow><rating></yellow>', '<gray>Wins:</gray> <green><wins></green>', '<gray>Losses:</gray> <red><losses></red>']
     empty: '<gray>No matches yet</gray>'
+  history:
+    loading: '<gray>Loading match history…</gray>'
+    title: '<dark_gray>History · <page>/<pages></dark_gray>'
+    empty: '<gold>No completed matches yet</gold>'
+    empty-lore: ['<gray>Your duel results will appear here.</gray>']
+    win: '<green>Victory</green> <dark_gray>·</dark_gray> <white><player></white>'
+    loss: '<red>Defeat</red> <dark_gray>·</dark_gray> <white><player></white>'
+    entry-lore: ['<gray>Score:</gray> <white><score></white>  <gray>Format:</gray> <white>BO<bestof></white>', '<gray>Mode:</gray> <objective>', '<gray>Loadout:</gray> <loadout>  <ranked>', '<gray>Arena:</gray> <white><arena></white>', '<gray>Server:</gray> <server>', '<gray>Finished:</gray> <white><time></white>', '<gray>Result:</gray> <reason>', '<gray>Rating after:</gray> <aqua><rating></aqua>', '', '<aqua>Left click</aqua> <gray>Open head-to-head record</gray>']
+    legacy-arena: 'legacy arena'
+    reason:
+      elimination: '<white>elimination</white>'
+      objective: '<white>objective completed</white>'
+      forfeit: '<white>forfeit</white>'
+      disconnect: '<white>disconnect</white>'
+  h2h:
+    title: '<dark_gray>Against <player></dark_gray>'
+    you: '<gold>You</gold>'
+    opponent: '<gold><player></gold>'
+    player-lore: ['<gray>Wins in this pairing:</gray> <green><wins></green>']
+    matches: '<gold><matches> matches</gold>'
+    matches-lore: ['<gray>Your wins:</gray> <green><first></green>', '<gray>Opponent wins:</gray> <red><second></red>']
+    offline: '<gray>Opponent is offline</gray>'
+    offline-lore: ['<gray>You can challenge them when they return.</gray>']
+    challenge: '<green>Challenge <player></green>'
+    challenge-lore: ['<gray>Open the usual duel setup.</gray>', '', '<aqua>Left click</aqua> <gray>Choose rules</gray>']
+  presets:
+    loading: '<gray>Loading saved setups…</gray>'
+    title: '<dark_gray>Saved setups</dark_gray>'
+    empty: '<gold>Slot <slot> · Empty</gold>'
+    empty-lore: ['<gray>Save the current rules here.</gray>', '', '<aqua>Left click</aqua> <gray>Save</gray>']
+    auto-arena: 'automatic selection'
+    entry: '<gold>Setup <slot></gold>'
+    entry-lore: ['<gray>Mode:</gray> <objective>', '<gray>Loadout:</gray> <loadout>', '<gray>Format:</gray> <white>BO<bestof></white>', '<gray>Arena:</gray> <white><arena></white>', '<gray>Status:</gray> <state>', '']
+    ready: '<green>Ready</green>'
+    arena-missing: '<yellow>Saved arena is unavailable</yellow>'
+    kit-missing: '<red>Saved kit is unavailable</red>'
+    ready-actions: ['<aqua>Left click</aqua> <gray>Apply</gray>', '<aqua>Shift + left click</aqua> <gray>Overwrite</gray>', '<red>Shift + right click</red> <gray>Delete</gray>']
+    arena-missing-actions: ['<aqua>Right click</aqua> <gray>Apply with automatic arena</gray>', '<aqua>Shift + left click</aqua> <gray>Overwrite</gray>', '<red>Shift + right click</red> <gray>Delete</gray>']
+    kit-missing-actions: ['<aqua>Shift + left click</aqua> <gray>Overwrite</gray>', '<red>Shift + right click</red> <gray>Delete</gray>']
+    kit-unavailable: '<red>This setup references a kit that is no longer available.</red>'
+    arena-unavailable: '<yellow>This setup references an unavailable arena. Right click to use automatic selection.</yellow>'
+    saved: '<green>Setup <slot> saved.</green>'
+    deleted: '<gray>Setup <slot> deleted.</gray>'
   modes:
     title: '<dark_gray>Game modes</dark_gray>'
   kits:
@@ -210,6 +257,9 @@ error:
   player-left: '<red>The player left or entered another match.</red>'
   leaderboard: '<red>Could not load the leaderboard.</red>'
   invalid-challenge-id: '<red>Invalid challenge identifier.</red>'
+  invalid-match-id: '<red>Invalid match identifier.</red>'
+  history: '<red>Could not load match history.</red>'
+  presets: '<red>Could not load saved setups.</red>'
 
 controller:
   busy: '<red>One of the players is already queued, fighting, or awaiting recovery.</red>'
@@ -220,6 +270,19 @@ controller:
   network-transfer: '<#fff4d6>Challenge accepted.</#fff4d6><newline><#9aa7b5>Moving you to arena:</#9aa7b5> <server>'
   network-return: '<#fff4d6>Returning you to your origin server.</#fff4d6><newline><#9aa7b5>Server:</#9aa7b5> <server>'
   rematch-return: '<#e6fff3>Your next fight is accepted.</#e6fff3><newline><#8c8c8c>I will safely restore your state on</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, then send you to the arena.</#8c8c8c>'
+  rematch-unavailable: '<#c42323>This match is unavailable for a rematch.</#c42323>'
+  rematch-expired: '<#8c8c8c>The rematch window has expired.</#8c8c8c>'
+  rematch-arena-unavailable: '<#c42323>The original arena was not recorded and cannot be reused safely.</#c42323>'
+  rematch-arena-missing: '<#ffb347>The original arena is unavailable.</#ffb347><newline><action>'
+  rematch-choose: '<#92bed8>Choose another arena</#92bed8>'
+  rematch-choose-hover: '<#8c8c8c>Open the normal duel setup with this opponent</#8c8c8c>'
+  rematch-pending: '<#8c8c8c>Your rematch request is already waiting for the opponent.</#8c8c8c>'
+  rematch-offer: |-
+    <#e6fff3>Rematch with <player>?</#e6fff3>
+    <#8c8c8c>The same rules and arena are available for <seconds> seconds.</#8c8c8c>
+    <action>
+  rematch-action: '<#92bed8>⚔ Request rematch</#92bed8>'
+  rematch-hover: '<#8c8c8c>The opponent confirms with the same button</#8c8c8c>'
   return-offer: |-
     <#e6fff3>The fight is over. Your items are protected.</#e6fff3>
     <#8c8c8c>Origin server:</#8c8c8c> <#92bed8><server></#92bed8>

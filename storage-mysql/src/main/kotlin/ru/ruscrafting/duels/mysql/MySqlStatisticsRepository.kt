@@ -5,10 +5,18 @@ import ru.arc.sql.SqlMigrationReport
 import ru.arc.sql.SqlRuntime
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.DuelPreset
+import ru.ruscrafting.duels.domain.DuelPresetRepository
+import ru.ruscrafting.duels.domain.CombatModifiers
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
+import ru.ruscrafting.duels.domain.HeadToHeadRecord
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.LeaderboardEntry
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
+import ru.ruscrafting.duels.domain.MatchEndReason
+import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.PersistedMatchResult
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
@@ -31,7 +39,7 @@ import java.util.concurrent.TimeUnit
 
 class MySqlStatisticsRepository(
     private val runtime: SqlRuntime,
-) : StatisticsRepository, PlayerStateEscrowRepository, AutoCloseable {
+) : StatisticsRepository, DuelPresetRepository, PlayerStateEscrowRepository, AutoCloseable {
     fun migrate(): CompletableFuture<SqlMigrationReport> =
         runtime.executor.submit {
             MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(MySqlDuelMigrations.all)
@@ -115,6 +123,148 @@ class MySqlStatisticsRepository(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    override fun findMatch(matchId: MatchId): CompletableFuture<RecordedMatch?> =
+        runtime.executor.read { connection -> findRecordedMatch(connection, matchId) }
+
+    override fun recentMatches(
+        playerId: PlayerId,
+        limit: Int,
+    ): CompletableFuture<List<RecordedMatch>> {
+        require(limit in 1..100) { "Match history limit must be between 1 and 100" }
+        return runtime.executor.read { connection ->
+            connection.prepareStatement(
+                """
+                SELECT $MATCH_COLUMNS, wn.`last_known_name` AS `winner_name`, ln.`last_known_name` AS `loser_name`
+                FROM `arcduels_matches` m
+                LEFT JOIN `arcduels_player_names` wn ON wn.`player_id` = m.`winner_id`
+                LEFT JOIN `arcduels_player_names` ln ON ln.`player_id` = m.`loser_id`
+                WHERE m.`winner_id` = ? OR m.`loser_id` = ?
+                ORDER BY m.`completed_at` DESC, m.`match_id` ASC
+                LIMIT ?
+                """.trimIndent(),
+            ).use { statement ->
+                val encoded = UuidBytes.encode(playerId.value)
+                statement.setBytes(1, encoded)
+                statement.setBytes(2, encoded)
+                statement.setInt(3, limit)
+                statement.executeQuery().use { result -> buildList { while (result.next()) add(result.toRecordedMatch()) } }
+            }
+        }
+    }
+
+    override fun headToHead(
+        firstPlayer: PlayerId,
+        secondPlayer: PlayerId,
+    ): CompletableFuture<HeadToHeadRecord> {
+        require(firstPlayer != secondPlayer) { "Head-to-head players must be different" }
+        return runtime.executor.read { connection ->
+            connection.prepareStatement(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN `winner_id` = ? THEN 1 ELSE 0 END), 0) AS `first_wins`,
+                    COALESCE(SUM(CASE WHEN `winner_id` = ? THEN 1 ELSE 0 END), 0) AS `second_wins`,
+                    MAX(`completed_at`) AS `last_completed_at`
+                FROM `arcduels_matches`
+                WHERE (`winner_id` = ? AND `loser_id` = ?)
+                   OR (`winner_id` = ? AND `loser_id` = ?)
+                """.trimIndent(),
+            ).use { statement ->
+                val first = UuidBytes.encode(firstPlayer.value)
+                val second = UuidBytes.encode(secondPlayer.value)
+                statement.setBytes(1, first)
+                statement.setBytes(2, second)
+                statement.setBytes(3, first)
+                statement.setBytes(4, second)
+                statement.setBytes(5, second)
+                statement.setBytes(6, first)
+                statement.executeQuery().use { result ->
+                    check(result.next()) { "Head-to-head aggregate did not return a row" }
+                    HeadToHeadRecord(
+                        firstPlayer = firstPlayer,
+                        secondPlayer = secondPlayer,
+                        firstWins = result.getLong("first_wins"),
+                        secondWins = result.getLong("second_wins"),
+                        lastCompletedAt = result.getTimestamp("last_completed_at")?.toInstant(),
+                    )
+                }
+            }
+        }
+    }
+
+    override fun presets(playerId: PlayerId): CompletableFuture<List<DuelPreset>> =
+        runtime.executor.read { connection ->
+            connection.prepareStatement(
+                "SELECT $PRESET_COLUMNS FROM `arcduels_rule_presets` WHERE `player_id` = ? ORDER BY `slot` ASC",
+            ).use { statement ->
+                statement.setBytes(1, UuidBytes.encode(playerId.value))
+                statement.executeQuery().use { result -> buildList { while (result.next()) add(result.toPreset(playerId)) } }
+            }
+        }
+
+    override fun savePreset(preset: DuelPreset): CompletableFuture<Unit> =
+        runtime.executor.write { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO `arcduels_rule_presets`
+                    (`player_id`, `slot`, `mode`, `objective`, `kit_id`, `ranked`, `best_of`, `projectiles`, `consumables`,
+                     `ender_pearls`, `natural_regeneration`, `sudden_death_seconds`, `koth_capture_seconds`,
+                     `boxing_hits_to_win`, `combo_hits_to_win`, `selected_arena_server`, `selected_arena_id`, `updated_at`)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    `mode` = VALUES(`mode`), `objective` = VALUES(`objective`), `kit_id` = VALUES(`kit_id`),
+                    `ranked` = VALUES(`ranked`), `best_of` = VALUES(`best_of`), `projectiles` = VALUES(`projectiles`),
+                    `consumables` = VALUES(`consumables`), `ender_pearls` = VALUES(`ender_pearls`),
+                    `natural_regeneration` = VALUES(`natural_regeneration`),
+                    `sudden_death_seconds` = VALUES(`sudden_death_seconds`),
+                    `koth_capture_seconds` = VALUES(`koth_capture_seconds`),
+                    `boxing_hits_to_win` = VALUES(`boxing_hits_to_win`),
+                    `combo_hits_to_win` = VALUES(`combo_hits_to_win`),
+                    `selected_arena_server` = VALUES(`selected_arena_server`),
+                    `selected_arena_id` = VALUES(`selected_arena_id`), `updated_at` = VALUES(`updated_at`)
+                """.trimIndent(),
+            ).use { statement ->
+                val modifiers = preset.rules.modifiers
+                statement.setBytes(1, UuidBytes.encode(preset.playerId.value))
+                statement.setInt(2, preset.slot)
+                statement.setString(3, preset.rules.mode.name)
+                statement.setString(4, preset.rules.objective.name)
+                statement.setString(5, preset.rules.kitId?.value)
+                statement.setBoolean(6, preset.rules.ranked)
+                statement.setInt(7, preset.rules.bestOf)
+                statement.setBoolean(8, modifiers.projectiles)
+                statement.setBoolean(9, modifiers.consumables)
+                statement.setBoolean(10, modifiers.enderPearls)
+                statement.setBoolean(11, modifiers.naturalRegeneration)
+                statement.setInt(12, modifiers.suddenDeathAfterSeconds)
+                statement.setInt(13, modifiers.kingOfTheHillCaptureSeconds)
+                statement.setInt(14, modifiers.boxingHitsToWin)
+                statement.setInt(15, modifiers.comboHitsToWin)
+                statement.setString(16, preset.arenaSelection?.serverId?.value)
+                statement.setString(17, preset.arenaSelection?.arenaId?.value)
+                statement.setTimestamp(18, Timestamp.from(preset.updatedAt))
+                // MySQL reports 0 when an idempotent upsert leaves an existing
+                // row unchanged, 1 for insert, and 2 for a changed update.
+                check(statement.executeUpdate() in 0..2) { "Could not save duel rule preset" }
+            }
+            Unit
+        }
+
+    override fun deletePreset(
+        playerId: PlayerId,
+        slot: Int,
+    ): CompletableFuture<Boolean> {
+        require(slot in 1..5) { "Preset slot must be between 1 and 5" }
+        return runtime.executor.write { connection ->
+            connection.prepareStatement(
+                "DELETE FROM `arcduels_rule_presets` WHERE `player_id` = ? AND `slot` = ?",
+            ).use { statement ->
+                statement.setBytes(1, UuidBytes.encode(playerId.value))
+                statement.setInt(2, slot)
+                statement.executeUpdate() == 1
             }
         }
     }
@@ -576,11 +726,14 @@ class MySqlStatisticsRepository(
         connection.prepareStatement(
             """
             INSERT INTO `arcduels_matches`
-                (`match_id`, `winner_id`, `loser_id`, `mode`, `objective`, `kit_id`, `ranked`, `server_id`, `completed_at`,
-                 `winner_rating_after`, `loser_rating_after`, `leaderboard_revision`)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (`match_id`, `winner_id`, `loser_id`, `mode`, `objective`, `kit_id`, `ranked`, `best_of`, `projectiles`,
+                 `consumables`, `ender_pearls`, `natural_regeneration`, `sudden_death_seconds`, `koth_capture_seconds`,
+                 `boxing_hits_to_win`, `combo_hits_to_win`, `server_id`, `arena_id`, `completed_at`,
+                 `winner_rating_after`, `loser_rating_after`, `winner_score`, `loser_score`, `end_reason`, `leaderboard_revision`)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
         ).use { statement ->
+            val modifiers = outcome.modifiers
             statement.setBytes(1, UuidBytes.encode(outcome.matchId.value))
             statement.setBytes(2, UuidBytes.encode(outcome.winner.value))
             statement.setBytes(3, UuidBytes.encode(outcome.loser.value))
@@ -588,11 +741,24 @@ class MySqlStatisticsRepository(
             statement.setString(5, outcome.objective.name)
             statement.setString(6, outcome.kitId?.value)
             statement.setBoolean(7, outcome.ranked)
-            statement.setString(8, outcome.serverId.value)
-            statement.setTimestamp(9, Timestamp.from(outcome.completedAt))
-            statement.setInt(10, winnerRating)
-            statement.setInt(11, loserRating)
-            statement.setLong(12, leaderboardRevision)
+            statement.setInt(8, outcome.bestOf)
+            statement.setBoolean(9, modifiers.projectiles)
+            statement.setBoolean(10, modifiers.consumables)
+            statement.setBoolean(11, modifiers.enderPearls)
+            statement.setBoolean(12, modifiers.naturalRegeneration)
+            statement.setInt(13, modifiers.suddenDeathAfterSeconds)
+            statement.setInt(14, modifiers.kingOfTheHillCaptureSeconds)
+            statement.setInt(15, modifiers.boxingHitsToWin)
+            statement.setInt(16, modifiers.comboHitsToWin)
+            statement.setString(17, outcome.serverId.value)
+            statement.setString(18, outcome.arenaId?.value)
+            statement.setTimestamp(19, Timestamp.from(outcome.completedAt))
+            statement.setInt(20, winnerRating)
+            statement.setInt(21, loserRating)
+            statement.setInt(22, outcome.winnerScore)
+            statement.setInt(23, outcome.loserScore)
+            statement.setString(24, outcome.endReason.name)
+            statement.setLong(25, leaderboardRevision)
             check(statement.executeUpdate() == 1) { "Could not insert duel match result" }
         }
     }
@@ -603,27 +769,15 @@ class MySqlStatisticsRepository(
     ): PersistedMatchResult? =
         connection.prepareStatement(
             """
-            SELECT `winner_id`, `loser_id`, `mode`, `objective`, `kit_id`, `ranked`, `server_id`, `completed_at`,
-                   `winner_rating_after`, `loser_rating_after`, `leaderboard_revision`
-            FROM `arcduels_matches`
-            WHERE `match_id` = ?
+            SELECT $MATCH_COLUMNS
+            FROM `arcduels_matches` m
+            WHERE m.`match_id` = ?
             """.trimIndent(),
         ).use { statement ->
             statement.setBytes(1, UuidBytes.encode(expected.matchId.value))
             statement.executeQuery().use resultUse@ { result ->
                 if (!result.next()) return@resultUse null
-                val stored =
-                    MatchOutcome(
-                        matchId = expected.matchId,
-                        winner = PlayerId(UuidBytes.decode(result.getBytes("winner_id"))),
-                        loser = PlayerId(UuidBytes.decode(result.getBytes("loser_id"))),
-                        mode = DuelMode.valueOf(result.getString("mode")),
-                        kitId = result.getString("kit_id")?.let(::KitId),
-                        ranked = result.getBoolean("ranked"),
-                        serverId = ServerId(result.getString("server_id")),
-                        completedAt = result.getTimestamp("completed_at").toInstant(),
-                        objective = DuelObjectiveType.valueOf(result.getString("objective")),
-                    )
+                val stored = result.toMatchOutcome()
                 check(stored == expected) { "Match id collision with a different duel outcome" }
                 PersistedMatchResult(
                     outcome = stored,
@@ -634,6 +788,93 @@ class MySqlStatisticsRepository(
                 )
             }
         }
+
+    private fun findRecordedMatch(
+        connection: Connection,
+        matchId: MatchId,
+    ): RecordedMatch? =
+        connection.prepareStatement(
+            """
+            SELECT $MATCH_COLUMNS, wn.`last_known_name` AS `winner_name`, ln.`last_known_name` AS `loser_name`
+            FROM `arcduels_matches` m
+            LEFT JOIN `arcduels_player_names` wn ON wn.`player_id` = m.`winner_id`
+            LEFT JOIN `arcduels_player_names` ln ON ln.`player_id` = m.`loser_id`
+            WHERE m.`match_id` = ?
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setBytes(1, UuidBytes.encode(matchId.value))
+            statement.executeQuery().use { result -> if (result.next()) result.toRecordedMatch() else null }
+        }
+
+    private fun ResultSet.toMatchOutcome(): MatchOutcome =
+        MatchOutcome(
+            matchId = MatchId(UuidBytes.decode(getBytes("match_id"))),
+            winner = PlayerId(UuidBytes.decode(getBytes("winner_id"))),
+            loser = PlayerId(UuidBytes.decode(getBytes("loser_id"))),
+            mode = DuelMode.valueOf(getString("mode")),
+            kitId = getString("kit_id")?.let(::KitId),
+            ranked = getBoolean("ranked"),
+            serverId = ServerId(getString("server_id")),
+            completedAt = getTimestamp("completed_at").toInstant(),
+            objective = DuelObjectiveType.valueOf(getString("objective")),
+            arenaId = getString("arena_id")?.let(::ArenaId),
+            bestOf = getInt("best_of"),
+            modifiers =
+                CombatModifiers(
+                    projectiles = getBoolean("projectiles"),
+                    consumables = getBoolean("consumables"),
+                    enderPearls = getBoolean("ender_pearls"),
+                    naturalRegeneration = getBoolean("natural_regeneration"),
+                    suddenDeathAfterSeconds = getInt("sudden_death_seconds"),
+                    kingOfTheHillCaptureSeconds = getInt("koth_capture_seconds"),
+                    boxingHitsToWin = getInt("boxing_hits_to_win"),
+                    comboHitsToWin = getInt("combo_hits_to_win"),
+                ),
+            winnerScore = getInt("winner_score"),
+            loserScore = getInt("loser_score"),
+            endReason = MatchEndReason.valueOf(getString("end_reason")),
+        )
+
+    private fun ResultSet.toRecordedMatch(): RecordedMatch =
+        RecordedMatch(
+            outcome = toMatchOutcome(),
+            winnerRatingAfter = getInt("winner_rating_after"),
+            loserRatingAfter = getInt("loser_rating_after"),
+            winnerName = getString("winner_name"),
+            loserName = getString("loser_name"),
+        )
+
+    private fun ResultSet.toPreset(playerId: PlayerId): DuelPreset {
+        val arenaServer = getString("selected_arena_server")
+        val arenaId = getString("selected_arena_id")
+        require((arenaServer == null) == (arenaId == null)) { "Stored preset arena selection is incomplete" }
+        return DuelPreset(
+            playerId = playerId,
+            slot = getInt("slot"),
+            rules =
+                ru.ruscrafting.duels.domain.DuelRules(
+                    mode = DuelMode.valueOf(getString("mode")),
+                    kitId = getString("kit_id")?.let(::KitId),
+                    ranked = getBoolean("ranked"),
+                    bestOf = getInt("best_of"),
+                    objective = DuelObjectiveType.valueOf(getString("objective")),
+                    modifiers =
+                        CombatModifiers(
+                            projectiles = getBoolean("projectiles"),
+                            consumables = getBoolean("consumables"),
+                            enderPearls = getBoolean("ender_pearls"),
+                            naturalRegeneration = getBoolean("natural_regeneration"),
+                            suddenDeathAfterSeconds = getInt("sudden_death_seconds"),
+                            kingOfTheHillCaptureSeconds = getInt("koth_capture_seconds"),
+                            boxingHitsToWin = getInt("boxing_hits_to_win"),
+                            comboHitsToWin = getInt("combo_hits_to_win"),
+                        ),
+                ),
+            arenaSelection =
+                if (arenaServer == null) null else ArenaSelection(ServerId(arenaServer), ArenaId(requireNotNull(arenaId))),
+            updatedAt = getTimestamp("updated_at").toInstant(),
+        )
+    }
 
     private fun ResultSet.toStatistics(playerId: PlayerId): PlayerStatistics =
         PlayerStatistics(
@@ -659,6 +900,16 @@ class MySqlStatisticsRepository(
         const val MIGRATION_NAMESPACE = "arcduels"
         const val STAT_COLUMNS =
             "`wins`, `losses`, `current_win_streak`, `best_win_streak`, `rating`, `revision`"
+        const val MATCH_COLUMNS =
+            "m.`match_id`, m.`winner_id`, m.`loser_id`, m.`mode`, m.`objective`, m.`kit_id`, m.`ranked`, " +
+                "m.`best_of`, m.`projectiles`, m.`consumables`, m.`ender_pearls`, m.`natural_regeneration`, " +
+                "m.`sudden_death_seconds`, m.`koth_capture_seconds`, m.`boxing_hits_to_win`, m.`combo_hits_to_win`, " +
+                "m.`server_id`, m.`arena_id`, m.`completed_at`, m.`winner_rating_after`, m.`loser_rating_after`, " +
+                "m.`winner_score`, m.`loser_score`, m.`end_reason`, m.`leaderboard_revision`"
+        const val PRESET_COLUMNS =
+            "`slot`, `mode`, `objective`, `kit_id`, `ranked`, `best_of`, `projectiles`, `consumables`, " +
+                "`ender_pearls`, `natural_regeneration`, `sudden_death_seconds`, `koth_capture_seconds`, " +
+                "`boxing_hits_to_win`, `combo_hits_to_win`, `selected_arena_server`, `selected_arena_id`, `updated_at`"
     }
 }
 
