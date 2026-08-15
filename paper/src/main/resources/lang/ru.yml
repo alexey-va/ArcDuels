@@ -199,7 +199,7 @@ controller:
   return-hover: '<#8c8c8c>Вернуться на исходный сервер и проверить вещи</#8c8c8c>'
   no-return-offer: '<#8c8c8c>Сейчас нет ожидающего возврата после дуэли.</#8c8c8c>'
   network-timeout: '<#c42323>Не удалось вовремя подготовить обоих игроков к дуэли.</#c42323>'
-  expired: '<#c42323>Этот вызов уже истёк.</#c42323>'
+  expired: '<#8c8c8c>Вызов на дуэль с</#8c8c8c> <#e6fff3><player></#e6fff3> <#8c8c8c>истёк.</#8c8c8c>'
   start-failed: '<#c42323>Не удалось начать дуэль:</#c42323> <reason>'
   wait-cancelled: '<#8c8c8c>ожидание арены отменено</#8c8c8c>'
   start-internal: '<#8c8c8c>арена или защищённое хранилище сейчас недоступны</#8c8c8c>'
@@ -219,18 +219,28 @@ controller:
   loadout-kit: '<#8c8c8c>кит <#e6fff3><kit></#e6fff3></#8c8c8c>'
   loadout-own: '<#8c8c8c>своё снаряжение</#8c8c8c>'
   received: |-
-    <#e6fff3><#ffacd5><player></#ffacd5> вызывает тебя на дуэль</#e6fff3>
-    <#8c8c8c>Режим:</#8c8c8c> <objective> <#666666>•</#666666> <#8c8c8c>Снаряжение:</#8c8c8c> <loadout>
-    <#8c8c8c>Формат:</#8c8c8c> <#92bed8>BO<bestof></#92bed8> <#666666>•</#666666> <#8c8c8c>Рейтинг:</#8c8c8c> <ranked>
+    <#e6fff3><player> предлагает дуэль</#e6fff3>
+    <objective> <#666666>•</#666666> <ranked>
+    <#8c8c8c>Снаряжение</#8c8c8c> <loadout> <#666666>•</#666666> <#92bed8>BO<bestof></#92bed8>
     <rules>
   combat-summary: |-
-    <gray>Внезапная смерть:</gray> <white><sudden>с</white> <dark_gray>•</dark_gray> <gray>Снаряды:</gray> <projectiles> <dark_gray>•</dark_gray> <gray>Расходники:</gray> <consumables>
-    <gray>Жемчуг:</gray> <pearls> <dark_gray>•</dark_gray> <gray>Регенерация:</gray> <regeneration>
-  hit-race-summary: '<gray>Цель:</gray> <white><hits> попаданий</white> <dark_gray>•</dark_gray> <gray>Урон отключён, считаются прямые удары.</gray>'
+    <#8c8c8c>Смерть</#8c8c8c> <white><sudden> с</white> <#666666>•</#666666> <#8c8c8c>Снаряды</#8c8c8c> <projectiles>
+    <#8c8c8c>Расходники</#8c8c8c> <consumables> <#666666>•</#666666> <#8c8c8c>Жемчуг</#8c8c8c> <pearls>
+    <#8c8c8c>Регенерация</#8c8c8c> <regeneration>
+  hit-race-summary: '<#8c8c8c>Цель</#8c8c8c> <white><hits> попаданий</white> <#666666>•</#666666> <#8c8c8c>без урона</#8c8c8c>'
+  state-on: '<#92bed8>✔ да</#92bed8>'
+  state-off: '<#8c8c8c>✕ нет</#8c8c8c>'
+  ranked: '<#92bed8>рейтинговая</#92bed8>'
+  unranked: '<#8c8c8c>обычная</#8c8c8c>'
+  objective-elimination: '<#e6fff3>Классическая дуэль</#e6fff3>'
+  objective-koth: '<#e6fff3>Царь горы</#e6fff3>'
+  objective-sumo: '<#e6fff3>Сумо</#e6fff3>'
+  objective-boxing: '<#e6fff3>Боксинг</#e6fff3>'
+  objective-combo: '<#e6fff3>Комбо</#e6fff3>'
 
-  accept: '<newline><#2bba43>✔ Принять</#2bba43>'
+  accept: '<newline><newline><#2bba43>✔ Принять</#2bba43>'
   accept-hover: '<#2bba43>Начать дуэль</#2bba43>'
-  deny: '  <#c42323>✕ Отклонить</#c42323>'
+  deny: '<newline><#c42323>✕ Отклонить</#c42323>'
   deny-hover: '<#c42323>Отклонить вызов</#c42323>'
 
 session:
@@ -241,8 +251,13 @@ session:
   recovery-requested: '<gray>Восстановление подготовлено. Дождись полной загрузки данных игрока.</gray>'
   recovering: '<yellow>Восстанавливаю сохранённое состояние после незавершённой дуэли…</yellow>'
   recovery-failed: '<red>Состояние не восстановлено. Обратись к администратору; защищённая копия инвентаря сохранена.</red>'
-  fight-title: '<red>В бой!</red>'
-  fight-subtitle: '<gray>Удачи — она пригодится</gray>'
+  countdown-title: '<#92bed8><seconds></#92bed8>'
+  countdown-subtitle: '<#8c8c8c>Противник</#8c8c8c> <#e6fff3><opponent></#e6fff3>'
+  fight-title: '<#e6fff3>В бой</#e6fff3>'
+  fight-subtitle: '<#8c8c8c>Дуэль началась</#8c8c8c>'
+  bossbar-countdown: '<#e6fff3><opponent></#e6fff3> <#666666>•</#666666> <#8c8c8c>старт через</#8c8c8c> <#92bed8><seconds></#92bed8>'
+  bossbar-active: '<#e6fff3><opponent></#e6fff3> <#666666>•</#666666> <#92bed8><own></#92bed8><#666666>:</#666666><#ffacd5><enemy></#ffacd5> <#666666>•</#666666> <#8c8c8c><time></#8c8c8c>'
+  bossbar-hits: '<#e6fff3><opponent></#e6fff3> <#666666>•</#666666> <#92bed8><own></#92bed8><#666666>:</#666666><#ffacd5><enemy></#ffacd5> <#666666>•</#666666> <#8c8c8c>цель <target></#8c8c8c>'
   hill-contested: '<yellow>Холм оспаривается</yellow>'
   hill-capturing: '<green>Захват</green>'
   hill-free: '<gray>Холм свободен</gray>'

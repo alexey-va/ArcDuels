@@ -73,6 +73,24 @@ class ChallengeRegistryTest : StringSpec({
         registry.find(challenge.id)?.status shouldBe ChallengeStatus.EXPIRED
     }
 
+    "scheduled expiry transition is idempotent and releases the pair" {
+        var now = Instant.parse("2026-08-13T10:00:00Z")
+        val mutableClock =
+            object : Clock() {
+                override fun getZone(): ZoneId = ZoneOffset.UTC
+                override fun withZone(zone: ZoneId): Clock = this
+                override fun instant(): Instant = now
+            }
+        val registry = ChallengeRegistry(mutableClock, Duration.ofSeconds(1))
+        val challenge = registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+
+        registry.expireIfDue(challenge.id)?.status shouldBe ChallengeStatus.PENDING
+        now = now.plusSeconds(1)
+        registry.expireIfDue(challenge.id)?.status shouldBe ChallengeStatus.EXPIRED
+        registry.expireIfDue(challenge.id)?.status shouldBe ChallengeStatus.EXPIRED
+        registry.create(second, first, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
+    }
+
     "reverse duplicate is rejected and expiry releases the pair" {
         var now = Instant.parse("2026-08-13T10:00:00Z")
         val mutableClock =

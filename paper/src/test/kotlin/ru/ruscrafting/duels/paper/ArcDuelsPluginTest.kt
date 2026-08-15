@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
+import io.mockk.every
 import io.mockk.verify
 import org.bukkit.GameMode
 import org.bukkit.Location
@@ -19,6 +20,16 @@ import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.format.TextDecoration
 import io.papermc.paper.datacomponent.DataComponentTypes
 import ru.ruscrafting.duels.domain.ChallengeId
+import ru.ruscrafting.duels.domain.ChallengeRegistry
+import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
+import ru.ruscrafting.duels.domain.ServerId
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.logging.Handler
 import java.util.logging.LogRecord
@@ -41,7 +52,8 @@ class ArcDuelsPluginTest : StringSpec({
 
         plugin.isEnabled shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
-        plugin.config.getInt("countdown-seconds") shouldBe 0
+        plugin.config.getInt("countdown-seconds") shouldBe 3
+        plugin.config.getLong("celebration.duration-ticks") shouldBe 80L
         plugin.config.getString("player-data-sync.provider") shouldBe "AUTO"
         plugin.config.getLong("player-data-sync.settle-delay-ticks") shouldBe 40L
         plugin.config.getString("post-match.return-policy") shouldBe "PROMPT"
@@ -76,6 +88,16 @@ class ArcDuelsPluginTest : StringSpec({
         hasUsableArenaRoute(localArenaCount = 1, networkArenaRoutingEnabled = false) shouldBe true
     }
 
+    "duel timing helpers clamp bossbar progress and schedule expiry on tick boundaries" {
+        formatDuelTime(0) shouldBe "0:00"
+        formatDuelTime(65) shouldBe "1:05"
+        remainingBossBarProgress(0, 60) shouldBe 1f
+        remainingBossBarProgress(600, 60) shouldBe 0.5f
+        remainingBossBarProgress(1_400, 60) shouldBe 0f
+        challengeExpiryDelayTicks(1_000, 1_001) shouldBe 1L
+        challengeExpiryDelayTicks(1_000, 1_051) shouldBe 2L
+    }
+
     "chat notices use one calm identity real blank lines and indented continuation rows" {
         val locales = LocaleService.load(plugin)
         val player = server.addPlayer("NoticeTester")
@@ -89,6 +111,49 @@ class ArcDuelsPluginTest : StringSpec({
         plain shouldBe "\n  ⚔ • Первая строка\n  Вернуться\n"
         ("\\n" in plain) shouldBe false
         notice.containsRunCommand("/duel return") shouldBe true
+    }
+
+    "challenge card is readable and both players are told when it expires" {
+        var now = Instant.parse("2026-08-15T00:00:00Z")
+        val clock =
+            object : Clock() {
+                override fun getZone(): ZoneId = ZoneOffset.UTC
+                override fun withZone(zone: ZoneId): Clock = this
+                override fun instant(): Instant = now
+            }
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val locales = LocaleService.load(plugin)
+        val localServer = ServerId("test")
+        val targets = DuelTargetDirectory(plugin, localServer, null)
+        val challenger = server.addPlayer("Challenger")
+        val target = server.addPlayer("Target")
+        challenger.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        target.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        val controller =
+            DuelController(
+                plugin,
+                ChallengeRegistry(clock, Duration.ofSeconds(1)),
+                sessions,
+                InMemoryStatisticsRepository(),
+                locales,
+                targets,
+                localServer,
+                clock = clock,
+            )
+
+        controller.challenge(challenger, targets.local(target), DuelRules(DuelMode.OWN_INVENTORY))
+        val invitation = PlainTextComponentSerializer.plainText().serialize(requireNotNull(target.nextComponentMessage()))
+        invitation.contains("\n  ⚔ • Challenger предлагает дуэль\n") shouldBe true
+        invitation.contains("\n  ✔ Принять\n  ✕ Отклонить\n") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(challenger.nextComponentMessage())).contains("Вызов отправлен") shouldBe true
+
+        now = now.plusSeconds(1)
+        server.scheduler.performTicks(20)
+
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(challenger.nextComponentMessage())).contains("Target истёк") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(target.nextComponentMessage())).contains("Challenger истёк") shouldBe true
+        controller.close()
     }
 
     "GUI item specs preserve the configured ItemsAdder material and modern model data" {
@@ -150,6 +215,43 @@ class ArcDuelsPluginTest : StringSpec({
         player.location.x shouldBe savedLocation.x
         player.location.z shouldBe savedLocation.z
         player.velocity shouldBe Vector(0.2, 0.3, -0.1)
+    }
+
+    "own-inventory restoration preserves every item acquired during a duel" {
+        val player = server.addPlayer()
+        val world = server.addSimpleWorld("own-inventory-world")
+        val savedLocation = Location(world, 10.5, 70.0, 10.5)
+        player.teleport(savedLocation)
+        player.gameMode = GameMode.CREATIVE
+        player.inventory.setItem(0, ItemStack(Material.STONE))
+        val snapshot = PlayerSnapshot.capture(player)
+
+        val acquiredSword = ItemStack(Material.NETHERITE_SWORD)
+        player.inventory.setItem(5, acquiredSword)
+        player.setItemOnCursor(ItemStack(Material.DIAMOND_SWORD))
+        player.gameMode = GameMode.SURVIVAL
+        player.teleport(Location(world, 0.5, 64.0, 0.5))
+
+        snapshot.restoreWithoutInventory(player) { restored, destination -> restored.teleport(destination) }
+
+        player.inventory.getItem(0)?.type shouldBe Material.STONE
+        player.inventory.getItem(5) shouldBe acquiredSword
+        player.itemOnCursor.type shouldBe Material.DIAMOND_SWORD
+        player.gameMode shouldBe GameMode.CREATIVE
+        player.location.x shouldBe savedLocation.x
+        player.location.z shouldBe savedLocation.z
+    }
+
+    "kit restoration still replaces temporary combat items with the protected inventory" {
+        val player = server.addPlayer()
+        val snapshot = PlayerSnapshot.capture(player)
+        player.inventory.setItem(0, ItemStack(Material.NETHERITE_SWORD))
+        player.setItemOnCursor(ItemStack(Material.GOLDEN_APPLE))
+
+        snapshot.restore(player) { restored, destination -> restored.teleport(destination) }
+
+        player.inventory.getItem(0) shouldBe null
+        player.itemOnCursor.isEmpty shouldBe true
     }
 
     "versioned snapshot codec round trips Paper item bytes and rejects corrupt framing" {

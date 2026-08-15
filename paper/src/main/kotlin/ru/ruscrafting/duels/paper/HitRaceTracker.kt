@@ -18,6 +18,13 @@ internal class HitRaceTracker {
         comboHits.clear()
     }
 
+    fun scores(objective: DuelObjectiveType): Map<PlayerId, Long> =
+        when (objective) {
+            DuelObjectiveType.BOXING -> totalHits.toMap()
+            DuelObjectiveType.COMBO -> comboHits.toMap()
+            else -> emptyMap()
+        }
+
     fun record(
         objective: DuelObjectiveType,
         attacker: PlayerId,

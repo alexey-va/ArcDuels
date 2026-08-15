@@ -113,8 +113,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
         } else {
             logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
         }
-        val countdownSeconds = config.getInt("countdown-seconds", 0)
+        val countdownSeconds = config.getInt("countdown-seconds", 3)
         require(countdownSeconds in 0..10) { "countdown-seconds must be between 0 and 10" }
+        val celebrationDurationTicks = config.getLong("celebration.duration-ticks", 80L)
+        require(celebrationDurationTicks in 0L..200L) { "celebration.duration-ticks must be between 0 and 200" }
         val recoveryApplyDelayTicks =
             if (config.contains("player-data-sync.settle-delay-ticks")) {
                 config.getLong("player-data-sync.settle-delay-ticks")
@@ -135,6 +137,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 playerDataReady = playerDataSync::isReady,
                 recoveryApplyDelayTicks = recoveryApplyDelayTicks,
                 syncProvider = syncProvider,
+                celebrationDurationTicks = celebrationDurationTicks,
             )
         sessions = sessionManager
         val challenges =

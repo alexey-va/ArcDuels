@@ -124,7 +124,7 @@ internal class DuelGameplayListener(
             return
         }
         when (match.state) {
-            MatchState.COUNTDOWN -> {
+            MatchState.COUNTDOWN, MatchState.COMPLETING, MatchState.COMPLETED -> {
                 if (event.from.x != destination.x || event.from.y != destination.y || event.from.z != destination.z) {
                     event.to = event.from.clone().apply {
                         yaw = destination.yaw
@@ -251,16 +251,17 @@ internal class DuelGameplayListener(
         if (requiresFullFreeze(event.player)) event.amount = 0
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    fun onCommand(event: PlayerCommandPreprocessEvent) {
-        if (!sessions.isStateLocked(event.player) ||
-            event.player.hasPermission(COMMAND_BYPASS_PERMISSION) ||
-            commandPolicy.isAllowed(event.message)
-        ) {
-            return
-        }
+    @EventHandler(priority = EventPriority.LOWEST)
+    fun onCommandEarly(event: PlayerCommandPreprocessEvent) {
+        if (!shouldBlockCommand(event)) return
         event.isCancelled = true
         event.player.sendMessage(locales.notice(event.player, "session.command-blocked"))
+    }
+
+    /** Reassert the lock if another command interceptor uncancels the event. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onCommandFinal(event: PlayerCommandPreprocessEvent) {
+        if (shouldBlockCommand(event)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -298,6 +299,11 @@ internal class DuelGameplayListener(
 
     private fun requiresFullFreeze(player: Player): Boolean =
         sessions.isPreparing(player) || (sessions.isStateLocked(player) && sessions.matchFor(player) == null)
+
+    private fun shouldBlockCommand(event: PlayerCommandPreprocessEvent): Boolean =
+        sessions.isStateLocked(event.player) &&
+            !event.player.hasPermission(COMMAND_BYPASS_PERMISSION) &&
+            !commandPolicy.isAllowed(event.message)
 
     private companion object {
         const val COMMAND_BYPASS_PERMISSION = "arcduels.bypass"

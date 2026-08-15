@@ -96,7 +96,26 @@ class ChallengeRegistry(
             resolved
         }
 
-    fun find(id: ChallengeId): DuelChallenge? = synchronized(lock) { challenges[id]?.refreshExpiry() }
+    fun find(id: ChallengeId): DuelChallenge? = expireIfDue(id)
+
+    /**
+     * Atomically expires one challenge when its deadline has passed.
+     *
+     * Controllers use this from a scheduled task so expiry is observable even
+     * when neither player runs another duel command.
+     */
+    fun expireIfDue(id: ChallengeId): DuelChallenge? =
+        synchronized(lock) {
+            val challenge = challenges[id] ?: return@synchronized null
+            if (challenge.status != ChallengeStatus.PENDING || clock.instant().isBefore(challenge.expiresAt)) {
+                return@synchronized challenge
+            }
+            val expired = challenge.resolve(ChallengeStatus.EXPIRED, clock.instant())
+            challenges[id] = expired
+            pendingByPair.remove(setOf(challenge.challenger, challenge.target), id)
+            pruneTerminalChallenges()
+            expired
+        }
 
     fun pendingFor(playerId: PlayerId): List<DuelChallenge> =
         synchronized(lock) {
@@ -127,13 +146,6 @@ class ChallengeRegistry(
         terminal.sortedBy(DuelChallenge::createdAt)
             .take(terminal.size - MAX_RETAINED_TERMINAL)
             .forEach { challenges.remove(it.id, it) }
-    }
-
-    private fun DuelChallenge.refreshExpiry(): DuelChallenge {
-        if (status != ChallengeStatus.PENDING || clock.instant().isBefore(expiresAt)) return this
-        val expired = resolve(ChallengeStatus.EXPIRED, clock.instant())
-        expirePending()
-        return challenges[id] ?: expired
     }
 
     private companion object {

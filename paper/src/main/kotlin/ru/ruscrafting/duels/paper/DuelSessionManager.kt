@@ -1,7 +1,7 @@
 package ru.ruscrafting.duels.paper
 
 import net.kyori.adventure.text.Component
-import net.kyori.adventure.text.minimessage.MiniMessage
+import net.kyori.adventure.bossbar.BossBar
 import net.kyori.adventure.title.Title
 import org.bukkit.GameMode
 import org.bukkit.Sound
@@ -50,12 +50,14 @@ class DuelSessionManager internal constructor(
     private val recoveryApplyDelayTicks: Long = 40L,
     private val playerDataSaver: (Player) -> Unit = Player::saveData,
     private val syncProvider: PlayerDataSyncProvider = PlayerDataSyncProvider.NONE,
+    private val celebrationDurationTicks: Long = 80L,
 ) {
-    private val miniMessage = MiniMessage.miniMessage()
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
     private val countdownTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val objectiveTasks = ConcurrentHashMap<MatchId, BukkitTask>()
+    private val matchDisplayTasks = ConcurrentHashMap<MatchId, BukkitTask>()
+    private val finaleTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val pendingStarts = ConcurrentHashMap<UUID, CompletableFuture<DuelMatch>>()
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val recoveryTokens = ConcurrentHashMap<UUID, UUID>()
@@ -69,6 +71,7 @@ class DuelSessionManager internal constructor(
 
     init {
         require(recoveryApplyDelayTicks in 0L..1_200L) { "Player data settle delay must be between 0 and 1200 ticks" }
+        require(celebrationDurationTicks in 0L..200L) { "Celebration duration must be between 0 and 200 ticks" }
     }
 
     fun onCompleted(listener: (DuelMatch) -> Unit): AutoCloseable {
@@ -692,12 +695,17 @@ class DuelSessionManager internal constructor(
         countdownTasks.clear()
         objectiveTasks.values.forEach(BukkitTask::cancel)
         objectiveTasks.clear()
+        matchDisplayTasks.values.forEach(BukkitTask::cancel)
+        matchDisplayTasks.clear()
+        finaleTasks.values.forEach(BukkitTask::cancel)
+        finaleTasks.clear()
         pendingStarts.values.toSet().forEach { it.cancel(false) }
         pendingStarts.clear()
         coordinator.activeMatches()
             .filter { !sessions.containsKey(it.id) }
             .forEach { match -> runCatching { coordinator.cancel(match.id, MatchEndReason.SERVER_SHUTDOWN) } }
         for ((matchId, session) in sessions) {
+            hideMatchDisplay(session)
             coordinator.find(matchId)?.let { match ->
                 if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
                     runCatching { coordinator.cancel(matchId, MatchEndReason.SERVER_SHUTDOWN) }
@@ -740,6 +748,7 @@ class DuelSessionManager internal constructor(
             scheduleCountdown(match.id)
             return coordinator.find(match.id) ?: error("Match disappeared during Paper setup")
         } catch (failure: Throwable) {
+            hideMatchDisplay(session)
             sessions.remove(match.id)
             session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
             if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) restore(session)
@@ -757,21 +766,29 @@ class DuelSessionManager internal constructor(
         val arena = arenas.get(match.arenaId)
         val first = requireOnline(match.firstPlayer)
         val second = requireOnline(match.secondPlayer)
-        resetPlayer(first, session.snapshots.getValue(first.uniqueId), match.rules.mode, match.rules.kitId)
-        resetPlayer(second, session.snapshots.getValue(second.uniqueId), match.rules.mode, match.rules.kitId)
+        if (match.rules.mode == DuelMode.OWN_INVENTORY && session.roundsPrepared == 0) {
+            check(session.snapshots.getValue(first.uniqueId).state.inventoryMatches(first)) {
+                "The first player's synchronized inventory no longer matches its protected snapshot"
+            }
+            check(session.snapshots.getValue(second.uniqueId).state.inventoryMatches(second)) {
+                "The second player's synchronized inventory no longer matches its protected snapshot"
+            }
+        }
+        resetPlayer(first, match.rules.mode, match.rules.kitId)
+        resetPlayer(second, match.rules.mode, match.rules.kitId)
         check(teleportInternally(first, arena.firstSpawn)) { "Could not teleport the first player to the arena" }
         check(teleportInternally(second, arena.secondSpawn)) { "Could not teleport the second player to the arena" }
         first.sendActionBar(scoreLine(match, first))
         second.sendActionBar(scoreLine(match, second))
+        showCountdownDisplay(match, countdownSeconds)
+        session.roundsPrepared++
     }
 
     private fun resetPlayer(
         player: Player,
-        stored: StoredPlayerSnapshot,
         mode: DuelMode,
         kitId: ru.ruscrafting.duels.domain.KitId?,
     ) {
-        if (mode == DuelMode.OWN_INVENTORY) stored.state.restoreState(player)
         player.gameMode = GameMode.SURVIVAL
         player.allowFlight = false
         player.isFlying = false
@@ -780,13 +797,13 @@ class DuelSessionManager internal constructor(
         player.noDamageTicks = 0
         player.absorptionAmount = 0.0
         player.velocity = Vector()
-        player.setItemOnCursor(ItemStack.empty())
         player.foodLevel = 20
         player.saturation = 5f
         player.activePotionEffects.forEach { player.removePotionEffect(it.type) }
         player.health = player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
         if (mode == DuelMode.KIT) {
             val kit = kits.get(requireNotNull(kitId))
+            player.setItemOnCursor(ItemStack.empty())
             player.inventory.clear()
             player.inventory.armorContents = arrayOfNulls<ItemStack>(4)
             player.inventory.setItemInOffHand(null)
@@ -814,10 +831,16 @@ class DuelSessionManager internal constructor(
                     }
                     val players = participants(match)
                     if (seconds > 0) {
-                        val color = if (seconds == 1) "<red>" else "<gold>"
-                        val title = miniMessage.deserialize("$color<bold>$seconds</bold>")
+                        showCountdownDisplay(match, seconds)
                         players.forEach { player ->
-                            player.showTitle(Title.title(title, Component.empty(), Title.Times.times(Duration.ZERO, Duration.ofMillis(850), Duration.ZERO)))
+                            val opponent = requireOnline(match.opponentOf(PlayerId(player.uniqueId)))
+                            player.showTitle(
+                                Title.title(
+                                    locales.component(player, "session.countdown-title", LocaleService.text("seconds", seconds)),
+                                    locales.component(player, "session.countdown-subtitle", LocaleService.text("opponent", opponent.name)),
+                                    Title.Times.times(Duration.ZERO, Duration.ofMillis(850), Duration.ZERO),
+                                ),
+                            )
                             player.playSound(player.location, Sound.BLOCK_NOTE_BLOCK_HAT, 0.8f, 1.4f)
                         }
                         seconds--
@@ -835,6 +858,7 @@ class DuelSessionManager internal constructor(
                         player.playSound(player.location, Sound.ENTITY_ENDER_DRAGON_GROWL, 0.45f, 1.5f)
                     }
                     scheduleObjective(active)
+                    scheduleMatchDisplay(active)
                     countdownTasks.remove(matchId)
                     cancel()
                 }
@@ -885,6 +909,97 @@ class DuelSessionManager internal constructor(
                 }
             }.runTaskTimer(plugin, OBJECTIVE_PERIOD_TICKS, OBJECTIVE_PERIOD_TICKS)
         objectiveTasks[match.id] = task
+    }
+
+    private fun scheduleMatchDisplay(match: DuelMatch) {
+        matchDisplayTasks.remove(match.id)?.cancel()
+        updateMatchDisplay(match)
+        val task =
+            plugin.server.scheduler.runTaskTimer(
+                plugin,
+                Runnable {
+                    val current = coordinator.find(match.id)
+                    if (current == null || current.state != MatchState.ACTIVE) {
+                        matchDisplayTasks.remove(match.id)?.cancel()
+                        return@Runnable
+                    }
+                    updateMatchDisplay(current)
+                },
+                20L,
+                20L,
+            )
+        matchDisplayTasks[match.id] = task
+    }
+
+    private fun showCountdownDisplay(match: DuelMatch, seconds: Int) {
+        val session = sessions[match.id] ?: return
+        participants(match).forEach { player ->
+            val opponent = requireOnline(match.opponentOf(PlayerId(player.uniqueId)))
+            val bar = session.bossBars.computeIfAbsent(player.uniqueId) {
+                BossBar.bossBar(Component.empty(), 1f, BossBar.Color.BLUE, BossBar.Overlay.PROGRESS).also(player::showBossBar)
+            }
+            bar.name(
+                locales.component(
+                    player,
+                    "session.bossbar-countdown",
+                    LocaleService.text("opponent", opponent.name),
+                    LocaleService.text("seconds", seconds),
+                ),
+            )
+            bar.color(BossBar.Color.BLUE)
+            bar.progress(if (countdownSeconds == 0) 1f else (seconds.toFloat() / countdownSeconds).coerceIn(0f, 1f))
+        }
+    }
+
+    private fun updateMatchDisplay(match: DuelMatch) {
+        val session = sessions[match.id] ?: return
+        participants(match).forEach { player ->
+            val ownId = PlayerId(player.uniqueId)
+            val opponent = requireOnline(match.opponentOf(ownId))
+            val bar = session.bossBars.computeIfAbsent(player.uniqueId) {
+                BossBar.bossBar(Component.empty(), 1f, BossBar.Color.BLUE, BossBar.Overlay.PROGRESS).also(player::showBossBar)
+            }
+            if (match.rules.objective.isHitRace) {
+                val scores = session.hitRace.scores(match.rules.objective)
+                val target =
+                    if (match.rules.objective == DuelObjectiveType.BOXING) {
+                        match.rules.modifiers.boxingHitsToWin
+                    } else {
+                        match.rules.modifiers.comboHitsToWin
+                    }
+                val own = scores[ownId] ?: 0L
+                val enemy = scores[match.opponentOf(ownId)] ?: 0L
+                bar.name(
+                    locales.component(
+                        player,
+                        "session.bossbar-hits",
+                        LocaleService.text("opponent", opponent.name),
+                        LocaleService.text("own", own),
+                        LocaleService.text("enemy", enemy),
+                        LocaleService.text("target", target),
+                    ),
+                )
+                bar.progress((own.toFloat() / target).coerceIn(0f, 1f))
+                bar.color(BossBar.Color.BLUE)
+            } else {
+                val total = match.rules.modifiers.suddenDeathAfterSeconds
+                val remaining = (total - session.roundElapsedTicks / 20L).coerceAtLeast(0L)
+                val ownScore = if (ownId == match.firstPlayer) match.score.first else match.score.second
+                val enemyScore = if (ownId == match.firstPlayer) match.score.second else match.score.first
+                bar.name(
+                    locales.component(
+                        player,
+                        "session.bossbar-active",
+                        LocaleService.text("opponent", opponent.name),
+                        LocaleService.text("own", ownScore),
+                        LocaleService.text("enemy", enemyScore),
+                        LocaleService.text("time", formatDuelTime(remaining)),
+                    ),
+                )
+                bar.progress(remainingBossBarProgress(session.roundElapsedTicks, total))
+                bar.color(if (session.suddenDeathStarted) BossBar.Color.RED else BossBar.Color.BLUE)
+            }
+        }
     }
 
     private fun showHillProgress(
@@ -970,6 +1085,7 @@ class DuelSessionManager internal constructor(
         failure: Throwable?,
     ) {
         objectiveTasks.remove(matchId)?.cancel()
+        matchDisplayTasks.remove(matchId)?.cancel()
         if (failure != null) {
             announcePersistenceFailure(matchId, unwrap(failure))
         } else if (updated?.state == MatchState.COUNTDOWN) {
@@ -1012,6 +1128,7 @@ class DuelSessionManager internal constructor(
         if (!session.finishing.compareAndSet(false, true)) return
         countdownTasks.remove(match.id)?.cancel()
         objectiveTasks.remove(match.id)?.cancel()
+        matchDisplayTasks.remove(match.id)?.cancel()
         val winnerId = requireNotNull(match.winner)
         participants(match).forEach { player ->
             val won = player.uniqueId == winnerId.value
@@ -1029,25 +1146,43 @@ class DuelSessionManager internal constructor(
                 1.0f,
             )
         }
+        showFinaleDisplay(match, session, winnerId)
+        plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
+        scheduleFinalization(match, session, celebrationDurationTicks)
+    }
+
+    private fun scheduleFinalization(match: DuelMatch, session: PaperSession, delayTicks: Long) {
+        finaleTasks.remove(match.id)?.cancel()
+        if (delayTicks == 0L) {
+            finalizeMatch(match, session)
+            return
+        }
+        finaleTasks[match.id] =
+            plugin.server.scheduler.runTaskLater(
+                plugin,
+                Runnable {
+                    finaleTasks.remove(match.id)
+                    finalizeMatch(match, session)
+                },
+                delayTicks,
+            )
+    }
+
+    private fun finalizeMatch(match: DuelMatch, session: PaperSession) {
+        if (sessions[match.id] !== session) return
         if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) {
             if (!restore(session)) {
-                session.finishing.set(false)
-                plugin.server.scheduler.runTaskLater(plugin, Runnable {
-                    coordinator.find(match.id)?.let(::finish)
-                }, 20L)
+                scheduleFinalization(match, session, 20L)
                 return
             }
         }
         if (session.recoveryOwner == RecoveryOwner.ORIGIN_SERVERS) {
             if (!moveNetworkPlayersToLobby(match, session)) {
-                session.finishing.set(false)
-                plugin.server.scheduler.runTaskLater(plugin, Runnable {
-                    coordinator.find(match.id)?.let(::finish)
-                }, 20L)
+                scheduleFinalization(match, session, 20L)
                 return
             }
         }
-        plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
+        hideMatchDisplay(session)
         sessions.remove(match.id, session)
         session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
         runCatching { coordinator.releaseCompleted(match.id) }
@@ -1060,6 +1195,21 @@ class DuelSessionManager internal constructor(
                 }
             }
             .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
+    }
+
+    private fun showFinaleDisplay(match: DuelMatch, session: PaperSession, winner: PlayerId) {
+        participants(match).forEach { player ->
+            session.bossBars[player.uniqueId]?.apply {
+                name(locales.component(player, if (player.uniqueId == winner.value) "session.match-win" else "session.match-loss"))
+                progress(1f)
+                color(if (player.uniqueId == winner.value) BossBar.Color.GREEN else BossBar.Color.RED)
+            }
+        }
+    }
+
+    private fun hideMatchDisplay(session: PaperSession) {
+        session.bossBars.forEach { (playerId, bar) -> plugin.server.getPlayer(playerId)?.hideBossBar(bar) }
+        session.bossBars.clear()
     }
 
     private fun announcePersistenceFailure(
@@ -1089,10 +1239,15 @@ class DuelSessionManager internal constructor(
             plugin.logger.warning("Arena ${arena.id} has no lobby; using each participant's assigned arena spawn after this match")
         }
         session.snapshots.forEach { (playerId, origin) ->
+            if (playerId in session.postMatchMovedPlayers) return@forEach
             val player = plugin.server.getPlayer(playerId) ?: return@forEach
             runCatching {
                 if (syncProvider.sharesInventoryBetweenServers) {
-                    origin.state.restoreInventory(player)
+                    if (origin.escrow.inventoryReplaced) {
+                        origin.state.restoreState(player)
+                    } else {
+                        origin.state.restoreStateWithoutInventory(player)
+                    }
                 } else {
                     session.arenaBaselines.getValue(playerId).restoreState(player)
                 }
@@ -1100,6 +1255,7 @@ class DuelSessionManager internal constructor(
                 val destination = postMatchDestination(arena, match, PlayerId(playerId))
                 check(teleportInternally(player, destination)) { "Could not move ${player.uniqueId} to the post-match waiting point" }
                 networkLobbyPlayers += player.uniqueId
+                session.postMatchMovedPlayers += playerId
             }.onFailure { failure ->
                 moved = false
                 plugin.logger.severe("Could not safely move ${player.uniqueId} to the post-match lobby: ${failure.message}")
@@ -1138,9 +1294,13 @@ class DuelSessionManager internal constructor(
         skipApplyWhenInventoryMatches: Boolean = false,
     ): Boolean {
         if (!restoringPlayers.add(player.uniqueId)) return true
+        val preserveInventory = !stored.escrow.inventoryReplaced
         val alreadyMatches = skipApplyWhenInventoryMatches && stored.state.inventoryMatches(player)
         val restored = runCatching {
-            if (alreadyMatches) {
+            if (preserveInventory) {
+                stored.state.restoreWithoutInventory(player, ::teleportInternally)
+                playerDataSaver(player)
+            } else if (alreadyMatches) {
                 val stateChanged = !stored.state.nonInventoryStateMatches(player)
                 val locationChanged = !stored.state.locationMatches(player)
                 if (stateChanged || locationChanged) {
@@ -1240,8 +1400,11 @@ class DuelSessionManager internal constructor(
         val restoredPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val hillCapture: HillCaptureTracker = HillCaptureTracker(),
         val hitRace: HitRaceTracker = HitRaceTracker(),
+        val bossBars: MutableMap<UUID, BossBar> = ConcurrentHashMap(),
+        val postMatchMovedPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         var roundElapsedTicks: Long = 0L,
         var suddenDeathStarted: Boolean = false,
+        var roundsPrepared: Int = 0,
         val finishing: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(),
     )
 
@@ -1271,6 +1434,13 @@ internal fun postMatchDestination(
         match.secondPlayer -> arena.secondSpawn
         else -> error("Player $player is not part of duel ${match.id}")
     }).clone()
+
+internal fun formatDuelTime(seconds: Long): String = "%d:%02d".format(seconds / 60L, seconds % 60L)
+
+internal fun remainingBossBarProgress(elapsedTicks: Long, durationSeconds: Int): Float {
+    if (durationSeconds <= 0) return 0f
+    return (1.0 - elapsedTicks.toDouble() / (durationSeconds * 20.0)).coerceIn(0.0, 1.0).toFloat()
+}
 
 internal enum class AdminRecoveryStatus {
     STARTED,

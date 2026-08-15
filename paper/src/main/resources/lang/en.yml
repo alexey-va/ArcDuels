@@ -199,7 +199,7 @@ controller:
   return-hover: '<gray>Return to your origin server and verify your inventory</gray>'
   no-return-offer: '<gray>You have no pending duel return.</gray>'
   network-timeout: '<red>Both players could not be prepared for the duel in time.</red>'
-  expired: '<red>This challenge has expired.</red>'
+  expired: '<gray>Your duel challenge with</gray> <white><player></white> <gray>expired.</gray>'
   start-failed: '<red>Could not start the duel: <reason></red>'
   wait-cancelled: '<gray>arena wait was cancelled</gray>'
   start-internal: '<gray>an arena or durable storage is currently unavailable</gray>'
@@ -220,17 +220,28 @@ controller:
   loadout-kit: '<gray>kit <white><kit></white></gray>'
   loadout-own: '<gray>own inventory</gray>'
   received: |-
-    <yellow><white><player></white> challenged you: <objective></yellow>
-    <gray>Loadout:</gray> <loadout> <dark_gray>•</dark_gray> <gray>BO<bestof></gray> <dark_gray>•</dark_gray> <gray>Ranked:</gray> <ranked>
+    <#e6fff3><player> offers you a duel</#e6fff3>
+    <objective> <dark_gray>•</dark_gray> <ranked>
+    <gray>Loadout</gray> <loadout> <dark_gray>•</dark_gray> <#92bed8>BO<bestof></#92bed8>
     <rules>
   combat-summary: |-
-    <gray>Sudden death:</gray> <white><sudden>s</white> <dark_gray>•</dark_gray> <gray>Projectiles:</gray> <projectiles> <dark_gray>•</dark_gray> <gray>Consumables:</gray> <consumables>
-    <gray>Pearls:</gray> <pearls> <dark_gray>•</dark_gray> <gray>Regeneration:</gray> <regeneration>
-  hit-race-summary: '<gray>Target:</gray> <white><hits> hits</white> <dark_gray>•</dark_gray> <gray>Damage is disabled and direct melee hits count.</gray>'
+    <gray>Sudden death</gray> <white><sudden>s</white> <dark_gray>•</dark_gray> <gray>Projectiles</gray> <projectiles>
+    <gray>Consumables</gray> <consumables> <dark_gray>•</dark_gray> <gray>Pearls</gray> <pearls>
+    <gray>Regeneration</gray> <regeneration>
+  hit-race-summary: '<gray>Target</gray> <white><hits> hits</white> <dark_gray>•</dark_gray> <gray>no damage</gray>'
+  state-on: '<#92bed8>✔ yes</#92bed8>'
+  state-off: '<gray>✕ no</gray>'
+  ranked: '<#92bed8>ranked</#92bed8>'
+  unranked: '<gray>unranked</gray>'
+  objective-elimination: '<#e6fff3>Classic duel</#e6fff3>'
+  objective-koth: '<#e6fff3>King of the hill</#e6fff3>'
+  objective-sumo: '<#e6fff3>Sumo</#e6fff3>'
+  objective-boxing: '<#e6fff3>Boxing</#e6fff3>'
+  objective-combo: '<#e6fff3>Combo</#e6fff3>'
 
-  accept: '<newline><#2bba43>✔ Accept</#2bba43>'
+  accept: '<newline><newline><#2bba43>✔ Accept</#2bba43>'
   accept-hover: '<green>Start the duel</green>'
-  deny: '  <#c42323>✕ Decline</#c42323>'
+  deny: '<newline><#c42323>✕ Decline</#c42323>'
   deny-hover: '<red>Decline the challenge</red>'
 
 session:
@@ -241,8 +252,13 @@ session:
   recovery-requested: '<gray>Recovery is prepared. Wait for player data to finish loading.</gray>'
   recovering: '<yellow>Restoring your saved state from an unfinished duel…</yellow>'
   recovery-failed: '<red>State recovery failed. Contact an administrator; a protected copy of your inventory remains available.</red>'
-  fight-title: '<red>Fight!</red>'
-  fight-subtitle: '<gray>Good luck — you may need it</gray>'
+  countdown-title: '<#92bed8><seconds></#92bed8>'
+  countdown-subtitle: '<gray>Opponent</gray> <white><opponent></white>'
+  fight-title: '<#e6fff3>Fight</#e6fff3>'
+  fight-subtitle: '<gray>The duel has started</gray>'
+  bossbar-countdown: '<white><opponent></white> <dark_gray>•</dark_gray> <gray>starts in</gray> <#92bed8><seconds></#92bed8>'
+  bossbar-active: '<white><opponent></white> <dark_gray>•</dark_gray> <#92bed8><own></#92bed8><dark_gray>:</dark_gray><#ffacd5><enemy></#ffacd5> <dark_gray>•</dark_gray> <gray><time></gray>'
+  bossbar-hits: '<white><opponent></white> <dark_gray>•</dark_gray> <#92bed8><own></#92bed8><dark_gray>:</dark_gray><#ffacd5><enemy></#ffacd5> <dark_gray>•</dark_gray> <gray>target <target></gray>'
   hill-contested: '<yellow>Hill contested</yellow>'
   hill-capturing: '<green>Capturing</green>'
   hill-free: '<gray>Hill is free</gray>'

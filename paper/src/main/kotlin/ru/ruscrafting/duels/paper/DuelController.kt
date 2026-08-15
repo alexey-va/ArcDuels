@@ -22,6 +22,7 @@ import ru.ruscrafting.duels.redis.CrossServerChallengeMessage
 import ru.ruscrafting.duels.redis.NetworkArenaDirectory
 import java.time.Clock
 import java.time.Duration
+import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
@@ -45,6 +46,8 @@ class DuelController(
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
     private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
     private val acceptedTasks = ConcurrentHashMap<ChallengeId, BukkitTask>()
+    private val challengeExpiryTasks = ConcurrentHashMap<ChallengeId, BukkitTask>()
+    private val expiredNotificationPlayers = ConcurrentHashMap.newKeySet<Pair<ChallengeId, UUID>>()
     private val transferRequests = ConcurrentHashMap.newKeySet<Pair<ChallengeId, PlayerId>>()
     private val originSnapshots = ConcurrentHashMap<Pair<ChallengeId, PlayerId>, java.util.concurrent.CompletableFuture<Unit>>()
     private val networkPendingPlayers = ConcurrentHashMap.newKeySet<PlayerId>()
@@ -114,6 +117,7 @@ class DuelController(
                     )
                 }
                 challenger.sendMessage(locales.notice(challenger, "controller.sent", LocaleService.text("player", target.name)))
+                scheduleChallengeExpiry(challenge)
             }
             .onFailure { challenger.sendMessage(locales.notice(challenger, "controller.failed")) }
     }
@@ -143,8 +147,9 @@ class DuelController(
                     player.sendMessage(locales.notice(player, "controller.failed"))
                     return
                 }
+        cancelChallengeExpiry(challenge.id)
         if (accepted.status != ChallengeStatus.ACCEPTED) {
-            player.sendMessage(locales.notice(player, "controller.expired"))
+            announceExpired(accepted)
             return
         }
         val continuesFromArenaLobby =
@@ -163,7 +168,10 @@ class DuelController(
         val challenge = resolveCandidate(player, challengeId, incoming = true) ?: return
         runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.DENIED) }
             .onSuccess { resolved ->
-                if (participants(resolved).size == 2 || challengeBus == null) {
+                cancelChallengeExpiry(resolved.id)
+                if (resolved.status == ChallengeStatus.EXPIRED) {
+                    announceExpired(resolved)
+                } else if (participants(resolved).size == 2 || challengeBus == null) {
                     participants(resolved).forEach { it.sendMessage(locales.notice(it, "controller.denied")) }
                 } else {
                     publishResolution(resolved, null)
@@ -176,7 +184,10 @@ class DuelController(
         val challenge = resolveCandidate(player, null, incoming = false) ?: return
         runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.CANCELLED) }
             .onSuccess { resolved ->
-                if (participants(resolved).size == 2 || challengeBus == null) {
+                cancelChallengeExpiry(resolved.id)
+                if (resolved.status == ChallengeStatus.EXPIRED) {
+                    announceExpired(resolved)
+                } else if (participants(resolved).size == 2 || challengeBus == null) {
                     participants(resolved).forEach { it.sendMessage(locales.notice(it, "controller.cancelled")) }
                 } else {
                     publishResolution(resolved, null)
@@ -247,8 +258,11 @@ class DuelController(
         networkSubscription?.close()
         completionSubscription.close()
         acceptedTasks.values.forEach(BukkitTask::cancel)
+        challengeExpiryTasks.values.forEach(BukkitTask::cancel)
         returnTasks.values.forEach(BukkitTask::cancel)
         acceptedTasks.clear()
+        challengeExpiryTasks.clear()
+        expiredNotificationPlayers.clear()
         returnTasks.clear()
         acceptedMatches.clear()
         transferRequests.clear()
@@ -287,7 +301,10 @@ class DuelController(
             return
         }
         runCatching { challenges.register(message.challenge) }
-            .onSuccess { notifyChallenge(target, message.challengerName, message.challenge) }
+            .onSuccess { registered ->
+                notifyChallenge(target, message.challengerName, registered)
+                scheduleChallengeExpiry(registered, broadcast = false)
+            }
             .onFailure {
                 plugin.logger.warning("Rejected network challenge ${message.challenge.id}: ${it.message}")
                 publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)
@@ -296,10 +313,11 @@ class DuelController(
 
     private fun receiveResolution(message: CrossServerChallengeMessage) {
         runCatching { challenges.registerResolution(message.challenge) }
-            .onFailure {
+            .getOrElse {
                 plugin.logger.warning("Rejected network challenge resolution ${message.challenge.id}: ${it.message}")
                 return
             }
+        cancelChallengeExpiry(message.challenge.id)
         rememberContext(
             message.challenge.id,
             ChallengeContext(
@@ -314,7 +332,7 @@ class DuelController(
             ChallengeStatus.ACCEPTED -> acceptNetworkMatch(message)
             ChallengeStatus.DENIED -> participants(message.challenge).forEach { it.sendMessage(locales.notice(it, "controller.denied")) }
             ChallengeStatus.CANCELLED -> participants(message.challenge).forEach { it.sendMessage(locales.notice(it, "controller.cancelled")) }
-            ChallengeStatus.EXPIRED -> participants(message.challenge).forEach { it.sendMessage(locales.notice(it, "controller.expired")) }
+            ChallengeStatus.EXPIRED -> notifyExpiredParticipants(message.challenge)
             ChallengeStatus.PENDING -> error("A resolution cannot be pending")
         }
     }
@@ -659,10 +677,65 @@ class DuelController(
         val pending = challenges.pendingFor(playerId)
         val candidate = challengeId?.let(challenges::find)
             ?: pending.lastOrNull { if (incoming) it.target == playerId else it.challenger == playerId }
-        if (candidate == null) {
+        if (candidate != null && if (incoming) candidate.target != playerId else candidate.challenger != playerId) {
             player.sendMessage(locales.notice(player, if (incoming) "controller.no-incoming" else "controller.no-outgoing"))
+            return null
+        }
+        if (candidate?.status == ChallengeStatus.EXPIRED) {
+            sendExpiredNotice(player, candidate, once = false)
+            return null
+        }
+        if (candidate == null || candidate.status != ChallengeStatus.PENDING) {
+            player.sendMessage(locales.notice(player, if (incoming) "controller.no-incoming" else "controller.no-outgoing"))
+            return null
         }
         return candidate
+    }
+
+    private fun scheduleChallengeExpiry(challenge: DuelChallenge, broadcast: Boolean = true) {
+        val delay = challengeExpiryDelayTicks(clock.millis(), challenge.expiresAt.toEpochMilli())
+        val task =
+            plugin.server.scheduler.runTaskLater(
+                plugin,
+                Runnable {
+                    challengeExpiryTasks.remove(challenge.id)
+                    val expired = challenges.expireIfDue(challenge.id) ?: return@Runnable
+                    when (expired.status) {
+                        ChallengeStatus.PENDING -> scheduleChallengeExpiry(expired, broadcast)
+                        ChallengeStatus.EXPIRED -> announceExpired(expired, broadcast)
+                        else -> Unit
+                    }
+                },
+                delay,
+            )
+        challengeExpiryTasks.put(challenge.id, task)?.cancel()
+    }
+
+    private fun cancelChallengeExpiry(challengeId: ChallengeId) {
+        challengeExpiryTasks.remove(challengeId)?.cancel()
+    }
+
+    private fun announceExpired(challenge: DuelChallenge, broadcast: Boolean = true) {
+        if (challengeBus == null || !broadcast) {
+            notifyExpiredParticipants(challenge)
+        } else {
+            publishResolution(challenge, null)
+        }
+    }
+
+    private fun notifyExpiredParticipants(challenge: DuelChallenge) {
+        participants(challenge).forEach { sendExpiredNotice(it, challenge) }
+    }
+
+    private fun sendExpiredNotice(player: Player, challenge: DuelChallenge, once: Boolean = true) {
+        if (once && !expiredNotificationPlayers.add(challenge.id to player.uniqueId)) return
+        val opponent =
+            when (PlayerId(player.uniqueId)) {
+                challenge.challenger -> challenge.target
+                challenge.target -> challenge.challenger
+                else -> return
+            }
+        player.sendMessage(locales.notice(player, "controller.expired", LocaleService.text("player", resolveName(opponent))))
     }
 
     private fun notifyChallenge(recipient: Player, challengerName: String, challenge: DuelChallenge) {
@@ -684,13 +757,13 @@ class DuelController(
             }
         val objectiveKey =
             when (challenge.rules.objective) {
-                ru.ruscrafting.duels.domain.DuelObjectiveType.ELIMINATION -> "objective.elimination.name"
-                ru.ruscrafting.duels.domain.DuelObjectiveType.KING_OF_THE_HILL -> "objective.koth.name"
-                ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO -> "objective.sumo.name"
-                ru.ruscrafting.duels.domain.DuelObjectiveType.BOXING -> "objective.boxing.name"
-                ru.ruscrafting.duels.domain.DuelObjectiveType.COMBO -> "objective.combo.name"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.ELIMINATION -> "controller.objective-elimination"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.KING_OF_THE_HILL -> "controller.objective-koth"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO -> "controller.objective-sumo"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.BOXING -> "controller.objective-boxing"
+                ru.ruscrafting.duels.domain.DuelObjectiveType.COMBO -> "controller.objective-combo"
             }
-        fun state(value: Boolean) = locales.component(recipient, if (value) "menu.common.enabled" else "menu.common.disabled")
+        fun state(value: Boolean) = locales.component(recipient, if (value) "controller.state-on" else "controller.state-off")
         val ruleSummary =
             if (challenge.rules.objective.isHitRace) {
                 val target =
@@ -719,7 +792,10 @@ class DuelController(
                 LocaleService.component("objective", locales.component(recipient, objectiveKey)),
                 LocaleService.component("loadout", mode),
                 LocaleService.text("bestof", challenge.rules.bestOf),
-                LocaleService.component("ranked", state(challenge.rules.ranked)),
+                LocaleService.component(
+                    "ranked",
+                    locales.component(recipient, if (challenge.rules.ranked) "controller.ranked" else "controller.unranked"),
+                ),
                 LocaleService.component("rules", ruleSummary),
             )
         val accept =
@@ -743,6 +819,7 @@ class DuelController(
             contexts.entries.minByOrNull { it.value.expiresAtMillis }?.key?.let(contexts::remove)
         }
         contexts[challengeId] = context
+        expiredNotificationPlayers.removeIf { (expiredChallengeId, _) -> !contexts.containsKey(expiredChallengeId) }
     }
 
     private fun participants(challenge: DuelChallenge): List<Player> =
@@ -813,6 +890,11 @@ internal fun shouldStartDirectLocalMatch(
     matchServer: ServerId?,
     localServer: ServerId,
 ): Boolean = bothPlayersLocal && !continuesFromArenaLobby && (matchServer == null || matchServer == localServer)
+
+internal fun challengeExpiryDelayTicks(nowMillis: Long, expiresAtMillis: Long): Long {
+    val remainingMillis = (expiresAtMillis - nowMillis).coerceAtLeast(1L)
+    return ((remainingMillis + 49L) / 50L).coerceAtLeast(1L)
+}
 
 internal data class AcceptedParticipantReadiness(
     val stateLocked: Boolean,

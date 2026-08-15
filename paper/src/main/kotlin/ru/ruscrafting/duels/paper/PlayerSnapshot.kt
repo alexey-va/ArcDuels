@@ -79,7 +79,14 @@ data class PlayerSnapshot(
 
     fun restoreState(player: Player) {
         restoreInventory(player)
+        restoreStateWithoutInventory(player)
+    }
+
+    /** Restores health, game mode and movement state without touching any item. */
+    fun restoreStateWithoutInventory(player: Player) {
         restoreNonInventoryState(player)
+        player.velocity = velocity.clone()
+        verifyNonInventoryState(player)
     }
 
     fun restoreWithoutInventory(
@@ -89,9 +96,7 @@ data class PlayerSnapshot(
         restoreLocation(player, teleport)
         // Teleport listeners may normalize health, movement, game mode, or
         // effects. Apply the saved state only after every teleport callback.
-        restoreNonInventoryState(player)
-        player.velocity = velocity.clone()
-        verifyNonInventoryState(player)
+        restoreStateWithoutInventory(player)
         check(locationMatches(player)) { "Location verification failed" }
     }
 

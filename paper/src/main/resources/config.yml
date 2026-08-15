@@ -1,8 +1,8 @@
 # Unique node id used in Redis event origin checks.
 server-id: duels-1
 challenge-timeout-seconds: 45
-# Zero starts immediately after both players are safely prepared and teleported.
-countdown-seconds: 0
+# Starts only after both players are safely prepared and teleported.
+countdown-seconds: 3
 
 player-data-sync:
   # AUTO detects HuskSync. Use HUSKSYNC or NONE to declare the node contract
@@ -24,10 +24,12 @@ locale:
   use-client-locale: true
 
 celebration:
+  # Keep both players on the arena for the victory sequence before recovery.
+  duration-ticks: 80
   fireworks:
     enabled: true
     # Bounded to 1..5 at runtime.
-    count: 3
+    count: 4
 
 mysql:
   # Matches are fail-closed while this is false: ArcDuels requires a durable
