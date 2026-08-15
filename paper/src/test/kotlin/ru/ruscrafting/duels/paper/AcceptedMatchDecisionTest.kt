@@ -31,4 +31,12 @@ class AcceptedMatchDecisionTest : StringSpec({
         selectOriginServer(recorded, ServerId("arena-host"), ServerId("fallback")) shouldBe recorded
         selectOriginServer(null, ServerId("observed"), ServerId("fallback")) shouldBe ServerId("observed")
     }
+
+    "a rematch accepted from the arena lobby must pass through origin recovery" {
+        val local = ServerId("parkour")
+
+        shouldStartDirectLocalMatch(true, false, local, local) shouldBe true
+        shouldStartDirectLocalMatch(true, true, local, local) shouldBe false
+        shouldStartDirectLocalMatch(false, false, local, local) shouldBe false
+    }
 })

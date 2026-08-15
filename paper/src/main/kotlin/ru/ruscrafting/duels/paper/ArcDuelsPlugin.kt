@@ -135,7 +135,6 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 playerDataReady = playerDataSync::isReady,
                 recoveryApplyDelayTicks = recoveryApplyDelayTicks,
                 syncProvider = syncProvider,
-                serverSpawnLobbyFallback = config.getBoolean("post-match.server-spawn-fallback", true),
             )
         sessions = sessionManager
         val challenges =
@@ -293,7 +292,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                                 val recipients = server.onlinePlayers.toList() + server.consoleSender
                                 recipients.forEach { recipient ->
                                     recipient.sendMessage(
-                                        locales.component(
+                                        locales.notice(
                                             recipient,
                                             "network.win",
                                             LocaleService.text("winner", winner),

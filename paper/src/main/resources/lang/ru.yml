@@ -1,4 +1,4 @@
-prefix: '<dark_gray>[</dark_gray><gold>Дуэли</gold><dark_gray>]</dark_gray> '
+identity: '<#92bed8>⚔</#92bed8> <#666666>•</#666666> '
 
 menu:
   common:
@@ -177,57 +177,61 @@ kit:
     description: ['<gray>Равное лёгкое снаряжение для ударных режимов.</gray>']
 
 error:
-  player-only: '<red>Эта команда доступна только игроку.</red>'
-  player-left: '<red>Игрок уже вышел или начал другой бой.</red>'
-  leaderboard: '<red>Не удалось загрузить рейтинг.</red>'
-  invalid-challenge-id: '<red>Некорректный идентификатор вызова.</red>'
+  player-only: '<#c42323>Эта команда доступна только игроку.</#c42323>'
+  player-left: '<#c42323>Игрок уже вышел или начал другой бой.</#c42323>'
+  leaderboard: '<#c42323>Не удалось загрузить рейтинг.</#c42323>'
+  invalid-challenge-id: '<#c42323>Некорректный идентификатор вызова.</#c42323>'
 
 controller:
-  busy: '<red>Один из игроков уже в очереди, в бою или ожидает восстановления.</red>'
-  sent: '<green>Вызов отправлен игроку <white><player></white>.</green>'
-  failed: '<red>Не удалось обработать вызов на дуэль.</red>'
-  network-unavailable: '<red>Сетевые вызовы сейчас недоступны.</red>'
-  no-network-arena: '<red>Сейчас нет доступной арены для выбранного режима и снаряжения.</red>'
-  network-transfer: '<gray>Вызов принят. Перевожу тебя на сервер арены</gray> <white><server></white><gray>…</gray>'
-  network-return: '<gray>Возвращаю тебя на исходный сервер</gray> <white><server></white><gray>…</gray>'
-  return-offer: '<gray>Ты в лобби арены. Твои вещи в безопасности.</gray> <action> <dark_gray>Сервер: <server></dark_gray>'
-  return-action: '<aqua>[Вернуться обратно]</aqua>'
-  return-hover: '<gray>Вернуться на исходный сервер и проверить вещи</gray>'
-  no-return-offer: '<gray>Сейчас нет ожидающего возврата после дуэли.</gray>'
-  network-timeout: '<red>Не удалось вовремя подготовить обоих игроков к дуэли.</red>'
-  expired: '<red>Этот вызов уже истёк.</red>'
-  start-failed: '<red>Не удалось начать дуэль: <reason></red>'
-  wait-cancelled: '<gray>ожидание арены отменено</gray>'
-  start-internal: '<gray>арена или надёжное хранилище сейчас недоступны</gray>'
-  denied: '<gray>Вызов на дуэль отклонён.</gray>'
-  cancelled: '<gray>Вызов на дуэль отменён.</gray>'
-  forfeit: '<gray>Ты сдался. Результат дуэли сохраняется…</gray>'
-  not-fighting: '<red>Ты сейчас не участвуешь в активной дуэли.</red>'
-  stats-failed: '<red>Не удалось загрузить статистику.</red>'
+  busy: '<#c42323>Один из игроков уже в очереди, в бою или восстанавливает состояние.</#c42323>'
+  sent: '<#2bba43>Вызов отправлен игроку <#e6fff3><player></#e6fff3>.</#2bba43>'
+  failed: '<#c42323>Не удалось обработать вызов на дуэль.</#c42323>'
+  network-unavailable: '<#c42323>Сетевые вызовы сейчас недоступны.</#c42323>'
+  no-network-arena: '<#c42323>Сейчас нет подходящей свободной арены.</#c42323>'
+  network-transfer: '<#e6fff3>Вызов принят.</#e6fff3><newline><#8c8c8c>Перемещаю на арену:</#8c8c8c> <#92bed8><server></#92bed8>'
+  network-return: '<#e6fff3>Возвращаю тебя на исходный сервер.</#e6fff3><newline><#8c8c8c>Сервер:</#8c8c8c> <#92bed8><server></#92bed8>'
+  rematch-return: '<#e6fff3>Новый бой принят.</#e6fff3><newline><#8c8c8c>Сначала безопасно восстановлю состояние на</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, затем отправлю на арену.</#8c8c8c>'
+  return-offer: |-
+    <#e6fff3>Бой завершён. Твои вещи защищены.</#e6fff3>
+    <#8c8c8c>Исходный сервер:</#8c8c8c> <#92bed8><server></#92bed8>
+    <action>
+  return-action: '<#92bed8>↩ Вернуться обратно</#92bed8>'
+  return-hover: '<#8c8c8c>Вернуться на исходный сервер и проверить вещи</#8c8c8c>'
+  no-return-offer: '<#8c8c8c>Сейчас нет ожидающего возврата после дуэли.</#8c8c8c>'
+  network-timeout: '<#c42323>Не удалось вовремя подготовить обоих игроков к дуэли.</#c42323>'
+  expired: '<#c42323>Этот вызов уже истёк.</#c42323>'
+  start-failed: '<#c42323>Не удалось начать дуэль:</#c42323> <reason>'
+  wait-cancelled: '<#8c8c8c>ожидание арены отменено</#8c8c8c>'
+  start-internal: '<#8c8c8c>арена или защищённое хранилище сейчас недоступны</#8c8c8c>'
+  denied: '<#8c8c8c>Вызов на дуэль отклонён.</#8c8c8c>'
+  cancelled: '<#8c8c8c>Вызов на дуэль отменён.</#8c8c8c>'
+  forfeit: '<#ff9f0f>Ты сдался. Сохраняю результат боя…</#ff9f0f>'
+  not-fighting: '<#c42323>Ты сейчас не участвуешь в активной дуэли.</#c42323>'
+  stats-failed: '<#c42323>Не удалось загрузить статистику.</#c42323>'
   stats: |-
-    <dark_gray>────────</dark_gray> <gold><player></gold> <dark_gray>────────</dark_gray>
-    <gray>Рейтинг:</gray> <aqua><rating></aqua>
-    <gray>Победы:</gray> <green><wins></green>  <gray>Поражения:</gray> <red><losses></red>
-    <gray>Винрейт:</gray> <yellow><winrate>%</yellow>
-    <gray>Серия:</gray> <gold><streak></gold>  <gray>Лучшая:</gray> <gold><best></gold>
-    <dark_gray>────────────────────</dark_gray>
-  no-incoming: '<red>У тебя нет входящих вызовов.</red>'
-  no-outgoing: '<red>У тебя нет исходящих вызовов.</red>'
-  loadout-kit: '<gray>кит <white><kit></white></gray>'
-  loadout-own: '<gray>своё снаряжение</gray>'
+    <#e6fff3>Статистика игрока <#92bed8><player></#92bed8></#e6fff3>
+    <#8c8c8c>Рейтинг:</#8c8c8c> <#92bed8><rating></#92bed8>
+    <#8c8c8c>Победы:</#8c8c8c> <#2bba43><wins></#2bba43>  <#8c8c8c>Поражения:</#8c8c8c> <#c42323><losses></#c42323>
+    <#8c8c8c>Винрейт:</#8c8c8c> <#ffacd5><winrate>%</#ffacd5>
+    <#8c8c8c>Серия:</#8c8c8c> <#92bed8><streak></#92bed8>  <#8c8c8c>Лучшая:</#8c8c8c> <#92bed8><best></#92bed8>
+  no-incoming: '<#c42323>У тебя нет входящих вызовов.</#c42323>'
+  no-outgoing: '<#c42323>У тебя нет исходящих вызовов.</#c42323>'
+  loadout-kit: '<#8c8c8c>кит <#e6fff3><kit></#e6fff3></#8c8c8c>'
+  loadout-own: '<#8c8c8c>своё снаряжение</#8c8c8c>'
   received: |-
-    <yellow><white><player></white> вызывает тебя на дуэль: <objective></yellow>
-    <gray>Снаряжение:</gray> <loadout> <dark_gray>•</dark_gray> <gray>BO<bestof></gray> <dark_gray>•</dark_gray> <gray>Рейтинг:</gray> <ranked>
+    <#e6fff3><#ffacd5><player></#ffacd5> вызывает тебя на дуэль</#e6fff3>
+    <#8c8c8c>Режим:</#8c8c8c> <objective> <#666666>•</#666666> <#8c8c8c>Снаряжение:</#8c8c8c> <loadout>
+    <#8c8c8c>Формат:</#8c8c8c> <#92bed8>BO<bestof></#92bed8> <#666666>•</#666666> <#8c8c8c>Рейтинг:</#8c8c8c> <ranked>
     <rules>
   combat-summary: |-
     <gray>Внезапная смерть:</gray> <white><sudden>с</white> <dark_gray>•</dark_gray> <gray>Снаряды:</gray> <projectiles> <dark_gray>•</dark_gray> <gray>Расходники:</gray> <consumables>
     <gray>Жемчуг:</gray> <pearls> <dark_gray>•</dark_gray> <gray>Регенерация:</gray> <regeneration>
   hit-race-summary: '<gray>Цель:</gray> <white><hits> попаданий</white> <dark_gray>•</dark_gray> <gray>Урон отключён, считаются прямые удары.</gray>'
 
-  accept: '<newline><green>[Принять]</green>'
-  accept-hover: '<green>Начать дуэль</green>'
-  deny: ' <red>[Отклонить]</red>'
-  deny-hover: '<red>Отклонить вызов</red>'
+  accept: '<newline><#2bba43>✔ Принять</#2bba43>'
+  accept-hover: '<#2bba43>Начать дуэль</#2bba43>'
+  deny: '  <#c42323>✕ Отклонить</#c42323>'
+  deny-hover: '<#c42323>Отклонить вызов</#c42323>'
 
 session:
   queued: '<yellow>Все совместимые арены заняты. Ваша пара в очереди: <white>#<position></white>.</yellow>'
@@ -258,7 +262,7 @@ session:
   command-blocked: '<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>'
 
 network:
-  win: '<dark_gray>[</dark_gray><gold>Дуэли</gold><dark_gray>]</dark_gray> <aqua><winner></aqua> <gray>победил</gray> <red><loser></red> <dark_gray>(<rating>)</dark_gray>'
+  win: '<#92bed8><winner></#92bed8> <#8c8c8c>побеждает</#8c8c8c> <#ffacd5><loser></#ffacd5> <#666666>• рейтинг <rating></#666666>'
 
 admin:
   no-permission: '<red>Нет права <permission>.</red>'

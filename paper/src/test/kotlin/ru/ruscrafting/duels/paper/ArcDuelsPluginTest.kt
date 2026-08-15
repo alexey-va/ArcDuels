@@ -14,6 +14,8 @@ import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.format.TextDecoration
 import io.papermc.paper.datacomponent.DataComponentTypes
 import ru.ruscrafting.duels.domain.ChallengeId
@@ -72,6 +74,21 @@ class ArcDuelsPluginTest : StringSpec({
         hasUsableArenaRoute(localArenaCount = 0, networkArenaRoutingEnabled = true) shouldBe true
         hasUsableArenaRoute(localArenaCount = 0, networkArenaRoutingEnabled = false) shouldBe false
         hasUsableArenaRoute(localArenaCount = 1, networkArenaRoutingEnabled = false) shouldBe true
+    }
+
+    "chat notices use one calm identity real blank lines and indented continuation rows" {
+        val locales = LocaleService.load(plugin)
+        val player = server.addPlayer("NoticeTester")
+        player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        val action = Component.text("Вернуться").clickEvent(ClickEvent.runCommand("/duel return"))
+        val body = Component.text("Первая строка").append(Component.newline()).append(action)
+
+        val notice = locales.frameNotice(player, body)
+        val plain = PlainTextComponentSerializer.plainText().serialize(notice)
+
+        plain shouldBe "\n  ⚔ • Первая строка\n  Вернуться\n"
+        ("\\n" in plain) shouldBe false
+        notice.containsRunCommand("/duel return") shouldBe true
     }
 
     "GUI item specs preserve the configured ItemsAdder material and modern model data" {
@@ -293,3 +310,6 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.set("arenas.gui_arena", null)
     }
 })
+
+private fun Component.containsRunCommand(command: String): Boolean =
+    clickEvent() == ClickEvent.runCommand(command) || children().any { it.containsRunCommand(command) }

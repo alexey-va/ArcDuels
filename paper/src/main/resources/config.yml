@@ -17,8 +17,6 @@ post-match:
   # PROMPT leaves the player in the arena lobby and offers a safe return button.
   # AUTOMATIC keeps the legacy delayed proxy return.
   return-policy: PROMPT
-  # If an arena has no explicit lobby, use this backend's primary world spawn.
-  server-spawn-fallback: true
 
 locale:
   # ru or en. When enabled, Russian Minecraft clients get ru and all others en.
@@ -197,7 +195,8 @@ arenas:
       yaw: 180.0
       pitch: 0.0
     # Safe post-match waiting point. Set it from the admin arena GUI or with
-    # /duels admin arena setlobby <id>. The primary world spawn is the fallback.
+    # /duels admin arena setlobby <id>. Without one, each player returns to
+    # their assigned spawn on this arena.
     lobby:
       world: world
       x: 0.5

@@ -105,7 +105,7 @@ class DuelGuiService internal constructor(
 
     fun openAdmin(player: Player) {
         if (!player.hasPermission(ADMIN_PERMISSION)) {
-            player.sendMessage(locales.component(player, "admin.no-permission", LocaleService.text("permission", ADMIN_PERMISSION)))
+            player.sendMessage(locales.notice(player, "admin.no-permission", LocaleService.text("permission", ADMIN_PERMISSION)))
             return
         }
         pendingArenaNames.remove(player.uniqueId)
@@ -262,7 +262,7 @@ class DuelGuiService internal constructor(
             runSync {
                 if (!player.isOnline) return@runSync
                 if (failure != null) {
-                    player.sendMessage(locales.component(player, "error.leaderboard"))
+                    player.sendMessage(locales.notice(player, "error.leaderboard"))
                     return@runSync
                 }
                 val page = pageWindow(entries, requestedPage, CONTENT_SLOTS.size)
@@ -341,7 +341,7 @@ class DuelGuiService internal constructor(
         val target = targets.find(draft.target.uniqueId)
         if (target == null) {
             player.closeInventory()
-            player.sendMessage(locales.component(player, "error.player-left"))
+            player.sendMessage(locales.notice(player, "error.player-left"))
             return
         }
         val holder = RulesMenuHolder(draft)
@@ -425,7 +425,7 @@ class DuelGuiService internal constructor(
                 42 -> if (sessions.hasPendingRecovery(player)) {
                     player.closeInventory()
                     if (sessions.requestRecovery(player)) {
-                        player.sendMessage(locales.component(player, "session.recovery-requested"))
+                        player.sendMessage(locales.notice(player, "session.recovery-requested"))
                     }
                 }
                 44 -> if (player.hasPermission(ADMIN_PERMISSION)) openAdmin(player)
@@ -436,17 +436,17 @@ class DuelGuiService internal constructor(
                 NEXT_SLOT -> if (holder.hasNext) openTargets(player, holder.page + 1)
                 else -> holder.targets[slot]?.let { selected ->
                     targets.find(selected.uniqueId)?.let { openObjectives(player, it) }
-                        ?: player.sendMessage(locales.component(player, "error.player-left"))
+                        ?: player.sendMessage(locales.notice(player, "error.player-left"))
                 }
             }
             is ObjectiveMenuHolder -> {
                 if (slot == BACK_SLOT) return openTargets(player)
                 val objective = OBJECTIVE_SLOTS[slot] ?: return
                 targets.find(holder.target.uniqueId)?.let { openLoadouts(player, it, objective) }
-                    ?: player.sendMessage(locales.component(player, "error.player-left"))
+                    ?: player.sendMessage(locales.notice(player, "error.player-left"))
             }
             is LoadoutMenuHolder -> {
-                val target = targets.find(holder.target.uniqueId) ?: run { player.closeInventory(); player.sendMessage(locales.component(player, "error.player-left")); return }
+                val target = targets.find(holder.target.uniqueId) ?: run { player.closeInventory(); player.sendMessage(locales.notice(player, "error.player-left")); return }
                 if (slot == BACK_SLOT) return openObjectives(player, target)
                 if (slot == PREVIOUS_SLOT && holder.hasPrevious) return openLoadouts(player, target, holder.objective, holder.page - 1)
                 if (slot == NEXT_SLOT && holder.hasNext) return openLoadouts(player, target, holder.objective, holder.page + 1)
@@ -525,7 +525,7 @@ class DuelGuiService internal constructor(
         runSync {
             if (!player.isOnline) return@runSync
             if (raw.equals("cancel", true) || raw.equals("отмена", true)) {
-                player.sendMessage(locales.component(player, "menu.admin.create-cancelled"))
+                player.sendMessage(locales.notice(player, "menu.admin.create-cancelled"))
                 openAdmin(player)
                 return@runSync
             }
@@ -545,12 +545,12 @@ class DuelGuiService internal constructor(
         player.closeInventory()
         val token = System.nanoTime()
         pendingArenaNames[player.uniqueId] = token
-        player.sendMessage(locales.component(player, "menu.admin.create-prompt"))
+        player.sendMessage(locales.notice(player, "menu.admin.create-prompt"))
         plugin.server.scheduler.runTaskLater(
             plugin,
             Runnable {
                 if (pendingArenaNames.remove(player.uniqueId, token) && player.isOnline) {
-                    player.sendMessage(locales.component(player, "menu.admin.create-timeout"))
+                    player.sendMessage(locales.notice(player, "menu.admin.create-timeout"))
                 }
             },
             ARENA_NAME_TIMEOUT_TICKS,
@@ -571,7 +571,7 @@ class DuelGuiService internal constructor(
         val selected = readArenaAllowedObjectives(section).toMutableSet()
         if (!selected.add(objective)) selected.remove(objective)
         if (selected.isEmpty()) {
-            player.sendMessage(locales.component(player, "menu.admin-objectives.required"))
+            player.sendMessage(locales.notice(player, "menu.admin-objectives.required"))
             return openAdminArenaObjectives(player, arenaId)
         }
         admin.execute(player, listOf("arena", "setobjectives", arenaId, *selected.map { it.key }.toTypedArray()))
@@ -616,7 +616,7 @@ class DuelGuiService internal constructor(
     private fun handleRulesClick(player: Player, draft: DuelDraft, slot: Int) {
         when (slot) {
             BACK_SLOT -> targets.find(draft.target.uniqueId)?.let { openLoadouts(player, it, draft.objective) }
-                ?: run { player.closeInventory(); player.sendMessage(locales.component(player, "error.player-left")) }
+                ?: run { player.closeInventory(); player.sendMessage(locales.notice(player, "error.player-left")) }
             10 -> if (draft.mode == DuelMode.KIT) openRules(player, draft.copy(ranked = !draft.ranked))
             12 -> openRules(player, draft.copy(bestOf = when (draft.bestOf) { 1 -> 3; 3 -> 5; else -> 1 }))
             14 -> when (draft.objective) {
@@ -632,7 +632,7 @@ class DuelGuiService internal constructor(
             40 -> {
                 val target = targets.find(draft.target.uniqueId)
                 player.closeInventory()
-                if (target == null) player.sendMessage(locales.component(player, "error.player-left"))
+                if (target == null) player.sendMessage(locales.notice(player, "error.player-left"))
                 else challengeAction(player, target, DuelRules(draft.mode, draft.kitId, draft.ranked, draft.bestOf, draft.objective, draft.modifiers))
             }
         }

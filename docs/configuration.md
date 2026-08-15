@@ -53,12 +53,17 @@ player-data-sync:
   settle-delay-ticks: 40
 post-match:
   return-policy: PROMPT # or AUTOMATIC
-  server-spawn-fallback: true
 ```
 
 `HUSKSYNC` fails startup when HuskSync is absent. `AUTO` detects it. `NONE`
 means inventories are isolated on that backend; such a node can advertise kit
 arenas but ArcDuels suppresses its cross-server own-inventory capacity.
+
+`PROMPT` keeps players at the arena's configured lobby and offers a return to
+their origin server. If the arena has no lobby, each participant is moved to
+their assigned arena spawn; ArcDuels never falls back to an unrelated primary
+world. Accepting another duel from this waiting state automatically returns the
+player through the origin recovery flow before the next arena transfer.
 
 ## Localization
 

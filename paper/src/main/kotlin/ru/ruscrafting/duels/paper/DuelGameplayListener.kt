@@ -260,7 +260,7 @@ internal class DuelGameplayListener(
             return
         }
         event.isCancelled = true
-        event.player.sendMessage(locales.component(event.player, "session.command-blocked"))
+        event.player.sendMessage(locales.notice(event.player, "session.command-blocked"))
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

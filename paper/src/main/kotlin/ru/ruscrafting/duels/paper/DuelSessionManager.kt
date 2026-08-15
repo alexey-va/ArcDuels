@@ -50,7 +50,6 @@ class DuelSessionManager internal constructor(
     private val recoveryApplyDelayTicks: Long = 40L,
     private val playerDataSaver: (Player) -> Unit = Player::saveData,
     private val syncProvider: PlayerDataSyncProvider = PlayerDataSyncProvider.NONE,
-    private val serverSpawnLobbyFallback: Boolean = true,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
@@ -94,8 +93,8 @@ class DuelSessionManager internal constructor(
         pendingStarts[second.uniqueId] = result
         if (!reservation.isDone) {
             val position = arenas.queueSize()
-            first.sendMessage(locales.component(first, "session.queued", LocaleService.text("position", position)))
-            second.sendMessage(locales.component(second, "session.queued", LocaleService.text("position", position)))
+            first.sendMessage(locales.notice(first, "session.queued", LocaleService.text("position", position)))
+            second.sendMessage(locales.notice(second, "session.queued", LocaleService.text("position", position)))
         }
         reservation
             .whenComplete { match, failure ->
@@ -312,7 +311,7 @@ class DuelSessionManager internal constructor(
                 if (lookupFailure != null) {
                     plugin.logger.warning("Could not check pending duel state for ${player.uniqueId}: ${unwrap(lookupFailure).message}")
                     if (player.isOnline) {
-                        if (notifyFailure) player.sendMessage(locales.component(player, "session.recovery-check-retry"))
+                        if (notifyFailure) player.sendMessage(locales.notice(player, "session.recovery-check-retry"))
                         plugin.server.scheduler.runTaskLater(
                             plugin,
                             Runnable {
@@ -406,7 +405,7 @@ class DuelSessionManager internal constructor(
             runCatching { playerStates.decode(escrow) }
                 .onSuccess { stored ->
                     if (escrow.inventoryReplaced && !stored.state.inventoryMatches(player)) {
-                        player.sendMessage(locales.component(player, "session.recovering"))
+                        player.sendMessage(locales.notice(player, "session.recovering"))
                     }
                     if (restoreAndRetain(player, stored, skipApplyWhenInventoryMatches = true)) {
                         markRestored(escrow.matchId, player.uniqueId)
@@ -416,7 +415,7 @@ class DuelSessionManager internal constructor(
                 }
                 .onFailure { failure ->
                     plugin.logger.severe("Could not decode pending duel state for ${player.uniqueId}: ${failure.message}")
-                    if (escrow.inventoryReplaced) player.sendMessage(locales.component(player, "session.recovery-failed"))
+                    if (escrow.inventoryReplaced) player.sendMessage(locales.notice(player, "session.recovery-failed"))
                     retryPendingRecovery(player, escrow)
                 }
         }
@@ -483,7 +482,7 @@ class DuelSessionManager internal constructor(
             }
         preparingPlayers -= player.uniqueId
         replayed.onSuccess {
-            if (escrow.inventoryReplaced) player.sendMessage(locales.component(player, "session.admin-restored"))
+            if (escrow.inventoryReplaced) player.sendMessage(locales.notice(player, "session.admin-restored"))
             result.complete(AdminRecoveryResult(AdminRecoveryStatus.REPLAYED, escrow.serverId))
         }.onFailure { failure ->
             plugin.logger.severe("Administrator replay failed for ${player.uniqueId}: ${failure.message}")
@@ -497,12 +496,12 @@ class DuelSessionManager internal constructor(
     ): Boolean {
         val transfer = remoteRecoveryTransfer
         if (transfer == null) {
-            player.sendMessage(locales.component(player, "session.remote-recovery-unavailable", LocaleService.text("server", escrow.serverId.value)))
+            player.sendMessage(locales.notice(player, "session.remote-recovery-unavailable", LocaleService.text("server", escrow.serverId.value)))
             return false
         }
         val token = UUID.randomUUID()
         if (remoteRecoveryTokens.putIfAbsent(player.uniqueId, token) != null) return true
-        player.sendMessage(locales.component(player, "session.remote-recovery", LocaleService.text("server", escrow.serverId.value)))
+        player.sendMessage(locales.notice(player, "session.remote-recovery", LocaleService.text("server", escrow.serverId.value)))
         requestRemoteRecoveryTransfer(player, escrow, token, transfer)
         return true
     }
@@ -959,7 +958,7 @@ class DuelSessionManager internal constructor(
         session.suddenDeathStarted = true
         participants(match).forEach { player ->
             player.addPotionEffect(PotionEffect(PotionEffectType.WITHER, Int.MAX_VALUE, 0, false, false, true))
-            player.sendMessage(locales.component(player, "session.sudden-death"))
+            player.sendMessage(locales.notice(player, "session.sudden-death"))
             player.playSound(player.location, Sound.ENTITY_WITHER_SPAWN, 0.6f, 1.2f)
         }
     }
@@ -1086,15 +1085,8 @@ class DuelSessionManager internal constructor(
     ): Boolean {
         var moved = true
         val arena = arenas.get(match.arenaId)
-        val lobby =
-            arena.lobby ?: if (serverSpawnLobbyFallback) {
-                plugin.server.worlds.first().spawnLocation
-            } else {
-                plugin.logger.severe("Arena ${arena.id} has no post-match lobby and the server-spawn fallback is disabled")
-                return false
-            }
         if (arena.lobby == null) {
-            plugin.logger.warning("Arena ${arena.id} has no lobby; using the primary world spawn after this match")
+            plugin.logger.warning("Arena ${arena.id} has no lobby; using each participant's assigned arena spawn after this match")
         }
         session.snapshots.forEach { (playerId, origin) ->
             val player = plugin.server.getPlayer(playerId) ?: return@forEach
@@ -1105,7 +1097,8 @@ class DuelSessionManager internal constructor(
                     session.arenaBaselines.getValue(playerId).restoreState(player)
                 }
                 playerDataSaver(player)
-                check(teleportInternally(player, lobby.clone())) { "Could not move ${player.uniqueId} to the arena lobby" }
+                val destination = postMatchDestination(arena, match, PlayerId(playerId))
+                check(teleportInternally(player, destination)) { "Could not move ${player.uniqueId} to the post-match waiting point" }
                 networkLobbyPlayers += player.uniqueId
             }.onFailure { failure ->
                 moved = false
@@ -1180,7 +1173,7 @@ class DuelSessionManager internal constructor(
                         "Could not archive restored duel state for ${player.uniqueId}; the active snapshot remains retryable: ${unwrap(failure).message}",
                     )
                     if (player.isOnline && stored.escrow.inventoryReplaced) {
-                        player.sendMessage(locales.component(player, "session.ack-retry"))
+                        player.sendMessage(locales.notice(player, "session.ack-retry"))
                     }
                     plugin.server.scheduler.runTaskLater(
                         plugin,
@@ -1267,6 +1260,17 @@ class DuelSessionManager internal constructor(
         const val RECOVERY_READY_POLL_TICKS = 5L
     }
 }
+
+internal fun postMatchDestination(
+    arena: PaperArena,
+    match: DuelMatch,
+    player: PlayerId,
+): org.bukkit.Location =
+    (arena.lobby ?: when (player) {
+        match.firstPlayer -> arena.firstSpawn
+        match.secondPlayer -> arena.secondSpawn
+        else -> error("Player $player is not part of duel ${match.id}")
+    }).clone()
 
 internal enum class AdminRecoveryStatus {
     STARTED,

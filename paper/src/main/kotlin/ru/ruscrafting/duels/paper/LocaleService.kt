@@ -1,6 +1,7 @@
 package ru.ruscrafting.duels.paper
 
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.TextReplacementConfig
 import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver
@@ -31,6 +32,36 @@ class LocaleService private constructor(
         key: String,
         vararg resolvers: TagResolver,
     ): Component = miniMessage.deserialize(raw(normalize(language), key), *resolvers)
+
+    /**
+     * Renders a top-level player-facing chat notice. GUI labels, titles and
+     * action bars intentionally keep using [component] so the chat frame never
+     * leaks into other Adventure surfaces.
+     */
+    fun notice(
+        audience: CommandSender?,
+        key: String,
+        vararg resolvers: TagResolver,
+    ): Component = frameNotice(audience, component(audience, key, *resolvers))
+
+    fun frameNotice(
+        audience: CommandSender?,
+        body: Component,
+    ): Component {
+        val indent = Component.text("  ")
+        val indentedBody =
+            body.replaceText(
+                TextReplacementConfig.builder()
+                    .matchLiteral("\n")
+                    .replacement(Component.newline().append(indent))
+                    .build(),
+            )
+        return Component.newline()
+            .append(indent)
+            .append(component(audience, "identity"))
+            .append(indentedBody)
+            .append(Component.newline())
+    }
 
     fun lines(
         audience: CommandSender?,

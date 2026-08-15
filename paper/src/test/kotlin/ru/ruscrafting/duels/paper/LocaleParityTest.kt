@@ -42,6 +42,21 @@ class LocaleParityTest : StringSpec({
         }
     }
 
+    "chat identity is calm and legacy bracket prefixes cannot return" {
+        for (language in listOf("ru", "en")) {
+            val bundle = loadBundle(language)
+            bundle.getString("identity") shouldBe "<#92bed8>⚔</#92bed8> <#666666>•</#666666> "
+            for ((key, values) in leaves(bundle)) {
+                values.forEach { value ->
+                    withClue("$language:$key") {
+                        Regex("\\[(Дуэли|Duels)]", RegexOption.IGNORE_CASE).containsMatchIn(value) shouldBe false
+                        ("\\n" in value) shouldBe false
+                    }
+                }
+            }
+        }
+    }
+
     "player-facing copy does not expose storage implementation details" {
         val forbidden = Regex("(?i)mysql|mariadb|jdbc|redis|database|escrow|баз[а-я]*\\s+данн")
         for (language in listOf("ru", "en")) {

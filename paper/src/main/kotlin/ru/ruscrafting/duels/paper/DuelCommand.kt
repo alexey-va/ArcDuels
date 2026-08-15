@@ -31,7 +31,7 @@ class DuelCommand internal constructor(
         }
         val player = sender as? Player
         if (player == null) {
-            sender.sendMessage(locales?.component(sender, "error.player-only") ?: miniMessage.deserialize("<red>This command requires a player.</red>"))
+            sender.sendMessage(locales?.notice(sender, "error.player-only") ?: miniMessage.deserialize("<red>This command requires a player.</red>"))
             return true
         }
         if (args.isEmpty()) {
@@ -106,7 +106,7 @@ class DuelCommand internal constructor(
         }
 
     private fun message(player: Player, key: String, fallback: String) =
-        locales?.component(player, key) ?: miniMessage.deserialize(fallback)
+        locales?.notice(player, key) ?: miniMessage.deserialize(fallback)
 
     private fun resolveTarget(player: Player, name: String): DuelTarget? =
         targets?.find(name) ?: player.server.getPlayerExact(name)?.let(::localTarget)

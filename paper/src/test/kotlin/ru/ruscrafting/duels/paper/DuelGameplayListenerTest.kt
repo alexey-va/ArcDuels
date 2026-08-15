@@ -137,7 +137,7 @@ class DuelGameplayListenerTest : StringSpec({
         val sessions = mockk<DuelSessionManager>(relaxed = true)
         every { sessions.isStateLocked(player) } returns true
         val locales = mockk<LocaleService>()
-        every { locales.component(player, "session.command-blocked") } returns Component.empty()
+        every { locales.notice(player, "session.command-blocked") } returns Component.empty()
         val event = mockk<PlayerCommandPreprocessEvent>(relaxed = true)
         every { event.player } returns player
         every { event.message } returns "/spawn"
