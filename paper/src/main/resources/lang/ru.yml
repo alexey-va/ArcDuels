@@ -1,4 +1,4 @@
-identity: '<#92bed8>⚔</#92bed8> <#666666>•</#666666> '
+identity: '<#32d6ff>⚔</#32d6ff> <#8795a5>•</#8795a5> '
 
 menu:
   common:
@@ -87,7 +87,7 @@ menu:
     arenas: '<gold>Арены</gold>'
     arenas-lore: ['<gray>Создано:</gray> <yellow><arenas></yellow>', '', '<aqua>ЛКМ</aqua> <gray>Открыть список арен</gray>']
     status: '<gold>Состояние</gold>'
-    status-lore: ['<gray>Включено арен:</gray> <yellow><arenas></yellow>', '<gray>Активных боёв:</gray> <yellow><active></yellow>', '<gray>Пар в очереди:</gray> <yellow><waiting></yellow>']
+    status-lore: ['<gray>Сервер:</gray> <server>', '<gray>Включено арен:</gray> <yellow><arenas></yellow>', '<gray>Активных боёв:</gray> <yellow><active></yellow>', '<gray>Пар в очереди:</gray> <yellow><waiting></yellow>', '<gray>Ожидают восстановления:</gray> <#ffb347><recoveries></#ffb347>']
     recovery: '<gold>Восстановление игроков</gold>'
     recovery-lore: ['<gray>Игроков онлайн:</gray> <yellow><players></yellow>', '<gray>Проверить сохранённый снимок</gray>', '<gray>и безопасно восстановить состояние.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать игрока</gray>']
     create: '<gold>Создать арену</gold>'
@@ -188,8 +188,8 @@ controller:
   failed: '<#c42323>Не удалось обработать вызов на дуэль.</#c42323>'
   network-unavailable: '<#c42323>Сетевые вызовы сейчас недоступны.</#c42323>'
   no-network-arena: '<#c42323>Сейчас нет подходящей свободной арены.</#c42323>'
-  network-transfer: '<#e6fff3>Вызов принят.</#e6fff3><newline><#8c8c8c>Перемещаю на арену:</#8c8c8c> <#92bed8><server></#92bed8>'
-  network-return: '<#e6fff3>Возвращаю тебя на исходный сервер.</#e6fff3><newline><#8c8c8c>Сервер:</#8c8c8c> <#92bed8><server></#92bed8>'
+  network-transfer: '<#fff4d6>Вызов принят.</#fff4d6><newline><#9aa7b5>Перемещаю на арену:</#9aa7b5> <server>'
+  network-return: '<#fff4d6>Возвращаю тебя на исходный сервер.</#fff4d6><newline><#9aa7b5>Сервер:</#9aa7b5> <server>'
   rematch-return: '<#e6fff3>Новый бой принят.</#e6fff3><newline><#8c8c8c>Сначала безопасно восстановлю состояние на</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, затем отправлю на арену.</#8c8c8c>'
   return-offer: |-
     <#e6fff3>Бой завершён. Твои вещи защищены.</#e6fff3>
@@ -251,13 +251,14 @@ session:
   recovery-requested: '<gray>Восстановление подготовлено. Дождись полной загрузки данных игрока.</gray>'
   recovering: '<yellow>Восстанавливаю сохранённое состояние после незавершённой дуэли…</yellow>'
   recovery-failed: '<red>Состояние не восстановлено. Обратись к администратору; защищённая копия инвентаря сохранена.</red>'
-  countdown-title: '<#92bed8><seconds></#92bed8>'
-  countdown-subtitle: '<#8c8c8c>Противник</#8c8c8c> <#e6fff3><opponent></#e6fff3>'
-  fight-title: '<#e6fff3>В бой</#e6fff3>'
-  fight-subtitle: '<#8c8c8c>Дуэль началась</#8c8c8c>'
-  bossbar-countdown: '<#e6fff3><opponent></#e6fff3> <#666666>•</#666666> <#8c8c8c>старт через</#8c8c8c> <#92bed8><seconds></#92bed8>'
-  bossbar-active: '<#e6fff3><opponent></#e6fff3> <#666666>•</#666666> <#92bed8><own></#92bed8><#666666>:</#666666><#ffacd5><enemy></#ffacd5> <#666666>•</#666666> <#8c8c8c><time></#8c8c8c>'
-  bossbar-hits: '<#e6fff3><opponent></#e6fff3> <#666666>•</#666666> <#92bed8><own></#92bed8><#666666>:</#666666><#ffacd5><enemy></#ffacd5> <#666666>•</#666666> <#8c8c8c>цель <target></#8c8c8c>'
+  countdown-title: '<#32d6ff><seconds></#32d6ff>'
+  countdown-subtitle: '<#9aa7b5>Противник</#9aa7b5> <#fff4d6><opponent></#fff4d6>'
+  fight-title: '<#ffb347>В бой</#ffb347>'
+  fight-subtitle: '<#55ff8a>Дуэль началась</#55ff8a>'
+  bossbar-countdown: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#9aa7b5>старт через</#9aa7b5> <#32d6ff><seconds></#32d6ff>'
+  bossbar-active-single: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#ffb347><time></#ffb347>'
+  bossbar-active: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#32d6ff><own></#32d6ff><#8795a5>:</#8795a5><#ff5ca8><enemy></#ff5ca8> <#8795a5>•</#8795a5> <#ffb347><time></#ffb347>'
+  bossbar-hits: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#32d6ff><own></#32d6ff><#8795a5>:</#8795a5><#ff5ca8><enemy></#ff5ca8> <#8795a5>•</#8795a5> <#ffb347>цель <target></#ffb347>'
   hill-contested: '<yellow>Холм оспаривается</yellow>'
   hill-capturing: '<green>Захват</green>'
   hill-free: '<gray>Холм свободен</gray>'
@@ -277,11 +278,16 @@ session:
   command-blocked: '<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>'
 
 network:
-  win: '<#92bed8><winner></#92bed8> <#8c8c8c>побеждает</#8c8c8c> <#ffacd5><loser></#ffacd5> <#666666>• рейтинг <rating></#666666>'
+  win: '<#32d6ff><winner></#32d6ff> <#9aa7b5>побеждает</#9aa7b5> <#ff5ca8><loser></#ff5ca8> <#8795a5>• рейтинг <rating></#8795a5>'
 
 admin:
   no-permission: '<red>Нет права <permission>.</red>'
-  status: '<aqua>ArcDuels:</aqua> арен <white><arenas></white>, занято <white><active></white>, пар в очереди <white><waiting></white>.'
+  status: |-
+    <#fff4d6>Состояние ArcDuels</#fff4d6>
+    <#9aa7b5>Сервер:</#9aa7b5> <server>
+    <#9aa7b5>Арены:</#9aa7b5> <#32d6ff><arenas></#32d6ff> <#8795a5>• занято <active></#8795a5>
+    <#9aa7b5>Очередь:</#9aa7b5> <#ffb347><waiting></#ffb347>
+    <#9aa7b5>Ожидают восстановления:</#9aa7b5> <#ffb347><recoveries></#ffb347>
   arena-exists: '<red>Арена <white><arena></white> уже существует.</red>'
   arena-created: '<green>Арена <white><arena></white> создана выключенной.</green> <gray>Теперь задай spawn 1/2, corner 1/2 и при необходимости hill.</gray>'
   arena-editing: '<yellow>Редактируется арена <arena></yellow>'

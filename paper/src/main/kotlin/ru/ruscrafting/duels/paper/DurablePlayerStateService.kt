@@ -16,11 +16,19 @@ import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class StoredPlayerSnapshot(
     val state: PlayerSnapshot,
     val escrow: PlayerStateEscrow,
+)
+
+internal data class RetentionDrainReport(
+    val observed: Int,
+    val acknowledged: Int,
+    val failed: Int,
+    val timedOut: Int,
 )
 
 internal class DurablePlayerStateService(
@@ -122,6 +130,8 @@ internal class DurablePlayerStateService(
 
     fun isPending(playerId: UUID): Boolean = pending.containsKey(playerId)
 
+    fun pendingCount(): Int = pending.size
+
     fun discover(playerId: UUID): CompletableFuture<PlayerStateEscrow?> {
         val cached = pending[playerId]
         return repository.findPending(PlayerId(playerId)).handle { escrow, failure ->
@@ -193,6 +203,38 @@ internal class DurablePlayerStateService(
                 .getOrElse { failure -> CompletableFuture.failedFuture(failure) }
         purge.whenComplete { _, _ -> purgeInFlight.set(false) }
         return purge
+    }
+
+    /**
+     * Waits only for archival operations that were already started after an
+     * exact state apply/save. A timeout never discards the active recovery row.
+     */
+    fun awaitRetentions(timeout: Duration): RetentionDrainReport {
+        require(!timeout.isNegative) { "Retention drain timeout cannot be negative" }
+        val observed = retentions.values.toSet()
+        val deadline = System.nanoTime() + timeout.toNanos()
+        var acknowledged = 0
+        var failed = 0
+        var timedOut = 0
+        observed.forEach { retention ->
+            val remaining = deadline - System.nanoTime()
+            if (remaining <= 0L) {
+                timedOut++
+                return@forEach
+            }
+            try {
+                retention.get(remaining, TimeUnit.NANOSECONDS)
+                acknowledged++
+            } catch (_: TimeoutException) {
+                timedOut++
+            } catch (_: ExecutionException) {
+                failed++
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                timedOut++
+            }
+        }
+        return RetentionDrainReport(observed.size, acknowledged, failed, timedOut)
     }
 
     private fun reconcileUnknownSave(

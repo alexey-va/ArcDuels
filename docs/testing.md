@@ -27,8 +27,15 @@ The suite covers:
   single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
   modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization,
   WorldGuard participant-only PvP overrides, immutable return routing, command
-  bypass behavior, damage-free celebration entities, default-kit presence, and strict Russian /
-  English locale-key and MiniMessage parity.
+  bypass behavior, damage-free celebration entities, default-kit presence,
+  player-facing network server names, BO1 boss bars without a meaningless
+  `0:0`, bounded graceful-shutdown retention draining that preserves timed-out
+  active snapshots, and strict Russian / English locale-key and MiniMessage parity.
+
+The separate `scripts/player-bot` suite recognizes the BO1 opponent/time boss
+bar, BO3/BO5 score boss bar, and hit-race target boss bar. Production QA must
+still exercise a real kit-only arena with two bots and compare their complete
+inventory summaries before and after the match.
 
 ## MySQL integration suite
 

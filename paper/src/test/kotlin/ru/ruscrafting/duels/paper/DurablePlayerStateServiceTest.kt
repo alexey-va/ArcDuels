@@ -117,6 +117,25 @@ class DurablePlayerStateServiceTest : StringSpec({
         service.isPending(first.uniqueId) shouldBe false
     }
 
+    "shutdown retention drain times out without claiming or deleting the active snapshot" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val archival = CompletableFuture<Boolean>()
+        repository.archival = archival
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val player = server.addPlayer()
+        val stored = service.store(MatchId.random(), player, inventoryReplaced = true).get()
+        val retention = service.retain(stored)
+
+        val report = service.awaitRetentions(Duration.ofMillis(1))
+
+        report shouldBe RetentionDrainReport(observed = 1, acknowledged = 0, failed = 0, timedOut = 1)
+        service.isPending(player.uniqueId) shouldBe true
+        archival.complete(true)
+        retention.get()
+        service.isPending(player.uniqueId) shouldBe false
+    }
+
     "own-inventory snapshots are marked so routine restoration stays quiet" {
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)

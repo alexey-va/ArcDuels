@@ -57,6 +57,8 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.getString("player-data-sync.provider") shouldBe "AUTO"
         plugin.config.getLong("player-data-sync.settle-delay-ticks") shouldBe 40L
         plugin.config.getString("post-match.return-policy") shouldBe "PROMPT"
+        plugin.config.getString("server-display-names.survival") shouldBe "<#55ff8a>Выживание</#55ff8a>"
+        plugin.config.getLong("shutdown.recovery-timeout-ms") shouldBe 5_000L
         plugin.getCommand("duel")?.executor?.javaClass shouldBe DuelCommand::class.java
         KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "boxing", "classic", "sumo", "tank", "uhc")
         java.io.File(plugin.dataFolder, "lang/ru.yml").isFile shouldBe true
@@ -96,6 +98,9 @@ class ArcDuelsPluginTest : StringSpec({
         remainingBossBarProgress(1_400, 60) shouldBe 0f
         challengeExpiryDelayTicks(1_000, 1_001) shouldBe 1L
         challengeExpiryDelayTicks(1_000, 1_051) shouldBe 2L
+        activeBossBarLocaleKey(1) shouldBe "session.bossbar-active-single"
+        activeBossBarLocaleKey(3) shouldBe "session.bossbar-active"
+        activeBossBarLocaleKey(5) shouldBe "session.bossbar-active"
     }
 
     "chat notices use one calm identity real blank lines and indented continuation rows" {
@@ -410,6 +415,19 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.isConfigurationSection("arenas.gui_arena") shouldBe true
         player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
         plugin.config.set("arenas.gui_arena", null)
+    }
+
+    "admin status is a readable health card with the configured server name and pending recoveries" {
+        val player = server.addPlayer("StatusAdmin")
+        player.isOp = true
+        player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+
+        player.performCommand("duels admin status") shouldBe true
+
+        val plain = PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.nextComponentMessage()))
+        plain.contains("Состояние ArcDuels") shouldBe true
+        plain.contains("Сервер: Арена") shouldBe true
+        plain.contains("Ожидают восстановления: 0") shouldBe true
     }
 })
 

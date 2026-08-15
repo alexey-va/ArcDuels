@@ -53,7 +53,13 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     override fun onDisable() {
         DuelLog.info("plugin-disable", "shutting down sessions and resources")
-        sessions?.shutdown()
+        runCatching { sessions?.shutdown() }
+            .onFailure { failure ->
+                logger.severe(
+                    "ArcDuels session shutdown failed; durable snapshots remain the recovery authority: " +
+                        "${failure.javaClass.simpleName}: ${failure.message}",
+                )
+            }
         sessions = null
         closeResources()
     }
@@ -62,6 +68,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val serverId = ServerId(config.getString("server-id", server.name)!!)
         DuelLog.info("plugin-bootstrap", "server={} version={}", serverId.value, pluginMeta.version)
         val locales = LocaleService.load(this)
+        val serverNames = ServerDisplayNames.load(config, logger::warning)
+        serverNames.display(serverId)
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
         val persistence = createPersistence()
@@ -121,6 +129,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
         require(countdownSeconds in 0..10) { "countdown-seconds must be between 0 and 10" }
         val celebrationDurationTicks = config.getLong("celebration.duration-ticks", 80L)
         require(celebrationDurationTicks in 0L..200L) { "celebration.duration-ticks must be between 0 and 200" }
+        val shutdownRecoveryTimeoutMillis = config.getLong("shutdown.recovery-timeout-ms", 5_000L)
+        require(shutdownRecoveryTimeoutMillis in 100L..30_000L) {
+            "shutdown.recovery-timeout-ms must be between 100 and 30000"
+        }
         val cmiCombatTags = CmiCombatTagIntegration(this)
         closeables += cmiCombatTags
         val recoveryApplyDelayTicks =
@@ -139,12 +151,14 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 playerStates,
                 locales,
                 countdownSeconds,
+                serverNames = serverNames,
                 remoteRecoveryTransfer = transfer?.let { gateway -> { player, destination -> gateway.connect(player, destination) } },
                 playerDataReady = playerDataSync::isReady,
                 recoveryApplyDelayTicks = recoveryApplyDelayTicks,
                 syncProvider = syncProvider,
                 celebrationDurationTicks = celebrationDurationTicks,
                 externalCombatTagClear = cmiCombatTags::clear,
+                shutdownRecoveryTimeoutMillis = shutdownRecoveryTimeoutMillis,
             )
         sessions = sessionManager
         val challenges =
@@ -162,16 +176,29 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 locales,
                 targets,
                 serverId,
-                network.challenges,
-                network.arenas,
-                transfer,
-                playerDataSync::isReady,
+                serverNames = serverNames,
+                challengeBus = network.challenges,
+                arenaDirectory = network.arenas,
+                transfer = transfer,
+                playerDataReady = playerDataSync::isReady,
                 transferTimeout = Duration.ofSeconds(config.getLong("redis.transfer-timeout-seconds", 30L).coerceIn(10L, 120L)),
                 returnPolicy = PostMatchReturnPolicy.parse(config.getString("post-match.return-policy", "PROMPT")!!),
             )
         closeables += controller
-        val admin = DuelAdminCommand(this, arenas, sessionManager, locales)
-        val gui = DuelGuiService(this, kits, statistics, sessionManager, locales, admin, targets, controller::challenge, controller::showStatistics)
+        val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames)
+        val gui =
+            DuelGuiService(
+                this,
+                kits,
+                statistics,
+                sessionManager,
+                locales,
+                admin,
+                targets,
+                controller::challenge,
+                controller::showStatistics,
+                serverNames,
+            )
         val command = DuelCommand(controller, gui, admin, targets, locales)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)

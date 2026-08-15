@@ -45,7 +45,7 @@ class LocaleParityTest : StringSpec({
     "chat identity is calm and legacy bracket prefixes cannot return" {
         for (language in listOf("ru", "en")) {
             val bundle = loadBundle(language)
-            bundle.getString("identity") shouldBe "<#92bed8>⚔</#92bed8> <#666666>•</#666666> "
+            bundle.getString("identity") shouldBe "<#32d6ff>⚔</#32d6ff> <#8795a5>•</#8795a5> "
             for ((key, values) in leaves(bundle)) {
                 values.forEach { value ->
                     withClue("$language:$key") {
@@ -99,4 +99,4 @@ private fun leaves(configuration: YamlConfiguration): Map<String, List<String>> 
     }.toMap()
 
 private fun replacePlaceholders(input: String): String =
-    input.replace(Regex("<(page|pages|active|waiting|player|players|position|rating|wins|losses|value|seconds|state|server|percent|first|second|reason|kit|loadout|winrate|streak|best|winner|loser|permission|arenas|arena|point|world|radius|height|count|spawn1|spawn2|corner1|corner2|hill|id|online-player|objective|bestof|ranked|sudden|projectiles|consumables|pearls|regeneration|hits|score|target|opponent|rules|own|enemy|time)>"), "value")
+    input.replace(Regex("<(page|pages|active|waiting|recoveries|player|players|position|rating|wins|losses|value|seconds|state|server|percent|first|second|reason|kit|loadout|winrate|streak|best|winner|loser|permission|arenas|arena|point|world|radius|height|count|spawn1|spawn2|corner1|corner2|hill|id|online-player|objective|bestof|ranked|sudden|projectiles|consumables|pearls|regeneration|hits|score|target|opponent|rules|own|enemy|time)>"), "value")

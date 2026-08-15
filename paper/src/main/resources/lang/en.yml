@@ -1,4 +1,4 @@
-identity: '<#92bed8>⚔</#92bed8> <#666666>•</#666666> '
+identity: '<#32d6ff>⚔</#32d6ff> <#8795a5>•</#8795a5> '
 
 menu:
   common:
@@ -87,7 +87,7 @@ menu:
     arenas: '<gold>Arenas</gold>'
     arenas-lore: ['<gray>Created:</gray> <yellow><arenas></yellow>', '', '<aqua>Left click</aqua> <gray>Open arena list</gray>']
     status: '<gold>Status</gold>'
-    status-lore: ['<gray>Enabled arenas:</gray> <yellow><arenas></yellow>', '<gray>Active matches:</gray> <yellow><active></yellow>', '<gray>Waiting pairs:</gray> <yellow><waiting></yellow>']
+    status-lore: ['<gray>Server:</gray> <server>', '<gray>Enabled arenas:</gray> <yellow><arenas></yellow>', '<gray>Active matches:</gray> <yellow><active></yellow>', '<gray>Waiting pairs:</gray> <yellow><waiting></yellow>', '<gray>Pending recoveries:</gray> <#ffb347><recoveries></#ffb347>']
     recovery: '<gold>Player recovery</gold>'
     recovery-lore: ['<gray>Online players:</gray> <yellow><players></yellow>', '<gray>Check for a retained snapshot</gray>', '<gray>and restore the player safely.</gray>', '', '<aqua>Left click</aqua> <gray>Choose a player</gray>']
     create: '<gold>Create arena</gold>'
@@ -188,8 +188,8 @@ controller:
   failed: '<red>Could not process the duel challenge.</red>'
   network-unavailable: '<red>Network challenges are currently unavailable.</red>'
   no-network-arena: '<red>No live arena currently supports the selected objective and loadout.</red>'
-  network-transfer: '<gray>Challenge accepted. Moving you to arena server</gray> <white><server></white><gray>…</gray>'
-  network-return: '<gray>Returning you to your origin server</gray> <white><server></white><gray>…</gray>'
+  network-transfer: '<#fff4d6>Challenge accepted.</#fff4d6><newline><#9aa7b5>Moving you to arena:</#9aa7b5> <server>'
+  network-return: '<#fff4d6>Returning you to your origin server.</#fff4d6><newline><#9aa7b5>Server:</#9aa7b5> <server>'
   rematch-return: '<#e6fff3>Your next fight is accepted.</#e6fff3><newline><#8c8c8c>I will safely restore your state on</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, then send you to the arena.</#8c8c8c>'
   return-offer: |-
     <#e6fff3>The fight is over. Your items are protected.</#e6fff3>
@@ -252,13 +252,14 @@ session:
   recovery-requested: '<gray>Recovery is prepared. Wait for player data to finish loading.</gray>'
   recovering: '<yellow>Restoring your saved state from an unfinished duel…</yellow>'
   recovery-failed: '<red>State recovery failed. Contact an administrator; a protected copy of your inventory remains available.</red>'
-  countdown-title: '<#92bed8><seconds></#92bed8>'
-  countdown-subtitle: '<gray>Opponent</gray> <white><opponent></white>'
-  fight-title: '<#e6fff3>Fight</#e6fff3>'
-  fight-subtitle: '<gray>The duel has started</gray>'
-  bossbar-countdown: '<white><opponent></white> <dark_gray>•</dark_gray> <gray>starts in</gray> <#92bed8><seconds></#92bed8>'
-  bossbar-active: '<white><opponent></white> <dark_gray>•</dark_gray> <#92bed8><own></#92bed8><dark_gray>:</dark_gray><#ffacd5><enemy></#ffacd5> <dark_gray>•</dark_gray> <gray><time></gray>'
-  bossbar-hits: '<white><opponent></white> <dark_gray>•</dark_gray> <#92bed8><own></#92bed8><dark_gray>:</dark_gray><#ffacd5><enemy></#ffacd5> <dark_gray>•</dark_gray> <gray>target <target></gray>'
+  countdown-title: '<#32d6ff><seconds></#32d6ff>'
+  countdown-subtitle: '<#9aa7b5>Opponent</#9aa7b5> <#fff4d6><opponent></#fff4d6>'
+  fight-title: '<#ffb347>Fight</#ffb347>'
+  fight-subtitle: '<#55ff8a>The duel has started</#55ff8a>'
+  bossbar-countdown: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#9aa7b5>starts in</#9aa7b5> <#32d6ff><seconds></#32d6ff>'
+  bossbar-active-single: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#ffb347><time></#ffb347>'
+  bossbar-active: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#32d6ff><own></#32d6ff><#8795a5>:</#8795a5><#ff5ca8><enemy></#ff5ca8> <#8795a5>•</#8795a5> <#ffb347><time></#ffb347>'
+  bossbar-hits: '<#fff4d6><opponent></#fff4d6> <#8795a5>•</#8795a5> <#32d6ff><own></#32d6ff><#8795a5>:</#8795a5><#ff5ca8><enemy></#ff5ca8> <#8795a5>•</#8795a5> <#ffb347>target <target></#ffb347>'
   hill-contested: '<yellow>Hill contested</yellow>'
   hill-capturing: '<green>Capturing</green>'
   hill-free: '<gray>Hill is free</gray>'
@@ -278,11 +279,16 @@ session:
   command-blocked: '<red>This command is unavailable during a duel.</red> <gray>Forfeit with <white>/duel leave</white></gray>'
 
 network:
-  win: '<#92bed8><winner></#92bed8> <#8c8c8c>defeated</#8c8c8c> <#ffacd5><loser></#ffacd5> <#666666>• rating <rating></#666666>'
+  win: '<#32d6ff><winner></#32d6ff> <#9aa7b5>defeated</#9aa7b5> <#ff5ca8><loser></#ff5ca8> <#8795a5>• rating <rating></#8795a5>'
 
 admin:
   no-permission: '<red>Missing permission <permission>.</red>'
-  status: '<aqua>ArcDuels:</aqua> arenas <white><arenas></white>, busy <white><active></white>, waiting pairs <white><waiting></white>.'
+  status: |-
+    <#fff4d6>ArcDuels status</#fff4d6>
+    <#9aa7b5>Server:</#9aa7b5> <server>
+    <#9aa7b5>Arenas:</#9aa7b5> <#32d6ff><arenas></#32d6ff> <#8795a5>• busy <active></#8795a5>
+    <#9aa7b5>Queue:</#9aa7b5> <#ffb347><waiting></#ffb347>
+    <#9aa7b5>Pending recoveries:</#9aa7b5> <#ffb347><recoveries></#ffb347>
   arena-exists: '<red>Arena <white><arena></white> already exists.</red>'
   arena-created: '<green>Arena <white><arena></white> was created disabled.</green> <gray>Set spawn 1/2, corner 1/2, and an optional hill.</gray>'
   arena-editing: '<yellow>Editing arena <arena></yellow>'

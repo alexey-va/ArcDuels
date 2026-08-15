@@ -1,5 +1,12 @@
 # Unique node id used in Redis event origin checks.
 server-id: duels-1
+# Technical ids above stay unchanged in Redis, storage, and proxy routing.
+# These MiniMessage names are used only on player-facing surfaces.
+server-display-names:
+  duels-1: '<#ffb347>Арена</#ffb347>'
+  spawn: '<#ffb347>Спавн</#ffb347>'
+  survival: '<#55ff8a>Выживание</#55ff8a>'
+  parkour: '<#32d6ff>Паркур</#32d6ff>'
 challenge-timeout-seconds: 45
 # Starts only after both players are safely prepared and teleported.
 countdown-seconds: 3
@@ -17,6 +24,11 @@ post-match:
   # PROMPT leaves the player in the arena lobby and offers a safe return button.
   # AUTOMATIC keeps the legacy delayed proxy return.
   return-policy: PROMPT
+
+shutdown:
+  # Wait briefly for already-applied snapshots to be archived before closing
+  # storage. A timeout leaves the active snapshot retryable on next join.
+  recovery-timeout-ms: 5000
 
 locale:
   # ru or en. When enabled, Russian Minecraft clients get ru and all others en.

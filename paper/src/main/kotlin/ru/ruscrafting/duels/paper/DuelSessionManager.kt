@@ -45,6 +45,7 @@ class DuelSessionManager internal constructor(
     private val playerStates: DurablePlayerStateService,
     private val locales: LocaleService,
     private val countdownSeconds: Int,
+    private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
     private val remoteRecoveryTransfer: ((Player, ServerId) -> Unit)? = null,
     private val playerDataReady: (Player) -> Boolean = { true },
     private val recoveryApplyDelayTicks: Long = 40L,
@@ -52,6 +53,7 @@ class DuelSessionManager internal constructor(
     private val syncProvider: PlayerDataSyncProvider = PlayerDataSyncProvider.NONE,
     private val celebrationDurationTicks: Long = 80L,
     private val externalCombatTagClear: (Player, MatchId, String) -> Unit = { _, _, _ -> },
+    private val shutdownRecoveryTimeoutMillis: Long = 5_000L,
 ) {
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
@@ -73,6 +75,7 @@ class DuelSessionManager internal constructor(
     init {
         require(recoveryApplyDelayTicks in 0L..1_200L) { "Player data settle delay must be between 0 and 1200 ticks" }
         require(celebrationDurationTicks in 0L..200L) { "Celebration duration must be between 0 and 200 ticks" }
+        require(shutdownRecoveryTimeoutMillis in 100L..30_000L) { "Shutdown recovery timeout must be between 100 and 30000 ms" }
     }
 
     fun onCompleted(listener: (DuelMatch) -> Unit): AutoCloseable {
@@ -356,6 +359,8 @@ class DuelSessionManager internal constructor(
 
     fun activeArenaCount(): Int = arenas.reservedCount()
 
+    fun pendingRecoveryCount(): Int = playerStates.pendingCount()
+
     fun hasPendingRecovery(player: Player): Boolean =
         matchFor(player) == null && !pendingStarts.containsKey(player.uniqueId) && playerStates.isPending(player.uniqueId)
 
@@ -577,12 +582,24 @@ class DuelSessionManager internal constructor(
     ): Boolean {
         val transfer = remoteRecoveryTransfer
         if (transfer == null) {
-            player.sendMessage(locales.notice(player, "session.remote-recovery-unavailable", LocaleService.text("server", escrow.serverId.value)))
+            player.sendMessage(
+                locales.notice(
+                    player,
+                    "session.remote-recovery-unavailable",
+                    LocaleService.component("server", serverNames.display(escrow.serverId)),
+                ),
+            )
             return false
         }
         val token = UUID.randomUUID()
         if (remoteRecoveryTokens.putIfAbsent(player.uniqueId, token) != null) return true
-        player.sendMessage(locales.notice(player, "session.remote-recovery", LocaleService.text("server", escrow.serverId.value)))
+        player.sendMessage(
+            locales.notice(
+                player,
+                "session.remote-recovery",
+                LocaleService.component("server", serverNames.display(escrow.serverId)),
+            ),
+        )
         requestRemoteRecoveryTransfer(player, escrow, token, transfer)
         return true
     }
@@ -797,7 +814,7 @@ class DuelSessionManager internal constructor(
         }
     }
 
-    fun shutdown() {
+    internal fun shutdown(): DuelShutdownReport {
         DuelLog.info(
             "sessions-shutdown",
             "sessions={} pending_starts={} preparing={} recoveries={}",
@@ -819,17 +836,48 @@ class DuelSessionManager internal constructor(
         coordinator.activeMatches()
             .filter { !sessions.containsKey(it.id) }
             .forEach { match -> runCatching { coordinator.cancel(match.id, MatchEndReason.SERVER_SHUTDOWN) } }
+        var localSnapshotsApplied = 0
+        var networkPlayersNormalized = 0
         for ((matchId, session) in sessions) {
             hideMatchDisplay(session)
-            coordinator.find(matchId)?.let { match ->
+            val match = coordinator.find(matchId)
+            match?.let {
                 if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
                     runCatching { coordinator.cancel(matchId, MatchEndReason.SERVER_SHUTDOWN) }
                 }
             }
-            if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) restore(session)
+            when (session.recoveryOwner) {
+                RecoveryOwner.ARENA_SERVER -> {
+                    restore(session)
+                    localSnapshotsApplied += session.restoredPlayers.size
+                }
+                RecoveryOwner.ORIGIN_SERVERS -> {
+                    if (match != null) {
+                        moveNetworkPlayersToLobby(match, session)
+                        networkPlayersNormalized += session.postMatchMovedPlayers.size
+                    }
+                }
+            }
             coordinator.find(matchId)?.takeIf { it.state == MatchState.COMPLETED }?.let {
                 runCatching { coordinator.releaseCompleted(matchId) }
             }
+        }
+        val retention = playerStates.awaitRetentions(Duration.ofMillis(shutdownRecoveryTimeoutMillis))
+        DuelLog.info(
+            "shutdown-recovery-drain",
+            "local_snapshots_applied={} network_players_normalized={} retentions_observed={} acknowledged={} failed={} timed_out={}",
+            localSnapshotsApplied,
+            networkPlayersNormalized,
+            retention.observed,
+            retention.acknowledged,
+            retention.failed,
+            retention.timedOut,
+        )
+        if (retention.failed > 0 || retention.timedOut > 0) {
+            plugin.logger.warning(
+                "ArcDuels shutdown left ${retention.failed + retention.timedOut} recovery acknowledgement(s) retryable; " +
+                    "the durable active snapshots were not discarded",
+            )
         }
         sessions.clear()
         sessionByPlayer.clear()
@@ -839,6 +887,7 @@ class DuelSessionManager internal constructor(
         expectedNetworkPlayers.clear()
         networkLobbyPlayers.clear()
         preparingPlayers.clear()
+        return DuelShutdownReport(localSnapshotsApplied, networkPlayersNormalized, retention)
     }
 
     private fun prepareNewSession(
@@ -1149,7 +1198,7 @@ class DuelSessionManager internal constructor(
                 bar.name(
                     locales.component(
                         player,
-                        "session.bossbar-active",
+                        activeBossBarLocaleKey(match.rules.bestOf),
                         LocaleService.text("opponent", opponent.name),
                         LocaleService.text("own", ownScore),
                         LocaleService.text("enemy", enemyScore),
@@ -1684,6 +1733,15 @@ internal fun postMatchDestination(
     }).clone()
 
 internal fun formatDuelTime(seconds: Long): String = "%d:%02d".format(seconds / 60L, seconds % 60L)
+
+internal fun activeBossBarLocaleKey(bestOf: Int): String =
+    if (bestOf == 1) "session.bossbar-active-single" else "session.bossbar-active"
+
+internal data class DuelShutdownReport(
+    val localSnapshotsApplied: Int,
+    val networkPlayersNormalized: Int,
+    val retention: RetentionDrainReport,
+)
 
 internal fun remainingBossBarProgress(elapsedTicks: Long, durationSeconds: Int): Float {
     if (durationSeconds <= 0) return 0f

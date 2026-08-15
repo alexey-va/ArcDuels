@@ -220,6 +220,10 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
         }
 
         "player state pair is atomically moved to retained history and purged only after expiry" {
+            // The suite intentionally shares one container. Isolate the purge
+            // count from retained rows created by earlier scenarios while
+            // preserving the exact expiry-minus-one-millisecond boundary check.
+            repository.purgeRetained(Instant.parse("9999-12-31T23:59:59.999Z")).get()
             val serverId = ServerId("duels-it")
             val matchId = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000060"))
             val first = escrow("00000000-0000-0000-0000-000000000061", matchId, serverId, "first-state")

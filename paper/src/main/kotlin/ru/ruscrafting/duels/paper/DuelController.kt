@@ -35,6 +35,7 @@ class DuelController(
     private val locales: LocaleService,
     private val targets: DuelTargetDirectory,
     private val localServer: ServerId,
+    private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
     private val challengeBus: CrossServerChallengeBus? = null,
     private val arenaDirectory: NetworkArenaDirectory? = null,
     private val transfer: PlayerTransfer? = null,
@@ -257,7 +258,13 @@ class DuelController(
             }
             return
         }
-        player.sendMessage(locales.notice(player, "controller.network-return", LocaleService.text("server", offer.destination.value)))
+        player.sendMessage(
+            locales.notice(
+                player,
+                "controller.network-return",
+                LocaleService.component("server", serverNames.display(offer.destination)),
+            ),
+        )
         transfer?.connect(player, offer.destination)
     }
 
@@ -434,7 +441,7 @@ class DuelController(
                 locales.notice(
                     player,
                     "controller.rematch-return",
-                    LocaleService.text("server", offer.destination.value),
+                    LocaleService.component("server", serverNames.display(offer.destination)),
                 ),
             )
             if (offer.destination == localServer) {
@@ -519,7 +526,13 @@ class DuelController(
                         localServer.value,
                         accepted.host.value,
                     )
-                    player.sendMessage(locales.notice(player, "controller.network-transfer", LocaleService.text("server", accepted.host.value)))
+                    player.sendMessage(
+                        locales.notice(
+                            player,
+                            "controller.network-transfer",
+                            LocaleService.component("server", serverNames.display(accepted.host)),
+                        ),
+                    )
                     transfer?.connect(player, accepted.host)
                 }
             }
@@ -723,7 +736,7 @@ class DuelController(
                     locales.notice(
                         player,
                         "controller.return-offer",
-                        LocaleService.text("server", destination.value),
+                        LocaleService.component("server", serverNames.display(destination)),
                         LocaleService.component("action", action),
                     ),
                 )
@@ -750,7 +763,13 @@ class DuelController(
             if (sessions.isStateLocked(player)) return@forEach
             val request = match.id to playerId
             if (returnRequests.add(request)) {
-                player.sendMessage(locales.notice(player, "controller.network-return", LocaleService.text("server", destination.value)))
+                player.sendMessage(
+                    locales.notice(
+                        player,
+                        "controller.network-return",
+                        LocaleService.component("server", serverNames.display(destination)),
+                    ),
+                )
                 transfer?.connect(player, destination)
             }
         }

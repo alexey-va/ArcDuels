@@ -44,6 +44,21 @@ or the legacy `plugins/ARC/config.yml`; the secret is never logged.
 Every network node needs a unique `server-id` containing only letters, digits,
 dot, underscore, or hyphen.
 
+Keep that id stable for Redis, MySQL, and proxy routing, and configure a
+separate player-facing MiniMessage name for every node that can appear in duel
+menus or transfer notices:
+
+```yaml
+server-id: spawn
+server-display-names:
+  spawn: '<#ffb347>Спавн</#ffb347>'
+  survival: '<#55ff8a>Выживание</#55ff8a>'
+  parkour: '<#32d6ff>Паркур</#32d6ff>'
+```
+
+An unknown remote id falls back to the technical id and emits one bounded
+operator warning; it never prevents recovery or routing.
+
 Declare how each node synchronizes player data instead of encoding server names
 in plugin logic:
 
@@ -239,6 +254,17 @@ The retention period is bounded to `1..3650` days. Cleanup can run every
 `1..10080` minutes and never touches active recovery rows. A snapshot belonging
 to another network node locks duel state and identifies the originating
 `server-id` instead of applying world data on the wrong server.
+
+During a graceful Paper shutdown, ArcDuels applies every local online snapshot,
+saves playerdata, and waits for already-started active-to-archive transactions
+before the storage pool closes. The wait is deliberately bounded; a timeout or
+database failure leaves the active snapshot unclaimed and retryable on the next
+join instead of discarding recovery authority:
+
+```yaml
+shutdown:
+  recovery-timeout-ms: 5000 # 100..30000
+```
 
 The bundled starter kits are `classic`, `axe`, `archer`, `uhc`, `tank`, `sumo`,
 and `boxing`. Sumo and hit-race objectives use their controlled kits only. The

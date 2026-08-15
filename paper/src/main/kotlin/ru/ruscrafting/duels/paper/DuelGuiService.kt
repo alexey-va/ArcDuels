@@ -23,6 +23,7 @@ import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
+import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -37,6 +38,7 @@ class DuelGuiService internal constructor(
     private val targets: DuelTargetDirectory,
     private val challengeAction: (Player, DuelTarget, DuelRules) -> Unit,
     private val statisticsAction: (Player, DuelTarget) -> Unit,
+    private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
 ) : Listener {
     private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
     private val guiItems = GuiItemCatalog.load(plugin)
@@ -94,7 +96,11 @@ class DuelGuiService internal constructor(
                     target.uniqueId,
                     target.name,
                     locales.component(player, "menu.targets.player", LocaleService.text("player", target.name)),
-                    locales.lines(player, "menu.targets.player-lore", LocaleService.text("server", target.server.value)),
+                    locales.lines(
+                        player,
+                        "menu.targets.player-lore",
+                        LocaleService.component("server", serverNames.display(target.server)),
+                    ),
                 ),
             )
         }
@@ -123,6 +129,11 @@ class DuelGuiService internal constructor(
                 LocaleService.text("arenas", arenaIds.count { plugin.config.getBoolean("arenas.$it.enabled") }),
                 LocaleService.text("active", sessions.activeArenaCount()),
                 LocaleService.text("waiting", sessions.queueSize()),
+                LocaleService.text("recoveries", sessions.pendingRecoveryCount()),
+                LocaleService.component(
+                    "server",
+                    serverNames.display(ServerId(plugin.config.getString("server-id", plugin.server.name)!!)),
+                ),
             ),
         )
         inventory.setItem(15, item(player, Material.RECOVERY_COMPASS, "menu.admin.recovery", "menu.admin.recovery-lore", LocaleService.text("players", plugin.server.onlinePlayers.size)))

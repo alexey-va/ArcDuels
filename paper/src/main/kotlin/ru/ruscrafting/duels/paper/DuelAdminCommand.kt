@@ -8,12 +8,14 @@ import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.ServerId
 
 internal class DuelAdminCommand(
     private val plugin: JavaPlugin,
     private val arenas: PaperArenaCatalog,
     private val sessions: DuelSessionManager,
     private val locales: LocaleService? = null,
+    private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
 ) {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -27,7 +29,21 @@ internal class DuelAdminCommand(
         }
         when (args.firstOrNull()?.lowercase()) {
             null, "help" -> help(sender)
-            "status" -> sender.sendMessage(message(sender, "admin.status", LocaleService.text("arenas", arenas.size()), LocaleService.text("active", sessions.activeArenaCount()), LocaleService.text("waiting", sessions.queueSize())))
+            "status" ->
+                sender.sendMessage(
+                    message(
+                        sender,
+                        "admin.status",
+                        LocaleService.component(
+                            "server",
+                            serverNames.display(ServerId(plugin.config.getString("server-id", plugin.server.name)!!)),
+                        ),
+                        LocaleService.text("arenas", arenas.size()),
+                        LocaleService.text("active", sessions.activeArenaCount()),
+                        LocaleService.text("waiting", sessions.queueSize()),
+                        LocaleService.text("recoveries", sessions.pendingRecoveryCount()),
+                    ),
+                )
             "recover" -> recover(sender, args)
             "arena" -> arena(sender, args.drop(1))
             else -> help(sender)
@@ -295,7 +311,8 @@ internal class DuelAdminCommand(
                         sender,
                         key,
                         LocaleService.text("player", player.name),
-                        LocaleService.text("server", result.server?.value ?: "—"),
+                        result.server?.let { LocaleService.component("server", serverNames.display(it)) }
+                            ?: LocaleService.text("server", "—"),
                     ),
                 )
             }
