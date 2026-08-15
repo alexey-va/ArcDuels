@@ -5,6 +5,8 @@ import com.google.gson.JsonParseException
 import ru.ruscrafting.duels.domain.ChallengeId
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.CombatModifiers
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
@@ -32,6 +34,8 @@ internal class ChallengeMessageCodec(
                 challengerServer = message.challengerServer.value,
                 targetServer = message.targetServer.value,
                 matchServer = message.matchServer?.value,
+                selectedArenaServer = message.challenge.arenaSelection?.serverId?.value,
+                selectedArenaId = message.challenge.arenaSelection?.arenaId?.value,
                 createdAt = message.challenge.createdAt.toString(),
                 expiresAt = message.challenge.expiresAt.toString(),
                 status = message.challenge.status.name,
@@ -88,6 +92,7 @@ internal class ChallengeMessageCodec(
                 createdAt = Instant.parse(wire.createdAt),
                 expiresAt = Instant.parse(wire.expiresAt),
                 status = ChallengeStatus.valueOf(wire.status),
+                arenaSelection = decodeArenaSelection(wire.selectedArenaServer, wire.selectedArenaId),
             )
         return CrossServerChallengeMessage(
             messageId = wire.messageId,
@@ -116,6 +121,8 @@ internal class ChallengeMessageCodec(
         val challengerServer: String,
         val targetServer: String,
         val matchServer: String?,
+        val selectedArenaServer: String?,
+        val selectedArenaId: String?,
         val createdAt: String,
         val expiresAt: String,
         val status: String,
@@ -135,7 +142,12 @@ internal class ChallengeMessageCodec(
     )
 
     private companion object {
-        const val WIRE_VERSION = 2
+        const val WIRE_VERSION = 3
         const val MAX_MESSAGE_CHARACTERS = 16_384
     }
+}
+
+private fun decodeArenaSelection(server: String?, arenaId: String?): ArenaSelection? {
+    require((server == null) == (arenaId == null)) { "Selected arena server and id must either both be present or both be absent" }
+    return if (server == null) null else ArenaSelection(ServerId(server), ArenaId(requireNotNull(arenaId)))
 }

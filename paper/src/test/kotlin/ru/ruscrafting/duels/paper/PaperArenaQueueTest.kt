@@ -6,6 +6,7 @@ import io.kotest.matchers.shouldBe
 import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.DuelObjectiveType
@@ -55,6 +56,24 @@ class PaperArenaQueueTest : StringSpec({
         catalog.reservedCount() shouldBe 1
         next.get().close()
         catalog.reservedCount() shouldBe 0
+    }
+
+    "explicit arena reservations never fall back and remain queued for the selected arena" {
+        val catalog = PaperArenaCatalog.load(plugin)
+        val rules = DuelRules(DuelMode.OWN_INVENTORY)
+        val active = catalog.reserve(rules, ArenaId("queue")).get()
+        val pinned = catalog.reserve(rules, ArenaId("queue"))
+
+        pinned.isDone shouldBe false
+        catalog.choices(ServerId("spawn"), rules).single().available shouldBe false
+        catalog.advertisements(allowOwnInventory = true).single().available shouldBe false
+        shouldThrow<java.util.concurrent.ExecutionException> {
+            catalog.reserve(rules, ArenaId("missing")).get()
+        }
+
+        active.close()
+        pinned.get().arenaId shouldBe ArenaId("queue")
+        pinned.get().close()
     }
 
     "arena catalog cannot hot reload while a match owns an arena or a pair is queued" {
@@ -150,6 +169,7 @@ private fun configureArena(
 ) {
     val path = "arenas.$id"
     plugin.config.set("$path.enabled", true)
+    plugin.config.set("$path.display-name", "Queue arena")
     plugin.config.set("$path.first-spawn.world", world)
     plugin.config.set("$path.first-spawn.x", -5.0)
     plugin.config.set("$path.first-spawn.y", 70.0)

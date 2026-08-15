@@ -19,12 +19,14 @@ import org.bukkit.inventory.ItemFlag
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.CombatModifiers
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
+import ru.ruscrafting.duels.redis.ArenaChoice
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -36,9 +38,10 @@ class DuelGuiService internal constructor(
     private val locales: LocaleService,
     private val admin: DuelAdminCommand,
     private val targets: DuelTargetDirectory,
-    private val challengeAction: (Player, DuelTarget, DuelRules) -> Unit,
+    private val challengeAction: (Player, DuelTarget, DuelRules, ArenaSelection?) -> Unit,
     private val statisticsAction: (Player, DuelTarget) -> Unit,
     private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
+    private val arenaChoices: (DuelRules) -> List<ArenaChoice> = { emptyList() },
 ) : Listener {
     private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
     private val guiItems = GuiItemCatalog.load(plugin)
@@ -366,6 +369,23 @@ class DuelGuiService internal constructor(
         } else {
             inventory.setItem(14, item(player, Material.WITHER_SKELETON_SKULL, "menu.rules.sudden-death", "menu.rules.sudden-death-lore", LocaleService.text("seconds", draft.modifiers.suddenDeathAfterSeconds)))
         }
+        val rules = draft.rules()
+        val selectedArena = draft.arenaSelection?.let { selection -> arenaChoices(rules).firstOrNull { it.selection == selection } }
+        if (draft.arenaSelection == null) {
+            inventory.setItem(16, item(player, Material.COMPASS, "menu.rules.arena-auto", "menu.rules.arena-auto-lore"))
+        } else {
+            inventory.setItem(
+                16,
+                item(
+                    player,
+                    Material.FILLED_MAP,
+                    "menu.rules.arena-selected",
+                    "menu.rules.arena-selected-lore",
+                    LocaleService.text("arena", selectedArena?.displayName ?: draft.arenaSelection.arenaId.value),
+                    LocaleService.component("server", serverNames.display(draft.arenaSelection.serverId)),
+                ),
+            )
+        }
         val combatTogglesEnabled = !draft.objective.isHitRace
         inventory.setItem(19, toggleItem(player, "menu.rules.projectiles", draft.modifiers.projectiles, combatTogglesEnabled))
         inventory.setItem(21, toggleItem(player, "menu.rules.consumables", draft.modifiers.consumables, combatTogglesEnabled))
@@ -376,6 +396,42 @@ class DuelGuiService internal constructor(
         }
         inventory.setItem(40, roleItem(player, "confirm", Material.LIME_CONCRETE, "menu.rules.confirm", "menu.rules.confirm-lore"))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        player.openInventory(inventory)
+    }
+
+    private fun openArenas(
+        player: Player,
+        draft: DuelDraft,
+        requestedPage: Int = 0,
+    ) {
+        val choices = arenaChoices(draft.rules())
+        val slots = CONTENT_SLOTS.filter { it != ARENA_AUTO_SLOT }
+        val page = pageWindow(choices, requestedPage, slots.size)
+        val holder = ArenaMenuHolder(draft, page.index, page.hasPrevious, page.hasNext)
+        val inventory = create(holder, locales.component(player, "menu.arenas.title"))
+        decorate(inventory)
+        inventory.setItem(ARENA_AUTO_SLOT, item(player, Material.COMPASS, "menu.arenas.auto", "menu.arenas.auto-lore"))
+        page.items.forEachIndexed { index, choice ->
+            val slot = slots[index]
+            holder.choices[slot] = choice.selection
+            inventory.setItem(
+                slot,
+                item(
+                    player,
+                    if (choice.available) Material.LIME_BANNER else Material.YELLOW_BANNER,
+                    "menu.arenas.entry",
+                    "menu.arenas.entry-lore",
+                    LocaleService.text("arena", choice.displayName),
+                    LocaleService.component("server", serverNames.display(choice.selection.serverId)),
+                    LocaleService.component(
+                        "state",
+                        locales.component(player, if (choice.available) "menu.arenas.available" else "menu.arenas.busy"),
+                    ),
+                ),
+            )
+        }
+        if (choices.isEmpty()) inventory.setItem(22, item(player, Material.BARRIER, "menu.arenas.empty", "menu.arenas.empty-lore"))
+        navigation(player, inventory, page, MenuBack.MAIN)
         player.openInventory(inventory)
     }
 
@@ -473,6 +529,13 @@ class DuelGuiService internal constructor(
                 openRules(player, DuelDraft(target, holder.objective, mode, kit, modifiers = modifiers))
             }
             is RulesMenuHolder -> handleRulesClick(player, holder.draft, slot)
+            is ArenaMenuHolder -> when (slot) {
+                BACK_SLOT -> openRules(player, holder.draft)
+                PREVIOUS_SLOT -> if (holder.hasPrevious) openArenas(player, holder.draft, holder.page - 1)
+                NEXT_SLOT -> if (holder.hasNext) openArenas(player, holder.draft, holder.page + 1)
+                ARENA_AUTO_SLOT -> openRules(player, holder.draft.copy(arenaSelection = null))
+                else -> holder.choices[slot]?.let { openRules(player, holder.draft.copy(arenaSelection = it)) }
+            }
             is LeaderboardMenuHolder -> when (slot) {
                 BACK_SLOT -> openMain(player)
                 PREVIOUS_SLOT -> if (holder.hasPrevious) openLeaderboard(player, holder.page - 1)
@@ -635,6 +698,7 @@ class DuelGuiService internal constructor(
                 DuelObjectiveType.COMBO -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(comboHitsToWin = nextOf(draft.modifiers.comboHitsToWin, listOf(5, 10, 15, 20)))))
                 else -> openRules(player, draft.copy(modifiers = draft.modifiers.copy(suddenDeathAfterSeconds = nextOf(draft.modifiers.suddenDeathAfterSeconds, listOf(60, 180, 300, 600)))))
             }
+            16 -> openArenas(player, draft)
             19 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(projectiles = !draft.modifiers.projectiles)))
             21 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(consumables = !draft.modifiers.consumables)))
             23 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(enderPearls = !draft.modifiers.enderPearls)))
@@ -644,7 +708,7 @@ class DuelGuiService internal constructor(
                 val target = targets.find(draft.target.uniqueId)
                 player.closeInventory()
                 if (target == null) player.sendMessage(locales.notice(player, "error.player-left"))
-                else challengeAction(player, target, DuelRules(draft.mode, draft.kitId, draft.ranked, draft.bestOf, draft.objective, draft.modifiers))
+                else challengeAction(player, target, draft.rules(), draft.arenaSelection)
             }
         }
     }
@@ -756,6 +820,9 @@ class DuelGuiService internal constructor(
     private class ObjectiveMenuHolder(val target: DuelTarget) : MenuHolder()
     private class LoadoutMenuHolder(val target: DuelTarget, val objective: DuelObjectiveType, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val kits = mutableMapOf<Int, KitId>(); var ownInventorySlot = -1 }
     private class RulesMenuHolder(val draft: DuelDraft) : MenuHolder()
+    private class ArenaMenuHolder(val draft: DuelDraft, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() {
+        val choices = mutableMapOf<Int, ArenaSelection>()
+    }
     private class LeaderboardMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder()
     private class CatalogMenuHolder(val type: CatalogType, val page: Int = 0, val hasPrevious: Boolean = false, val hasNext: Boolean = false) : MenuHolder()
     private class AdminMenuHolder : MenuHolder()
@@ -774,6 +841,7 @@ class DuelGuiService internal constructor(
         const val PAGE_SLOT = 40
         const val NEXT_SLOT = 43
         const val ADMIN_PERMISSION = "arcduels.admin"
+        const val ARENA_AUTO_SLOT = 10
         const val ARENA_NAME_TIMEOUT_TICKS = 1_200L
         val COORDINATE_KEYS = listOf("x", "y", "z")
         val CONTENT_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34)
@@ -823,7 +891,10 @@ private data class DuelDraft(
     val ranked: Boolean = false,
     val bestOf: Int = 1,
     val modifiers: CombatModifiers = CombatModifiers(),
-)
+    val arenaSelection: ArenaSelection? = null,
+) {
+    fun rules(): DuelRules = DuelRules(mode, kitId, ranked, bestOf, objective, modifiers)
+}
 
 private fun nextOf(current: Int, values: List<Int>): Int = values[(values.indexOf(current).takeIf { it >= 0 } ?: -1).let { (it + 1) % values.size }]
 

@@ -25,10 +25,11 @@ Enable `redis.enabled` for the network player picker, cross-server challenges,
 live arena routing, win announcements, and leaderboard invalidation. ProxyARC's
 authenticated `arc.proxy_player_list` snapshot is the authoritative online
 directory; entries expire locally when the proxy heartbeat becomes stale.
-Every ArcDuels node also publishes its objective- and loadout-compatible arena
-capacity, free slots, and queue depth. When a challenge is accepted, the plugin
-chooses a live compatible node by free capacity and load, then transfers both
-players there through the proxy. No fixed arena server is configured or assumed.
+Every ArcDuels node also publishes each objective- and loadout-compatible arena,
+its player-facing name, availability, and queue depth. Challenge setup offers
+either automatic load-aware routing or an exact server and arena. An exact busy
+arena remains pinned and queues the pair there; it never silently falls back to
+another backend. No fixed arena server is configured or assumed.
 After a network match, players are moved to the configured lobby on the arena
 backend and offered a clickable return. The origin row remains unclaimed until
 the player returns, the origin synchronizer settles, and the live inventory is
@@ -132,6 +133,7 @@ unsafe placeholder coordinates.
 arenas:
   colosseum:
     enabled: true
+    display-name: Colosseum
     allowed-loadouts: [OWN_INVENTORY, KIT]
     allowed-objectives: [ELIMINATION, KING_OF_THE_HILL, SUMO, BOXING, COMBO]
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
@@ -150,6 +152,9 @@ arenas:
 `OWN_INVENTORY`, `KIT`, or both; omitting it keeps both modes enabled for
 backward compatibility. This lets one network dedicate individual arenas to
 personal items or kits without ArcDuels knowing server names or topology.
+
+`display-name` is plain player-facing text; it falls back to the arena id. The
+server name is rendered separately through `server-display-names`.
 
 `allowed-objectives` independently restricts the combat modes assigned to an
 arena. It accepts `ELIMINATION`, `KING_OF_THE_HILL`, `SUMO`, `BOXING`, and
@@ -273,7 +278,8 @@ setting remains visible before the challenge is sent.
 
 `/duel` opens the main hub. The opponent picker includes players from every
 ProxyARC backend and shows their current server. Challenge setup is deliberately hierarchical:
-opponent → objective → loadout → rules → confirmation. Rules include
+opponent → objective → loadout → rules → arena → confirmation. The arena step
+supports automatic routing or one exact arena on one exact backend. Rules include
 BO1/BO3/BO5, ranked kit matches, sudden-death time, projectiles, consumables,
 ender pearls, natural regeneration, and KOTH capture time. The recipient sees
 the selected rules before accepting. Boxing ends at a configurable total-hit
@@ -281,6 +287,11 @@ target; Combo ends at a configurable unanswered-hit streak, reset by the
 opponent's next direct melee hit. Both disable health damage, projectiles,
 consumables, pearls, regeneration, and sudden death. Own-inventory matches
 remain unranked.
+
+Player names in duel chat cards are interactive. Hovering shows rating, wins,
+losses, win rate, and streak; clicking runs `/duel <player>` and opens that
+player's challenge setup. Untrusted names are inserted as plain text, never as
+MiniMessage markup or command syntax.
 
 ## GUI item roles
 

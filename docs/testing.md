@@ -20,8 +20,8 @@ The suite covers:
 - long result sequences, rating bounds, streaks, revisions, and leaderboards;
 - Redis event and challenge codec validation, authenticated origins, listener
   isolation, dedupe, source collisions, player-snapshot TTL expiry, blank
-  backend handling, schema-version rejection, and dynamic objective/loadout-compatible
-  arena-node selection;
+  backend handling, schema-version rejection, dynamic objective/loadout-compatible
+  arena-node selection, exact server/arena pinning, and no-fallback FIFO reservation;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
   arena and kit validation, explicit sync-provider detection, origin-before-transfer
   single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
@@ -30,7 +30,8 @@ The suite covers:
   bypass behavior, damage-free celebration entities, default-kit presence,
   player-facing network server names, BO1 boss bars without a meaningless
   `0:0`, bounded graceful-shutdown retention draining that preserves timed-out
-  active snapshots, and strict Russian / English locale-key and MiniMessage parity.
+  active snapshots, interactive player-name hover/click events, and strict
+  Russian / English locale-key and MiniMessage parity.
 
 The separate `scripts/player-bot` suite recognizes the BO1 opponent/time boss
 bar, BO3/BO5 score boss bar, and hit-race target boss bar. Production QA must
@@ -51,8 +52,11 @@ escrow, exact active-to-archive transfer, idempotent replay after an unknown
 archival outcome, retention deadlines, bounded expiry cleanup, checksum
 matching, claimed-snapshot lookup, recovery metadata, and rollback on a participant conflict. It also deletes a committed
 migration-history row and proves that replay converges when MySQL DDL committed
-before its journal write. It is intentionally not part of a fake JDBC test
-double.
+before its journal write. A crash-boundary scenario closes the writer after the
+pair commit, reopens a fresh repository, acknowledges only one participant,
+closes again, and proves another fresh repository still exposes exactly the
+unclaimed participant while retaining the claimed snapshot idempotently. It is
+intentionally not part of a fake JDBC test double.
 
 ## Artifact gate
 

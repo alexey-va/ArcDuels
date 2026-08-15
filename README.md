@@ -24,8 +24,9 @@ This repository is under active development. The first vertical slice targets:
 - kit and own-inventory duels;
 - validated challenges and one active match per player;
 - local and MySQL-backed statistics;
-- network-wide player selection, cross-server challenges, live load-aware
-  arena routing, leaderboard invalidation, and announcements over Redis;
+- network-wide player selection, cross-server challenges, automatic load-aware
+  routing or an exact player-selected server and arena, leaderboard invalidation,
+  and announcements over Redis;
 - a Lands-inspired 45-slot main hub with challenge, queue, mode, kit, statistics,
   help, leaderboard, and administrative branches;
 - elimination, king-of-the-hill, sumo, boxing, and combo objectives with BO1/BO3/BO5,
@@ -48,6 +49,8 @@ This repository is under active development. The first vertical slice targets:
   objective-compatible arena allocation;
 - resource-pack-neutral GUI roles with optional production ItemsAdder
   material/CustomModelData overlays.
+- interactive player names in chat: hover for current duel statistics and click
+  to open that player's challenge setup.
 
 ## Build
 

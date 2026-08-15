@@ -102,7 +102,14 @@ class DuelSessionManager internal constructor(
         )
         val result = CompletableFuture<DuelMatch>()
         val reservation =
-            runCatching { coordinator.reserve(PlayerId(first.uniqueId), PlayerId(second.uniqueId), challenge.rules) }
+            runCatching {
+                coordinator.reserve(
+                    PlayerId(first.uniqueId),
+                    PlayerId(second.uniqueId),
+                    challenge.rules,
+                    arenaId = challenge.arenaSelection?.arenaId,
+                )
+            }
                 .getOrElse { failure ->
                     result.completeExceptionally(failure)
                     return result
@@ -270,7 +277,13 @@ class DuelSessionManager internal constructor(
         val snapshotsFuture = playerStates.findMatchSnapshots(matchId, origins)
         val reservation =
             runCatching {
-                coordinator.reserve(PlayerId(first.uniqueId), PlayerId(second.uniqueId), challenge.rules, matchId)
+                coordinator.reserve(
+                    PlayerId(first.uniqueId),
+                    PlayerId(second.uniqueId),
+                    challenge.rules,
+                    matchId,
+                    challenge.arenaSelection?.arenaId,
+                )
             }.getOrElse { failure ->
                 result.completeExceptionally(failure)
                 return result

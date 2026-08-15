@@ -7,6 +7,7 @@ import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
 import ru.ruscrafting.duels.domain.ChallengeId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.ChallengeRegistry
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelChallenge
@@ -58,6 +59,7 @@ class DuelController(
     private val returnOffers = ConcurrentHashMap<PlayerId, ReturnOffer>()
     private val networkSubscription = challengeBus?.subscribe(::onNetworkMessage)
     private val completionSubscription = sessions.onCompleted(::onMatchCompleted)
+    private val playerComponents = DuelPlayerComponents(statistics, locales)
 
     init {
         require(!transferTimeout.isNegative && !transferTimeout.isZero) { "Network transfer timeout must be positive" }
@@ -70,16 +72,18 @@ class DuelController(
         challenger: Player,
         requestedTarget: DuelTarget,
         rules: DuelRules,
+        arenaSelection: ArenaSelection? = null,
     ) {
         DuelLog.debug(
             "challenge-request",
             challenger,
-            "challenger={} target={} mode={} objective={} best_of={}",
+            "challenger={} target={} mode={} objective={} best_of={} selected_arena={}",
             challenger.name,
             requestedTarget.name,
             rules.mode,
             rules.objective,
             rules.bestOf,
+            arenaSelection?.let { "${it.serverId.value}:${it.arenaId.value}" } ?: "auto",
         )
         val target = targets.find(requestedTarget.uniqueId)
         if (target == null || target.uniqueId == challenger.uniqueId) {
@@ -94,7 +98,7 @@ class DuelController(
             challenger.sendMessage(locales.notice(challenger, "controller.busy"))
             return
         }
-        runCatching { challenges.create(PlayerId(challenger.uniqueId), PlayerId(target.uniqueId), rules) }
+        runCatching { challenges.create(PlayerId(challenger.uniqueId), PlayerId(target.uniqueId), rules, arenaSelection) }
             .onSuccess { challenge ->
                 DuelLog.info(
                     "challenge-created",
@@ -137,7 +141,7 @@ class DuelController(
                         ),
                     )
                 }
-                challenger.sendMessage(locales.notice(challenger, "controller.sent", LocaleService.text("player", target.name)))
+                sendPlayerNotice(challenger, target.uniqueId, target.name, "controller.sent", challenge.id)
                 scheduleChallengeExpiry(challenge)
             }
             .onFailure {
@@ -161,8 +165,10 @@ class DuelController(
             player.sendMessage(locales.notice(player, "controller.network-unavailable"))
             return
         }
-        val matchServer = arenaDirectory?.select(challenge.rules)
-        if (arenaDirectory != null && matchServer == null) {
+        val matchServer =
+            arenaDirectory?.select(challenge.rules, challenge.arenaSelection)
+                ?: challenge.arenaSelection?.serverId?.takeIf { arenaDirectory == null && it == localServer }
+        if ((arenaDirectory != null || challenge.arenaSelection != null) && matchServer == null) {
             player.sendMessage(locales.notice(player, "controller.no-network-arena"))
             return
         }
@@ -182,11 +188,12 @@ class DuelController(
             "challenge-accepted",
             MatchId(accepted.id.value),
             player,
-            "host={} both_local={} mode={} objective={}",
+            "host={} both_local={} mode={} objective={} selected_arena={}",
             matchServer?.value ?: localServer.value,
             bothLocal,
             accepted.rules.mode,
             accepted.rules.objective,
+            accepted.arenaSelection?.arenaId?.value ?: "auto",
         )
         val continuesFromArenaLobby =
             returnOffers.containsKey(challenge.challenger) || returnOffers.containsKey(challenge.target)
@@ -286,7 +293,10 @@ class DuelController(
                     locales.notice(
                         viewer,
                         "controller.stats",
-                        LocaleService.text("player", target.name),
+                        LocaleService.component(
+                            "player",
+                            playerComponents.component(viewer, target.uniqueId, target.name, stats),
+                        ),
                         LocaleService.text("rating", stats.rating),
                         LocaleService.text("wins", stats.wins),
                         LocaleService.text("losses", stats.losses),
@@ -861,15 +871,21 @@ class DuelController(
                 challenge.target -> challenge.challenger
                 else -> return
             }
-        player.sendMessage(locales.notice(player, "controller.expired", LocaleService.text("player", resolveName(opponent))))
+        val name = resolveName(opponent)
+        sendPlayerNotice(player, opponent.value, name, "controller.expired")
     }
 
     private fun notifyChallenge(recipient: Player, challengerName: String, challenge: DuelChallenge) {
-        recipient.sendMessage(challengeMessage(recipient, challengerName, challenge))
-        recipient.playSound(recipient.location, org.bukkit.Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.5f)
+        playerComponents.load(recipient, challenge.challenger.value, challengerName).whenComplete { challenger, _ ->
+            runSync {
+                if (!recipient.isOnline || challenges.find(challenge.id)?.status != ChallengeStatus.PENDING) return@runSync
+                recipient.sendMessage(challengeMessage(recipient, requireNotNull(challenger), challenge))
+                recipient.playSound(recipient.location, org.bukkit.Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.5f)
+            }
+        }
     }
 
-    private fun challengeMessage(recipient: Player, challengerName: String, challenge: DuelChallenge): Component {
+    private fun challengeMessage(recipient: Player, challenger: Component, challenge: DuelChallenge): Component {
         val kitId = challenge.rules.kitId
         val mode =
             if (kitId != null) {
@@ -890,6 +906,20 @@ class DuelController(
                 ru.ruscrafting.duels.domain.DuelObjectiveType.COMBO -> "controller.objective-combo"
             }
         fun state(value: Boolean) = locales.component(recipient, if (value) "controller.state-on" else "controller.state-off")
+        val arena =
+            challenge.arenaSelection?.let { selection ->
+                val displayName =
+                    arenaDirectory?.choices(challenge.rules)
+                        ?.firstOrNull { it.selection == selection }
+                        ?.displayName
+                        ?: selection.arenaId.value
+                locales.component(
+                    recipient,
+                    "controller.arena-selected",
+                    LocaleService.text("arena", displayName),
+                    LocaleService.component("server", serverNames.display(selection.serverId)),
+                )
+            } ?: locales.component(recipient, "controller.arena-auto")
         val ruleSummary =
             if (challenge.rules.objective.isHitRace) {
                 val target =
@@ -914,7 +944,7 @@ class DuelController(
             locales.component(
                 recipient,
                 "controller.received",
-                LocaleService.text("player", challengerName),
+                LocaleService.component("player", challenger),
                 LocaleService.component("objective", locales.component(recipient, objectiveKey)),
                 LocaleService.component("loadout", mode),
                 LocaleService.text("bestof", challenge.rules.bestOf),
@@ -923,6 +953,7 @@ class DuelController(
                     locales.component(recipient, if (challenge.rules.ranked) "controller.ranked" else "controller.unranked"),
                 ),
                 LocaleService.component("rules", ruleSummary),
+                LocaleService.component("arena", arena),
             )
         val accept =
             locales.component(recipient, "controller.accept")
@@ -937,6 +968,28 @@ class DuelController(
 
     private fun resolveName(playerId: PlayerId): String =
         targets.find(playerId.value)?.name ?: plugin.server.getOfflinePlayer(playerId.value).name ?: playerId.toString().take(8)
+
+    private fun sendPlayerNotice(
+        viewer: Player,
+        playerId: UUID,
+        playerName: String,
+        key: String,
+        pendingChallenge: ChallengeId? = null,
+    ) {
+        playerComponents.load(viewer, playerId, playerName).whenComplete { playerComponent, _ ->
+            runSync {
+                if (viewer.isOnline && (pendingChallenge == null || challenges.find(pendingChallenge)?.status == ChallengeStatus.PENDING)) {
+                    viewer.sendMessage(
+                        locales.notice(
+                            viewer,
+                            key,
+                            LocaleService.component("player", requireNotNull(playerComponent)),
+                        ),
+                    )
+                }
+            }
+        }
+    }
 
     private fun rememberContext(challengeId: ChallengeId, context: ChallengeContext) {
         val cutoff = clock.millis() - CONTEXT_RETENTION.toMillis()

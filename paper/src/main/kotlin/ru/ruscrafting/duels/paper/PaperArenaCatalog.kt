@@ -6,9 +6,13 @@ import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaAllocator
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaReservation
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.ServerId
+import ru.ruscrafting.duels.redis.ArenaAdvertisement
+import ru.ruscrafting.duels.redis.ArenaChoice
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
@@ -61,6 +65,7 @@ data class ArenaBounds(
 
 data class PaperArena(
     val id: ArenaId,
+    val displayName: String,
     val firstSpawn: Location,
     val secondSpawn: Location,
     val bounds: ArenaBounds,
@@ -70,6 +75,9 @@ data class PaperArena(
     val lobby: Location? = null,
 ) {
     init {
+        require(displayName.isNotBlank() && displayName.length <= 64 && displayName.none(Char::isISOControl)) {
+            "Arena display name must contain 1..64 visible characters"
+        }
         require(allowedLoadouts.isNotEmpty()) { "Arena must support at least one loadout mode" }
         require(allowedObjectives.isNotEmpty()) { "Arena must support at least one objective" }
     }
@@ -118,16 +126,29 @@ class PaperArenaCatalog private constructor(
     private val waiting = ArrayDeque<PendingReservation>()
 
     override fun reserve(rules: DuelRules): CompletableFuture<ArenaReservation> {
+        return reserve(rules, null)
+    }
+
+    override fun reserve(
+        rules: DuelRules,
+        arenaId: ArenaId?,
+    ): CompletableFuture<ArenaReservation> {
         val future = CompletableFuture<ArenaReservation>()
         synchronized(lock) {
             if (arenas.isEmpty()) return CompletableFuture.failedFuture(IllegalStateException("No enabled duel arenas are configured"))
-            val compatible = arenas.values.filter { it.supports(rules) }
+            val compatible =
+                if (arenaId == null) {
+                    arenas.values.filter { it.supports(rules) }
+                } else {
+                    listOfNotNull(arenas[arenaId]).filter { it.supports(rules) }
+                }
             if (compatible.isEmpty()) {
-                return CompletableFuture.failedFuture(IllegalStateException("No arena supports the selected objective"))
+                val reason = if (arenaId == null) "No arena supports the selected objective" else "Selected arena is missing or incompatible"
+                return CompletableFuture.failedFuture(IllegalStateException(reason))
             }
             val arena = compatible.firstOrNull { it.id !in reserved }
             if (arena == null) {
-                waiting.addLast(PendingReservation(rules, future))
+                waiting.addLast(PendingReservation(rules, arenaId, future))
             } else {
                 reserved += arena.id
                 future.complete(reservationFor(arena.id))
@@ -146,6 +167,46 @@ class PaperArenaCatalog private constructor(
     fun queueSize(): Int = synchronized(lock) { waiting.count { !it.future.isDone } }
 
     fun reservedCount(): Int = synchronized(lock) { reserved.size }
+
+    fun choices(
+        serverId: ServerId,
+        rules: DuelRules,
+    ): List<ArenaChoice> =
+        synchronized(lock) {
+            arenas.values
+                .filter { it.supports(rules) }
+                .map { arena ->
+                    ArenaChoice(
+                        selection = ArenaSelection(serverId, arena.id),
+                        displayName = arena.displayName,
+                        available = arena.id !in reserved,
+                        queuedPairs = waiting.count { !it.future.isDone },
+                    )
+                }
+                .sortedWith(compareByDescending<ArenaChoice>(ArenaChoice::available).thenBy { it.selection.arenaId.value })
+        }
+
+    fun advertisements(allowOwnInventory: Boolean): List<ArenaAdvertisement> =
+        synchronized(lock) {
+            arenas.values.mapNotNull { arena ->
+                val loadouts =
+                    arena.allowedLoadouts.filterTo(linkedSetOf()) { mode ->
+                        mode != DuelMode.OWN_INVENTORY || allowOwnInventory
+                    }
+                if (loadouts.isEmpty()) return@mapNotNull null
+                val objectives =
+                    arena.allowedObjectives.filterTo(linkedSetOf()) { objective ->
+                        objective != DuelObjectiveType.KING_OF_THE_HILL || arena.hill != null
+                    }
+                ArenaAdvertisement(
+                    id = arena.id,
+                    displayName = arena.displayName,
+                    loadouts = loadouts,
+                    objectives = objectives,
+                    available = arena.id !in reserved,
+                )
+            }
+        }
 
     fun capacity(
         mode: DuelMode,
@@ -187,10 +248,21 @@ class PaperArenaCatalog private constructor(
             if (!reserved.remove(id)) return
             while (true) {
                 val next = waiting.firstOrNull { pending ->
-                    !pending.future.isDone && arenas.values.any { it.id !in reserved && it.supports(pending.rules) }
+                    !pending.future.isDone && arenas.values.any { arena ->
+                        arena.id !in reserved &&
+                            (pending.arenaId == null || arena.id == pending.arenaId) &&
+                            arena.supports(pending.rules)
+                    }
                 } ?: break
                 waiting.remove(next)
-                val arena = requireNotNull(arenas.values.firstOrNull { it.id !in reserved && it.supports(next.rules) })
+                val arena =
+                    requireNotNull(
+                        arenas.values.firstOrNull { arena ->
+                            arena.id !in reserved &&
+                                (next.arenaId == null || arena.id == next.arenaId) &&
+                                arena.supports(next.rules)
+                        },
+                    )
                 reserved += arena.id
                 assignments += next.future to reservationFor(arena.id)
             }
@@ -220,6 +292,7 @@ class PaperArenaCatalog private constructor(
                     val section = root.getConfigurationSection(rawId) ?: return@mapNotNull null
                     if (!section.getBoolean("enabled", false)) return@mapNotNull null
                     val id = ArenaId(rawId.lowercase())
+                    val displayName = section.getString("display-name", rawId)!!.trim()
                     val first = section.readLocation(plugin, "first-spawn")
                     val second = section.readLocation(plugin, "second-spawn")
                     val firstWorld = requireNotNull(first.world)
@@ -232,6 +305,7 @@ class PaperArenaCatalog private constructor(
                     id to
                         PaperArena(
                             id,
+                            displayName,
                             first,
                             second,
                             bounds,
@@ -312,6 +386,7 @@ class PaperArenaCatalog private constructor(
 
     private data class PendingReservation(
         val rules: DuelRules,
+        val arenaId: ArenaId?,
         val future: CompletableFuture<ArenaReservation>,
     )
 }

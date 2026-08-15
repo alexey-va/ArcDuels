@@ -16,12 +16,13 @@ class ChallengeRegistry(
         challenger: PlayerId,
         target: PlayerId,
         rules: DuelRules,
+        arenaSelection: ArenaSelection? = null,
     ): DuelChallenge =
         synchronized(lock) {
             expirePending()
             val pair = setOf(challenger, target)
             check(pendingByPair[pair] == null) { "These players already have a pending challenge" }
-            DuelChallenge.create(challenger, target, rules, clock.instant(), ttl).also { challenge ->
+            DuelChallenge.create(challenger, target, rules, clock.instant(), ttl, arenaSelection).also { challenge ->
                 challenges[challenge.id] = challenge
                 pendingByPair[pair] = challenge.id
             }
@@ -61,7 +62,12 @@ class ChallengeRegistry(
                 require(existing.challenger == challenge.challenger && existing.target == challenge.target) {
                     "Challenge participants do not match the registered challenge"
                 }
-                require(existing.rules == challenge.rules && existing.createdAt == challenge.createdAt && existing.expiresAt == challenge.expiresAt) {
+                require(
+                    existing.rules == challenge.rules &&
+                        existing.arenaSelection == challenge.arenaSelection &&
+                        existing.createdAt == challenge.createdAt &&
+                        existing.expiresAt == challenge.expiresAt,
+                ) {
                     "Challenge resolution does not match the registered challenge"
                 }
                 require(existing.status == ChallengeStatus.PENDING || existing == challenge) {

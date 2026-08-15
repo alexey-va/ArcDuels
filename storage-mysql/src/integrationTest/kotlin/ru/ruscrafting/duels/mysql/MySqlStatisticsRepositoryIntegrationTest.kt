@@ -34,26 +34,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
     init {
         beforeSpec {
             mysql.start()
-            val runtime =
-                SqlRuntime.create(
-                    SqlConnectionConfig(
-                        host = mysql.host,
-                        port = mysql.firstMappedPort,
-                        database = mysql.databaseName,
-                        username = mysql.username,
-                        password = mysql.password,
-                        sslMode = SqlSslMode.DISABLED,
-                        minimumIdle = 0,
-                        maximumPoolSize = 4,
-                        connectionTimeoutMs = 10_000,
-                        socketTimeoutMs = 30_000,
-                        validationTimeoutMs = 5_000,
-                        maxLifetimeMs = 60_000,
-                        failFast = true,
-                    ),
-                    "arcduels-it",
-                )
-            repository = MySqlStatisticsRepository(runtime)
+            repository = openRepository("arcduels-it")
             repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
             repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6)
         }
@@ -219,6 +200,37 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             repository.retainRestored(state, restoredAt, restoredAt.plusSeconds(3600)).get() shouldBe true
         }
 
+        "committed recovery state survives process loss before apply and between participant acknowledgements" {
+            repository.purgeRetained(Instant.parse("9999-12-31T23:59:59.999Z")).get()
+            val serverId = ServerId("duels-crash-it")
+            val matchId = MatchId(UUID.fromString("00000000-0000-0000-0000-000000000057"))
+            val first = escrow("00000000-0000-0000-0000-000000000058", matchId, serverId, "crash-first")
+            val second = escrow("00000000-0000-0000-0000-000000000059", matchId, serverId, "crash-second")
+            val restoredAt = Instant.parse("2026-08-14T11:30:00Z")
+            val purgeAfter = restoredAt.plusSeconds(3600)
+
+            openRepository("arcduels-crash-writer").use { writer ->
+                writer.migrate().get()
+                writer.savePair(first, second).get()
+            }
+
+            openRepository("arcduels-crash-after-commit").use { afterCommit ->
+                afterCommit.migrate().get()
+                afterCommit.pending(serverId).get().map { it.playerId } shouldContainExactly listOf(first.playerId, second.playerId)
+                afterCommit.retainRestored(first, restoredAt, purgeAfter).get() shouldBe true
+            }
+
+            openRepository("arcduels-crash-after-partial-ack").use { afterPartialAcknowledgement ->
+                afterPartialAcknowledgement.migrate().get()
+                afterPartialAcknowledgement.findPending(first.playerId).get() shouldBe null
+                afterPartialAcknowledgement.findLatestRetained(first.playerId).get()?.sameContent(first) shouldBe true
+                afterPartialAcknowledgement.findPending(second.playerId).get()?.sameContent(second) shouldBe true
+                afterPartialAcknowledgement.retainRestored(first, restoredAt, purgeAfter).get() shouldBe true
+                afterPartialAcknowledgement.retainRestored(second, restoredAt, purgeAfter).get() shouldBe true
+                afterPartialAcknowledgement.purgeRetained(purgeAfter).get() shouldBe 2
+            }
+        }
+
         "player state pair is atomically moved to retained history and purged only after expiry" {
             // The suite intentionally shares one container. Isolate the purge
             // count from retained rows created by earlier scenarios while
@@ -322,6 +334,28 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                 }
             }
         }
+
+    private fun openRepository(poolName: String): MySqlStatisticsRepository =
+        MySqlStatisticsRepository(
+            SqlRuntime.create(
+                SqlConnectionConfig(
+                    host = mysql.host,
+                    port = mysql.firstMappedPort,
+                    database = mysql.databaseName,
+                    username = mysql.username,
+                    password = mysql.password,
+                    sslMode = SqlSslMode.DISABLED,
+                    minimumIdle = 0,
+                    maximumPoolSize = 4,
+                    connectionTimeoutMs = 10_000,
+                    socketTimeoutMs = 30_000,
+                    validationTimeoutMs = 5_000,
+                    maxLifetimeMs = 60_000,
+                    failFast = true,
+                ),
+                poolName,
+            ),
+        )
 
     private fun UUID.toBytes(): ByteArray =
         ByteBuffer.allocate(16)

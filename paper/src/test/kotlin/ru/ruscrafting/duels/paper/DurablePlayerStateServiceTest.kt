@@ -188,6 +188,44 @@ class DurablePlayerStateServiceTest : StringSpec({
         sessions.shutdown()
     }
 
+    "a fresh process instance restores exact kit inventory from the committed snapshot" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val writer = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val player = server.addPlayer()
+        val peer = server.addPlayer()
+        player.inventory.setItem(0, ItemStack(Material.NETHERITE_SWORD))
+        peer.inventory.setItem(4, ItemStack(Material.TOTEM_OF_UNDYING))
+        writer.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
+        player.inventory.setItem(0, ItemStack(Material.WOODEN_SWORD))
+
+        val afterCrash = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        afterCrash.loadPending(1_000L) shouldBe 2
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                afterCrash,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataReady = { true },
+                recoveryApplyDelayTicks = 0L,
+                playerDataSaver = {},
+            )
+
+        sessions.handleJoin(player)
+        server.scheduler.performTicks(2)
+
+        player.inventory.getItem(0)?.type shouldBe Material.NETHERITE_SWORD
+        afterCrash.isPending(player.uniqueId) shouldBe false
+        val afterAcknowledgementCrash = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        afterAcknowledgementCrash.loadPending(1_000L) shouldBe 1
+        afterAcknowledgementCrash.isPending(peer.uniqueId) shouldBe true
+        sessions.shutdown()
+    }
+
     "matching inventory is claimed after the settle window without applying or saving it again" {
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
@@ -457,6 +495,7 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
     val commit = CompletableFuture<Unit>()
     var saved: List<PlayerStateEscrow>? = null
     var retained: UUID? = null
+    private val retainedPlayers = linkedSetOf<UUID>()
     var retentionCalls: Int = 0
     var archival: CompletableFuture<Boolean> = CompletableFuture.completedFuture(true)
     var restoredAt: Instant? = null
@@ -481,14 +520,16 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
 
     override fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> {
         lookupCalls++
-        return CompletableFuture.completedFuture(saved?.takeIf { exposeSavedRows }?.firstOrNull { it.playerId == playerId })
+        return CompletableFuture.completedFuture(
+            saved?.takeIf { exposeSavedRows }?.firstOrNull { it.playerId == playerId && it.playerId.value !in retainedPlayers },
+        )
     }
 
     override fun pending(serverId: ServerId): CompletableFuture<List<PlayerStateEscrow>> =
-        CompletableFuture.completedFuture(saved.orEmpty().filter { it.serverId == serverId })
+        CompletableFuture.completedFuture(saved.orEmpty().filter { it.serverId == serverId && it.playerId.value !in retainedPlayers })
 
     override fun findLatestRetained(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> =
-        CompletableFuture.completedFuture(saved?.firstOrNull { it.playerId == playerId && it.playerId.value == retained })
+        CompletableFuture.completedFuture(saved?.firstOrNull { it.playerId == playerId && it.playerId.value in retainedPlayers })
 
     override fun retainRestored(
         snapshot: PlayerStateEscrow,
@@ -499,7 +540,10 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
         retained = snapshot.playerId.value
         this.restoredAt = restoredAt
         this.purgeAfter = purgeAfter
-        return archival
+        return archival.thenApply { archived ->
+            if (archived) retainedPlayers += snapshot.playerId.value
+            archived
+        }
     }
 
     override fun purgeRetained(cutoff: Instant): CompletableFuture<Int> {

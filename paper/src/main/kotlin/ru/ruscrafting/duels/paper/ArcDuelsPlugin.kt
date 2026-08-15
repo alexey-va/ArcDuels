@@ -23,11 +23,9 @@ import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
 import ru.ruscrafting.duels.redis.ArenaNodeStatus
-import ru.ruscrafting.duels.redis.ArenaModeCapacity
 import ru.ruscrafting.duels.redis.CrossServerChallengeBus
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 import ru.ruscrafting.duels.redis.NetworkArenaDirectory
-import ru.ruscrafting.duels.redis.ObjectiveCapacity
 import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
 import java.time.Clock
 import java.time.Duration
@@ -198,6 +196,9 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 controller::challenge,
                 controller::showStatistics,
                 serverNames,
+                arenaChoices = { rules ->
+                    network.arenas?.choices(rules) ?: arenas.choices(serverId, rules)
+                },
             )
         val command = DuelCommand(controller, gui, admin, targets, locales)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
@@ -218,13 +219,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 directory.publish(
                     ArenaNodeStatus(
                         server = serverId,
-                        ownInventory =
-                            if (syncProvider.sharesInventoryBetweenServers) {
-                                arenas.networkCapacity(DuelMode.OWN_INVENTORY)
-                            } else {
-                                emptyNetworkCapacity()
-                            },
-                        kit = arenas.networkCapacity(DuelMode.KIT),
+                        arenas = arenas.advertisements(syncProvider.sharesInventoryBetweenServers),
                         queuedPairs = arenas.queueSize(),
                     ),
                 )
@@ -252,18 +247,6 @@ open class ArcDuelsPlugin : JavaPlugin() {
         }
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
     }
-
-    private fun PaperArenaCatalog.networkCapacity(mode: DuelMode): ArenaModeCapacity {
-        return ArenaModeCapacity(
-            DuelObjectiveType.entries.associateWith { objective ->
-                val capacity = capacity(mode, objective)
-                ObjectiveCapacity(capacity.total, capacity.free)
-            },
-        )
-    }
-
-    private fun emptyNetworkCapacity(): ArenaModeCapacity =
-        ArenaModeCapacity(DuelObjectiveType.entries.associateWith { ObjectiveCapacity(0, 0) })
 
     private fun createPersistence(): Persistence {
         if (!config.getBoolean("mysql.enabled", false)) {
@@ -326,24 +309,39 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 staleAfter = Duration.ofSeconds(config.getLong("redis.player-list-ttl-seconds", 5L).coerceIn(2L, 30L)),
             )
         val arenas = NetworkArenaDirectory(manager, serverId)
+        val playerComponents = DuelPlayerComponents(statistics, locales)
         if (config.getBoolean("redis.broadcast-wins", true)) {
             bus.subscribe { event ->
                 if (!isEnabled) return@subscribe
                 if (event is MatchCompletedEvent) {
-                    statistics.findPlayerName(event.winner).thenCombine(statistics.findPlayerName(event.loser), ::Pair)
-                        .whenComplete { names, _ ->
+                    val names = statistics.findPlayerName(event.winner).thenCombine(statistics.findPlayerName(event.loser), ::Pair)
+                    val playerStats = statistics.find(event.winner).thenCombine(statistics.find(event.loser), ::Pair)
+                    names.thenCombine(playerStats) { resolvedNames, resolvedStats -> resolvedNames to resolvedStats }
+                        .whenComplete { resolved, _ ->
                             if (!isEnabled) return@whenComplete
                             server.scheduler.runTask(this, Runnable {
-                                val winner = names?.first ?: server.getOfflinePlayer(event.winner.value).name ?: event.winner.toString().take(8)
-                                val loser = names?.second ?: server.getOfflinePlayer(event.loser.value).name ?: event.loser.toString().take(8)
+                                val winner = resolved?.first?.first ?: server.getOfflinePlayer(event.winner.value).name ?: event.winner.toString().take(8)
+                                val loser = resolved?.first?.second ?: server.getOfflinePlayer(event.loser.value).name ?: event.loser.toString().take(8)
                                 val recipients = server.onlinePlayers.toList() + server.consoleSender
                                 recipients.forEach { recipient ->
+                                    val winnerComponent =
+                                        if (recipient is org.bukkit.entity.Player) {
+                                            playerComponents.component(recipient, event.winner.value, winner, resolved?.second?.first)
+                                        } else {
+                                            net.kyori.adventure.text.Component.text(winner)
+                                        }
+                                    val loserComponent =
+                                        if (recipient is org.bukkit.entity.Player) {
+                                            playerComponents.component(recipient, event.loser.value, loser, resolved?.second?.second)
+                                        } else {
+                                            net.kyori.adventure.text.Component.text(loser)
+                                        }
                                     recipient.sendMessage(
                                         locales.notice(
                                             recipient,
                                             "network.win",
-                                            LocaleService.text("winner", winner),
-                                            LocaleService.text("loser", loser),
+                                            LocaleService.component("winner", winnerComponent),
+                                            LocaleService.component("loser", loserComponent),
                                             LocaleService.text("rating", event.winnerRating),
                                         ),
                                     )

@@ -189,6 +189,8 @@ kits:
 arenas:
   example:
     enabled: false
+    # Plain player-facing name shown together with server-display-names.
+    display-name: Example arena
     # Optional per-arena compatibility. Omit for both modes.
     # Values: OWN_INVENTORY, KIT.
     allowed-loadouts: [OWN_INVENTORY, KIT]

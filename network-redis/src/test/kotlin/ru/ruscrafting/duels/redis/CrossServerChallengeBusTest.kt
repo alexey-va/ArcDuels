@@ -1,11 +1,14 @@
 package ru.ruscrafting.duels.redis
 
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.ChallengeStatus
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.CombatModifiers
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.DuelMode
@@ -48,6 +51,7 @@ class CrossServerChallengeBusTest : StringSpec({
                     ),
                     Instant.parse("2026-08-14T09:00:00Z"),
                     Duration.ofSeconds(45),
+                    ArenaSelection(ServerId("parkour"), ArenaId("kit-one")),
                 ),
             challengerName = "Alice",
             targetName = "Bob",
@@ -89,7 +93,7 @@ class CrossServerChallengeBusTest : StringSpec({
 
         codec.decode(codec.encode(boxing)) shouldBe boxing
         io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
-            codec.decode(codec.encode(boxing).replace("\"version\":2", "\"version\":1"))
+            codec.decode(codec.encode(boxing).replace("\"version\":3", "\"version\":2"))
         }
     }
 
@@ -107,5 +111,19 @@ class CrossServerChallengeBusTest : StringSpec({
 
         received shouldContainExactly listOf(offer)
         bus.close()
+    }
+
+    "challenge messages can only originate from the participant server authorized for that transition" {
+        shouldThrow<IllegalArgumentException> {
+            offer.copy(sourceServer = ServerId("parkour"))
+        }
+        shouldThrow<IllegalArgumentException> {
+            offer.copy(
+                messageId = "challenge:accepted:spoofed",
+                type = ChallengeMessageType.RESOLUTION,
+                challenge = offer.challenge.resolve(ChallengeStatus.ACCEPTED, offer.challenge.createdAt),
+                matchServer = ServerId("parkour"),
+            )
+        }
     }
 })

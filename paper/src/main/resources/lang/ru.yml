@@ -64,8 +64,22 @@ menu:
     capture-lore: ['<gray>Время удержания точки одним игроком.</gray>', '<gray>При спорном захвате прогресс стоит.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить время</gray>']
     hit-target: '<gold>Цель: <hits> попаданий</gold>'
     hit-target-lore: ['<gray>Раунд завершится, когда игрок первым</gray>', '<gray>наберёт указанное число попаданий.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить цель</gray>']
+    arena-auto: '<gold>Арена: автовыбор</gold>'
+    arena-auto-lore: ['<gray>Система выберет подходящую арену</gray>', '<gray>с наименьшей очередью на всей сети.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать арену вручную</gray>']
+    arena-selected: '<gold>Арена: <arena></gold>'
+    arena-selected-lore: ['<gray>Сервер:</gray> <server>', '<gray>Вызов закреплён за этой ареной.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить выбор</gray>']
     confirm: '<green>Отправить вызов</green>'
     confirm-lore: ['<dark_gray>✖</dark_gray> <white>Все параметры выбраны.</white>', '', '<aqua>ЛКМ</aqua> <gray>Подтвердить</gray>']
+  arenas:
+    title: '<dark_gray>Выбор арены</dark_gray>'
+    auto: '<gold>Автовыбор</gold>'
+    auto-lore: ['<gray>Предпочесть свободную арену</gray>', '<gray>с наименьшей очередью.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать</gray>']
+    entry: '<gold><arena></gold>'
+    entry-lore: ['<gray>Сервер:</gray> <server>', '<gray>Состояние:</gray> <state>', '', '<aqua>ЛКМ</aqua> <gray>Закрепить арену</gray>']
+    available: '<green>свободна</green>'
+    busy: '<yellow>занята — бой встанет в очередь</yellow>'
+    empty: '<red>Подходящих арен сейчас нет</red>'
+    empty-lore: ['<gray>Можно оставить автовыбор:</gray>', '<gray>арена найдётся при принятии вызова.</gray>']
   leaderboard:
     loading: '<gray>Загружаю глобальный рейтинг…</gray>'
     title: '<dark_gray>Лидеры · <page>/<pages></dark_gray>'
@@ -176,6 +190,21 @@ kit:
     name: '<gold>Боксинг</gold>'
     description: ['<gray>Равное лёгкое снаряжение для ударных режимов.</gray>']
 
+player-link:
+  name: '<#92bed8><player></#92bed8>'
+  hover: |-
+    <#fff4d6><player></#fff4d6>
+    <#8c8c8c>Рейтинг:</#8c8c8c> <#32d6ff><rating></#32d6ff>
+    <#8c8c8c>Победы:</#8c8c8c> <#55ff8a><wins></#55ff8a>  <#8c8c8c>Поражения:</#8c8c8c> <#ff5c7a><losses></#ff5c7a>
+    <#8c8c8c>Винрейт:</#8c8c8c> <#ffb347><winrate>%</#ffb347>  <#8c8c8c>Серия:</#8c8c8c> <#ffacd5><streak></#ffacd5>
+
+    <#32d6ff>Нажми, чтобы открыть меню игрока</#32d6ff>
+  hover-unavailable: |-
+    <#fff4d6><player></#fff4d6>
+    <#8c8c8c>Статистика временно недоступна</#8c8c8c>
+
+    <#32d6ff>Нажми, чтобы открыть меню игрока</#32d6ff>
+
 error:
   player-only: '<#c42323>Эта команда доступна только игроку.</#c42323>'
   player-left: '<#c42323>Игрок уже вышел или начал другой бой.</#c42323>'
@@ -187,7 +216,7 @@ controller:
   sent: '<#2bba43>Вызов отправлен игроку <#e6fff3><player></#e6fff3>.</#2bba43>'
   failed: '<#c42323>Не удалось обработать вызов на дуэль.</#c42323>'
   network-unavailable: '<#c42323>Сетевые вызовы сейчас недоступны.</#c42323>'
-  no-network-arena: '<#c42323>Сейчас нет подходящей свободной арены.</#c42323>'
+  no-network-arena: '<#c42323>Выбранная арена недоступна или не поддерживает эти правила.</#c42323>'
   network-transfer: '<#fff4d6>Вызов принят.</#fff4d6><newline><#9aa7b5>Перемещаю на арену:</#9aa7b5> <server>'
   network-return: '<#fff4d6>Возвращаю тебя на исходный сервер.</#fff4d6><newline><#9aa7b5>Сервер:</#9aa7b5> <server>'
   rematch-return: '<#e6fff3>Новый бой принят.</#e6fff3><newline><#8c8c8c>Сначала безопасно восстановлю состояние на</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, затем отправлю на арену.</#8c8c8c>'
@@ -218,10 +247,13 @@ controller:
   no-outgoing: '<#c42323>У тебя нет исходящих вызовов.</#c42323>'
   loadout-kit: '<#8c8c8c>кит <#e6fff3><kit></#e6fff3></#8c8c8c>'
   loadout-own: '<#8c8c8c>своё снаряжение</#8c8c8c>'
+  arena-auto: '<#8c8c8c>автовыбор по всей сети</#8c8c8c>'
+  arena-selected: '<#e6fff3><arena></#e6fff3> <#666666>·</#666666> <server>'
   received: |-
     <#e6fff3><player> предлагает дуэль</#e6fff3>
     <objective> <#666666>•</#666666> <ranked>
     <#8c8c8c>Снаряжение</#8c8c8c> <loadout> <#666666>•</#666666> <#92bed8>BO<bestof></#92bed8>
+    <#8c8c8c>Арена</#8c8c8c> <arena>
     <rules>
   combat-summary: |-
     <#8c8c8c>Смерть</#8c8c8c> <white><sudden> с</white> <#666666>•</#666666> <#8c8c8c>Снаряды</#8c8c8c> <projectiles>

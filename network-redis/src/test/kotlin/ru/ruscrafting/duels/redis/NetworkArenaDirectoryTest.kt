@@ -1,17 +1,21 @@
 package ru.ruscrafting.duels.redis
 
 import com.google.gson.Gson
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import io.mockk.verify
 import org.slf4j.Logger
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
+import ru.ruscrafting.duels.domain.CombatModifiers
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
-import ru.ruscrafting.duels.domain.CombatModifiers
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
@@ -30,58 +34,67 @@ class NetworkArenaDirectoryTest : StringSpec({
 
     beforeTest { now = Instant.parse("2026-08-14T09:00:00Z") }
 
-    fun capacity(vararg values: Pair<DuelObjectiveType, ObjectiveCapacity>): ArenaModeCapacity =
-        ArenaModeCapacity(DuelObjectiveType.entries.associateWith { ObjectiveCapacity(0, 0) } + values.toMap())
+    fun arena(
+        id: String,
+        loadouts: Set<DuelMode>,
+        objectives: Set<DuelObjectiveType>,
+        available: Boolean,
+    ) = ArenaAdvertisement(ArenaId(id), id.replace('-', ' '), loadouts, objectives, available)
 
     fun statusJson(
         server: String,
-        ownInventory: ArenaModeCapacity,
-        kit: ArenaModeCapacity,
+        arenas: List<ArenaAdvertisement>,
         queuedPairs: Int = 0,
     ): String =
         Gson().toJson(
             mapOf(
-                "version" to 3,
+                "version" to 4,
                 "server" to server,
-                "ownInventory" to mapOf("objectives" to ownInventory.objectives.mapKeys { it.key.name }),
-                "kit" to mapOf("objectives" to kit.objectives.mapKeys { it.key.name }),
+                "arenas" to
+                    arenas.map { advertised ->
+                        mapOf(
+                            "id" to advertised.id.value,
+                            "displayName" to advertised.displayName,
+                            "loadouts" to advertised.loadouts.map { it.name },
+                            "objectives" to advertised.objectives.map { it.name },
+                            "available" to advertised.available,
+                        )
+                    },
                 "queuedPairs" to queuedPairs,
             ),
         )
 
-    "selects a live compatible node with free capacity before a queued node" {
+    "selects a live compatible node and exposes exact player-selectable arenas" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
         val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
         directory.publish(
             ArenaNodeStatus(
                 ServerId("spawn"),
-                ownInventory =
-                    capacity(
-                        DuelObjectiveType.ELIMINATION to ObjectiveCapacity(2, 0),
-                        DuelObjectiveType.KING_OF_THE_HILL to ObjectiveCapacity(1, 0),
+                listOf(
+                    arena(
+                        "spawn-own",
+                        setOf(DuelMode.OWN_INVENTORY),
+                        setOf(DuelObjectiveType.ELIMINATION, DuelObjectiveType.KING_OF_THE_HILL),
+                        available = false,
                     ),
-                kit = capacity(),
+                ),
                 queuedPairs = 1,
             ),
         )
+        val parkourArenas =
+            listOf(
+                arena("kit-one", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true),
+                arena("boxing", setOf(DuelMode.KIT), setOf(DuelObjectiveType.BOXING), available = true),
+            )
         redis.simulateExternalMessage(
             NetworkArenaDirectory.CHANNEL,
-            statusJson(
-                "parkour",
-                capacity(),
-                capacity(
-                    DuelObjectiveType.ELIMINATION to ObjectiveCapacity(5, 3),
-                    DuelObjectiveType.BOXING to ObjectiveCapacity(2, 2),
-                ),
-            ),
+            statusJson("parkour", parkourArenas),
             "parkour",
         )
 
-        directory.select(DuelRules(DuelMode.KIT, KitId("classic"))) shouldBe ServerId("parkour")
+        val kitRules = DuelRules(DuelMode.KIT, KitId("classic"))
+        directory.select(kitRules) shouldBe ServerId("parkour")
         directory.select(DuelRules(DuelMode.OWN_INVENTORY)) shouldBe ServerId("spawn")
-        directory.select(DuelRules(DuelMode.OWN_INVENTORY, objective = DuelObjectiveType.KING_OF_THE_HILL)) shouldBe
-            ServerId("spawn")
-        directory.select(DuelRules(DuelMode.KIT, KitId("classic"), objective = DuelObjectiveType.KING_OF_THE_HILL)) shouldBe null
         directory.select(
             DuelRules(
                 DuelMode.KIT,
@@ -90,6 +103,35 @@ class NetworkArenaDirectoryTest : StringSpec({
                 modifiers = CombatModifiers(false, false, false, false),
             ),
         ) shouldBe ServerId("parkour")
+        directory.choices(kitRules) shouldContainExactly
+            listOf(ArenaChoice(ArenaSelection(ServerId("parkour"), ArenaId("kit-one")), "kit one", true, 0))
+        directory.select(kitRules, ArenaSelection(ServerId("parkour"), ArenaId("kit-one"))) shouldBe ServerId("parkour")
+        directory.select(kitRules, ArenaSelection(ServerId("parkour"), ArenaId("boxing"))) shouldBe null
+        directory.close()
+    }
+
+    "an explicitly selected busy arena stays pinned instead of rerouting" {
+        val redis = InMemoryRedis(ServerIdentity { "spawn" })
+        val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
+        val rules = DuelRules(DuelMode.KIT, KitId("classic"))
+        directory.publish(
+            ArenaNodeStatus(
+                ServerId("spawn"),
+                listOf(arena("chosen", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = false)),
+                queuedPairs = 4,
+            ),
+        )
+        redis.simulateExternalMessage(
+            NetworkArenaDirectory.CHANNEL,
+            statusJson(
+                "parkour",
+                listOf(arena("free", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true)),
+            ),
+            "parkour",
+        )
+
+        directory.select(rules) shouldBe ServerId("parkour")
+        directory.select(rules, ArenaSelection(ServerId("spawn"), ArenaId("chosen"))) shouldBe ServerId("spawn")
         directory.close()
     }
 
@@ -99,8 +141,7 @@ class NetworkArenaDirectoryTest : StringSpec({
         val status =
             statusJson(
                 "parkour",
-                capacity(),
-                capacity(DuelObjectiveType.ELIMINATION to ObjectiveCapacity(5, 5)),
+                listOf(arena("kit", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true)),
             )
         val rules = DuelRules(DuelMode.KIT, KitId("classic"))
 
@@ -118,14 +159,35 @@ class NetworkArenaDirectoryTest : StringSpec({
         val logger = mockk<Logger>(relaxed = true)
         val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock, logger = logger)
         val oldStatus =
-            """{"version":2,"server":"legacy","ownInventory":{"generalTotal":5,"generalFree":5,"kingOfTheHillTotal":1,"kingOfTheHillFree":1},"kit":{"generalTotal":0,"generalFree":0,"kingOfTheHillTotal":0,"kingOfTheHillFree":0},"queuedPairs":0}"""
+            """{"version":3,"server":"legacy","ownInventory":{"objectives":{}},"kit":{"objectives":{}},"queuedPairs":0}"""
 
         redis.simulateExternalMessage(NetworkArenaDirectory.CHANNEL, oldStatus, "legacy")
 
         directory.select(DuelRules(DuelMode.OWN_INVENTORY)) shouldBe null
         directory.activeNodes() shouldBe emptyList()
-        verify(exactly = 1) { logger.debug("Ignored ArcDuels arena status version {} from {}", 2, "legacy") }
+        verify(exactly = 1) { logger.debug("Ignored ArcDuels arena status version {} from {}", 3, "legacy") }
         verify(exactly = 0) { logger.warn(any<String>(), any<Any>(), any<Throwable>()) }
+        directory.close()
+    }
+
+    "rejects an oversized outbound arena heartbeat before publishing it" {
+        val redis = InMemoryRedis(ServerIdentity { "spawn" })
+        val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
+        val arenas =
+            List(1_000) { index ->
+                ArenaAdvertisement(
+                    ArenaId("arena-$index"),
+                    "x".repeat(64),
+                    DuelMode.entries.toSet(),
+                    DuelObjectiveType.entries.toSet(),
+                    available = true,
+                )
+            }
+
+        shouldThrow<IllegalArgumentException> {
+            directory.publish(ArenaNodeStatus(ServerId("spawn"), arenas, queuedPairs = 0))
+        }
+        directory.activeNodes() shouldBe emptyList()
         directory.close()
     }
 })

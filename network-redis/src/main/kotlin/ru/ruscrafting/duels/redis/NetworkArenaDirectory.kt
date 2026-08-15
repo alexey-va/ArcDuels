@@ -6,6 +6,8 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import ru.arc.redis.ChannelListener
 import ru.arc.redis.RedisOperations
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
@@ -14,52 +16,60 @@ import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
-data class ArenaModeCapacity(
-    val objectives: Map<DuelObjectiveType, ObjectiveCapacity>,
+data class ArenaAdvertisement(
+    val id: ArenaId,
+    val displayName: String,
+    val loadouts: Set<DuelMode>,
+    val objectives: Set<DuelObjectiveType>,
+    val available: Boolean,
 ) {
     init {
-        require(objectives.keys == DuelObjectiveType.entries.toSet()) { "Arena capacity must describe every objective" }
+        require(displayName.isNotBlank() && displayName.length <= MAX_DISPLAY_NAME_LENGTH) {
+            "Arena display name must contain 1..$MAX_DISPLAY_NAME_LENGTH characters"
+        }
+        require(displayName.none(Char::isISOControl)) { "Arena display name contains control characters" }
+        require(loadouts.isNotEmpty()) { "Advertised arena must support at least one loadout" }
+        require(objectives.isNotEmpty()) { "Advertised arena must support at least one objective" }
     }
 
-    fun total(objective: DuelObjectiveType): Int = objectives.getValue(objective).total
-
-    fun free(objective: DuelObjectiveType): Int = objectives.getValue(objective).free
-}
-
-data class ObjectiveCapacity(
-    val total: Int,
-    val free: Int,
-) {
-    init {
-        require(total in 0..MAX_ARENAS && free in 0..total) { "Invalid objective arena capacity" }
-    }
+    fun supports(rules: DuelRules): Boolean = rules.mode in loadouts && rules.objective in objectives
 
     private companion object {
-        const val MAX_ARENAS = 10_000
+        const val MAX_DISPLAY_NAME_LENGTH = 64
     }
 }
 
 data class ArenaNodeStatus(
     val server: ServerId,
-    val ownInventory: ArenaModeCapacity,
-    val kit: ArenaModeCapacity,
+    val arenas: List<ArenaAdvertisement>,
     val queuedPairs: Int,
 ) {
     init {
+        require(arenas.size <= MAX_ARENAS) { "Too many advertised arenas" }
+        require(arenas.map(ArenaAdvertisement::id).distinct().size == arenas.size) {
+            "Advertised arena ids must be unique per server"
+        }
         require(queuedPairs in 0..MAX_QUEUE) { "Invalid arena queue size" }
     }
 
-    fun capacity(mode: DuelMode): ArenaModeCapacity =
-        if (mode == DuelMode.OWN_INVENTORY) ownInventory else kit
+    fun matching(rules: DuelRules): List<ArenaAdvertisement> = arenas.filter { it.supports(rules) }
 
-    fun total(rules: DuelRules): Int = capacity(rules.mode).total(rules.objective)
+    fun total(rules: DuelRules): Int = matching(rules).size
 
-    fun free(rules: DuelRules): Int = capacity(rules.mode).free(rules.objective)
+    fun free(rules: DuelRules): Int = matching(rules).count(ArenaAdvertisement::available)
 
     companion object {
+        private const val MAX_ARENAS = 1_000
         private const val MAX_QUEUE = 100_000
     }
 }
+
+data class ArenaChoice(
+    val selection: ArenaSelection,
+    val displayName: String,
+    val available: Boolean,
+    val queuedPairs: Int,
+)
 
 /** Live Redis directory used to route accepted duels to an actual compatible arena node. */
 class NetworkArenaDirectory(
@@ -80,16 +90,25 @@ class NetworkArenaDirectory(
 
     fun publish(status: ArenaNodeStatus) {
         require(status.server == localServer) { "Cannot publish arena status owned by another server" }
+        val message = gson.toJson(WireStatus.from(status))
+        require(message.length <= MAX_MESSAGE_CHARACTERS) { "Arena status message is too large" }
         nodes[localServer] = ObservedStatus(status, clock.millis())
-        redis.publish(CHANNEL, gson.toJson(WireStatus.from(status)))
+        redis.publish(CHANNEL, message)
     }
 
-    fun select(rules: DuelRules): ServerId? {
-        val now = clock.millis()
-        return nodes.values
+    fun select(
+        rules: DuelRules,
+        selected: ArenaSelection? = null,
+    ): ServerId? {
+        val active = activeNodes()
+        if (selected != null) {
+            return active.firstOrNull { status ->
+                status.server == selected.serverId &&
+                    status.arenas.any { it.id == selected.arenaId && it.supports(rules) }
+            }?.server
+        }
+        return active
             .asSequence()
-            .filter { now - it.receivedAtMillis < staleAfter.toMillis() }
-            .map(ObservedStatus::status)
             .filter { it.total(rules) > 0 }
             .sortedWith(
                 compareByDescending<ArenaNodeStatus> { it.free(rules) > 0 }
@@ -101,6 +120,25 @@ class NetworkArenaDirectory(
             .firstOrNull()
             ?.server
     }
+
+    fun choices(rules: DuelRules): List<ArenaChoice> =
+        activeNodes()
+            .flatMap { status ->
+                status.matching(rules).map { arena ->
+                    ArenaChoice(
+                        selection = ArenaSelection(status.server, arena.id),
+                        displayName = arena.displayName,
+                        available = arena.available,
+                        queuedPairs = status.queuedPairs,
+                    )
+                }
+            }
+            .sortedWith(
+                compareByDescending<ArenaChoice>(ArenaChoice::available)
+                    .thenBy(ArenaChoice::queuedPairs)
+                    .thenBy { it.selection.serverId.value }
+                    .thenBy { it.selection.arenaId.value },
+            )
 
     fun activeNodes(): List<ArenaNodeStatus> {
         val now = clock.millis()
@@ -143,61 +181,57 @@ class NetworkArenaDirectory(
     private data class WireStatus(
         val version: Int = WIRE_VERSION,
         val server: String,
-        val ownInventory: WireModeCapacity,
-        val kit: WireModeCapacity,
+        val arenas: List<WireArena>,
         val queuedPairs: Int,
     ) {
         fun toStatus(): ArenaNodeStatus =
             ArenaNodeStatus(
-                ServerId(server),
-                ownInventory.toCapacity(),
-                kit.toCapacity(),
-                queuedPairs,
+                server = ServerId(server),
+                arenas = arenas.map(WireArena::toAdvertisement),
+                queuedPairs = queuedPairs,
             )
 
         companion object {
             fun from(status: ArenaNodeStatus): WireStatus =
                 WireStatus(
                     server = status.server.value,
-                    ownInventory = WireModeCapacity.from(status.ownInventory),
-                    kit = WireModeCapacity.from(status.kit),
+                    arenas = status.arenas.map(WireArena::from),
                     queuedPairs = status.queuedPairs,
                 )
         }
     }
 
-    private data class WireModeCapacity(
-        val objectives: Map<String, WireObjectiveCapacity>,
+    private data class WireArena(
+        val id: String,
+        val displayName: String,
+        val loadouts: List<String>,
+        val objectives: List<String>,
+        val available: Boolean,
     ) {
-        fun toCapacity(): ArenaModeCapacity {
-            require(objectives.keys == DuelObjectiveType.entries.mapTo(linkedSetOf()) { it.name }) {
-                "Arena status must describe every supported objective"
-            }
-            return ArenaModeCapacity(
-                objectives.mapKeys { (name, _) -> DuelObjectiveType.valueOf(name) }
-                    .mapValues { (_, capacity) -> capacity.toCapacity() },
+        fun toAdvertisement(): ArenaAdvertisement =
+            ArenaAdvertisement(
+                id = ArenaId(id),
+                displayName = displayName,
+                loadouts = loadouts.mapTo(linkedSetOf(), DuelMode::valueOf),
+                objectives = objectives.mapTo(linkedSetOf(), DuelObjectiveType::valueOf),
+                available = available,
             )
-        }
 
         companion object {
-            fun from(capacity: ArenaModeCapacity): WireModeCapacity =
-                WireModeCapacity(
-                    capacity.objectives.mapKeys { (objective, _) -> objective.name }
-                        .mapValues { (_, value) -> WireObjectiveCapacity(value.total, value.free) },
+            fun from(arena: ArenaAdvertisement): WireArena =
+                WireArena(
+                    id = arena.id.value,
+                    displayName = arena.displayName,
+                    loadouts = arena.loadouts.map(Enum<*>::name).sorted(),
+                    objectives = arena.objectives.map(Enum<*>::name).sorted(),
+                    available = arena.available,
                 )
         }
     }
 
-    private data class WireObjectiveCapacity(
-        val total: Int,
-        val free: Int,
-    ) {
-        fun toCapacity(): ObjectiveCapacity = ObjectiveCapacity(total, free)
-    }
-
     companion object {
         const val CHANNEL = "arcduels:v1:arenas"
-        private const val WIRE_VERSION = 3
-        private const val MAX_MESSAGE_CHARACTERS = 4_096
+        private const val WIRE_VERSION = 4
+        private const val MAX_MESSAGE_CHARACTERS = 65_536
     }
 }

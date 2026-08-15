@@ -17,6 +17,7 @@ import org.bukkit.util.Vector
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
+import net.kyori.adventure.text.event.HoverEvent
 import net.kyori.adventure.text.format.TextDecoration
 import io.papermc.paper.datacomponent.DataComponentTypes
 import ru.ruscrafting.duels.domain.ChallengeId
@@ -147,11 +148,23 @@ class ArcDuelsPluginTest : StringSpec({
                 clock = clock,
             )
 
-        controller.challenge(challenger, targets.local(target), DuelRules(DuelMode.OWN_INVENTORY))
-        val invitation = PlainTextComponentSerializer.plainText().serialize(requireNotNull(target.nextComponentMessage()))
+        controller.challenge(
+            challenger,
+            targets.local(target),
+            DuelRules(DuelMode.OWN_INVENTORY),
+            ru.ruscrafting.duels.domain.ArenaSelection(ServerId("spawn"), ru.ruscrafting.duels.domain.ArenaId("kit-test")),
+        )
+        val invitationComponent = requireNotNull(target.nextComponentMessage())
+        val invitation = PlainTextComponentSerializer.plainText().serialize(invitationComponent)
         invitation.contains("\n  ⚔ • Challenger предлагает дуэль\n") shouldBe true
+        invitation.contains("Арена kit-test · Спавн") shouldBe true
         invitation.contains("\n  ✔ Принять\n  ✕ Отклонить\n") shouldBe true
-        PlainTextComponentSerializer.plainText().serialize(requireNotNull(challenger.nextComponentMessage())).contains("Вызов отправлен") shouldBe true
+        invitationComponent.containsRunCommand("/duel Challenger") shouldBe true
+        invitationComponent.containsHoverText("Рейтинг: 1000") shouldBe true
+        val sent = requireNotNull(challenger.nextComponentMessage())
+        PlainTextComponentSerializer.plainText().serialize(sent).contains("Вызов отправлен") shouldBe true
+        sent.containsRunCommand("/duel Target") shouldBe true
+        sent.containsHoverText("Победы: 0") shouldBe true
 
         now = now.plusSeconds(1)
         server.scheduler.performTicks(20)
@@ -373,6 +386,12 @@ class ArcDuelsPluginTest : StringSpec({
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
         player.openInventory.topInventory.getItem(14)?.type shouldBe Material.TARGET
         player.openInventory.topInventory.getItem(19)?.type shouldBe Material.GRAY_DYE
+        player.openInventory.topInventory.getItem(16)?.type shouldBe Material.COMPASS
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 16)
+        player.openInventory.topInventory.getItem(10)?.type shouldBe Material.COMPASS
+        player.openInventory.topInventory.getItem(22)?.type shouldBe Material.BARRIER
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 36)
+        player.openInventory.topInventory.getItem(16)?.type shouldBe Material.COMPASS
 
         player.closeInventory()
         player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
@@ -433,3 +452,9 @@ class ArcDuelsPluginTest : StringSpec({
 
 private fun Component.containsRunCommand(command: String): Boolean =
     clickEvent() == ClickEvent.runCommand(command) || children().any { it.containsRunCommand(command) }
+
+private fun Component.containsHoverText(fragment: String): Boolean {
+    val hovered = hoverEvent()?.value() as? Component
+    return (hovered != null && PlainTextComponentSerializer.plainText().serialize(hovered).contains(fragment)) ||
+        children().any { it.containsHoverText(fragment) }
+}

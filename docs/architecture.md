@@ -40,7 +40,9 @@ bounded in size, and expires after one hour.
 
 The arena allocator queues accepted pairs FIFO. Per-arena loadout policies are
 evaluated together with objective compatibility locally and in Redis routing;
-they do not depend on server names. The coordinator owns both
+they do not depend on server names. Redis advertises exact arena identities, so
+automatic routing can balance live capacity while a player-selected arena stays
+pinned to its server and its own FIFO reservation. The coordinator owns both
 players while their request is queued, so racing challenges cannot allocate the
 same participant twice. For a cross-server challenge, each origin Paper node
 captures and commits its own participant before allowing proxy transfer. The

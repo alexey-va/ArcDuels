@@ -25,6 +25,7 @@ class PostMatchDestinationTest : StringSpec({
         val arena =
             PaperArena(
                 ArenaId("safe-default"),
+                "Safe default",
                 Location(world, 10.5, 72.0, -4.5),
                 Location(world, -10.5, 72.0, 4.5),
                 ArenaBounds(world.uid, -20.0, 60.0, -20.0, 20.0, 100.0, 20.0),
@@ -47,6 +48,7 @@ class PostMatchDestinationTest : StringSpec({
         val arena =
             PaperArena(
                 ArenaId("with-lobby"),
+                "With lobby",
                 Location(world, 10.0, 70.0, 0.0),
                 Location(world, -10.0, 70.0, 0.0),
                 ArenaBounds(world.uid, -20.0, 60.0, -20.0, 20.0, 100.0, 20.0),

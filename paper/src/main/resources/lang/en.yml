@@ -64,8 +64,22 @@ menu:
     capture-lore: ['<gray>Required uncontested hold time.</gray>', '<gray>Progress pauses while contested.</gray>', '', '<aqua>Left click</aqua> <gray>Change the timer</gray>']
     hit-target: '<gold>Target: <hits> hits</gold>'
     hit-target-lore: ['<gray>The round ends when a player is first</gray>', '<gray>to reach the selected hit target.</gray>', '', '<aqua>Left click</aqua> <gray>Change target</gray>']
+    arena-auto: '<gold>Arena: automatic</gold>'
+    arena-auto-lore: ['<gray>Choose a compatible arena with</gray>', '<gray>the shortest queue across the network.</gray>', '', '<aqua>Left click</aqua> <gray>Choose manually</gray>']
+    arena-selected: '<gold>Arena: <arena></gold>'
+    arena-selected-lore: ['<gray>Server:</gray> <server>', '<gray>This challenge is pinned to the arena.</gray>', '', '<aqua>Left click</aqua> <gray>Change selection</gray>']
     confirm: '<green>Send challenge</green>'
     confirm-lore: ['<dark_gray>✖</dark_gray> <white>All match options are ready.</white>', '', '<aqua>Left click</aqua> <gray>Confirm</gray>']
+  arenas:
+    title: '<dark_gray>Choose arena</dark_gray>'
+    auto: '<gold>Automatic selection</gold>'
+    auto-lore: ['<gray>Prefer an available arena</gray>', '<gray>with the shortest queue.</gray>', '', '<aqua>Left click</aqua> <gray>Select</gray>']
+    entry: '<gold><arena></gold>'
+    entry-lore: ['<gray>Server:</gray> <server>', '<gray>Status:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Pin this arena</gray>']
+    available: '<green>available</green>'
+    busy: '<yellow>busy — the fight will queue</yellow>'
+    empty: '<red>No compatible arenas are live</red>'
+    empty-lore: ['<gray>You may keep automatic selection:</gray>', '<gray>an arena is resolved when accepted.</gray>']
   leaderboard:
     loading: '<gray>Loading the global leaderboard…</gray>'
     title: '<dark_gray>Leaders · <page>/<pages></dark_gray>'
@@ -176,6 +190,21 @@ kit:
     name: '<gold>Boxing</gold>'
     description: ['<gray>Equal light equipment for hit-race modes.</gray>']
 
+player-link:
+  name: '<#92bed8><player></#92bed8>'
+  hover: |-
+    <#fff4d6><player></#fff4d6>
+    <#8c8c8c>Rating:</#8c8c8c> <#32d6ff><rating></#32d6ff>
+    <#8c8c8c>Wins:</#8c8c8c> <#55ff8a><wins></#55ff8a>  <#8c8c8c>Losses:</#8c8c8c> <#ff5c7a><losses></#ff5c7a>
+    <#8c8c8c>Win rate:</#8c8c8c> <#ffb347><winrate>%</#ffb347>  <#8c8c8c>Streak:</#8c8c8c> <#ffacd5><streak></#ffacd5>
+
+    <#32d6ff>Click to open the player menu</#32d6ff>
+  hover-unavailable: |-
+    <#fff4d6><player></#fff4d6>
+    <#8c8c8c>Statistics are temporarily unavailable</#8c8c8c>
+
+    <#32d6ff>Click to open the player menu</#32d6ff>
+
 error:
   player-only: '<red>This command requires a player.</red>'
   player-left: '<red>The player left or entered another match.</red>'
@@ -187,7 +216,7 @@ controller:
   sent: '<green>Challenge sent to <white><player></white>.</green>'
   failed: '<red>Could not process the duel challenge.</red>'
   network-unavailable: '<red>Network challenges are currently unavailable.</red>'
-  no-network-arena: '<red>No live arena currently supports the selected objective and loadout.</red>'
+  no-network-arena: '<red>The selected arena is unavailable or does not support these rules.</red>'
   network-transfer: '<#fff4d6>Challenge accepted.</#fff4d6><newline><#9aa7b5>Moving you to arena:</#9aa7b5> <server>'
   network-return: '<#fff4d6>Returning you to your origin server.</#fff4d6><newline><#9aa7b5>Server:</#9aa7b5> <server>'
   rematch-return: '<#e6fff3>Your next fight is accepted.</#e6fff3><newline><#8c8c8c>I will safely restore your state on</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, then send you to the arena.</#8c8c8c>'
@@ -219,10 +248,13 @@ controller:
   no-outgoing: '<red>You have no outgoing challenges.</red>'
   loadout-kit: '<gray>kit <white><kit></white></gray>'
   loadout-own: '<gray>own inventory</gray>'
+  arena-auto: '<gray>automatic network selection</gray>'
+  arena-selected: '<#e6fff3><arena></#e6fff3> <dark_gray>·</dark_gray> <server>'
   received: |-
     <#e6fff3><player> offers you a duel</#e6fff3>
     <objective> <dark_gray>•</dark_gray> <ranked>
     <gray>Loadout</gray> <loadout> <dark_gray>•</dark_gray> <#92bed8>BO<bestof></#92bed8>
+    <gray>Arena</gray> <arena>
     <rules>
   combat-summary: |-
     <gray>Sudden death</gray> <white><sudden>s</white> <dark_gray>•</dark_gray> <gray>Projectiles</gray> <projectiles>

@@ -25,6 +25,16 @@ class ChallengeRegistryTest : StringSpec({
         registry.resolve(challenge.id, second, ChallengeStatus.ACCEPTED).status shouldBe ChallengeStatus.ACCEPTED
     }
 
+    "explicit arena selection is immutable challenge state" {
+        val registry = ChallengeRegistry(clock)
+        val selection = ArenaSelection(ServerId("spawn"), ArenaId("kit-test"))
+
+        val challenge = registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY), selection)
+
+        challenge.arenaSelection shouldBe selection
+        registry.resolve(challenge.id, second, ChallengeStatus.ACCEPTED).arenaSelection shouldBe selection
+    }
+
     "network challenge registration is idempotent but rejects conflicting payloads" {
         val clock = Clock.fixed(Instant.parse("2026-08-14T09:00:00Z"), ZoneOffset.UTC)
         val registry = ChallengeRegistry(clock)
@@ -54,6 +64,21 @@ class ChallengeRegistryTest : StringSpec({
         }
 
         registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
+    }
+
+    "network resolution cannot replace the arena selected in the offer" {
+        val registry = ChallengeRegistry(clock)
+        val selected = ArenaSelection(ServerId("spawn"), ArenaId("kit-test"))
+        val challenge = registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY), selected)
+
+        shouldThrow<IllegalArgumentException> {
+            registry.registerResolution(
+                challenge.resolve(ChallengeStatus.ACCEPTED, clock.instant())
+                    .copy(arenaSelection = ArenaSelection(ServerId("parkour"), ArenaId("kit1"))),
+            )
+        }
+        registry.find(challenge.id)?.status shouldBe ChallengeStatus.PENDING
+        registry.find(challenge.id)?.arenaSelection shouldBe selected
     }
 
     "expired challenge cannot be accepted" {
