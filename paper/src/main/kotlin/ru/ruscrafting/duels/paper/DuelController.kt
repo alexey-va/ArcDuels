@@ -70,6 +70,16 @@ class DuelController(
         requestedTarget: DuelTarget,
         rules: DuelRules,
     ) {
+        DuelLog.debug(
+            "challenge-request",
+            challenger,
+            "challenger={} target={} mode={} objective={} best_of={}",
+            challenger.name,
+            requestedTarget.name,
+            rules.mode,
+            rules.objective,
+            rules.bestOf,
+        )
         val target = targets.find(requestedTarget.uniqueId)
         if (target == null || target.uniqueId == challenger.uniqueId) {
             challenger.sendMessage(locales.notice(challenger, "error.player-left"))
@@ -85,6 +95,16 @@ class DuelController(
         }
         runCatching { challenges.create(PlayerId(challenger.uniqueId), PlayerId(target.uniqueId), rules) }
             .onSuccess { challenge ->
+                DuelLog.info(
+                    "challenge-created",
+                    MatchId(challenge.id.value),
+                    challenger,
+                    "challenger={} target={} target_server={} expires_at={}",
+                    challenger.name,
+                    target.name,
+                    target.server.value,
+                    challenge.expiresAt,
+                )
                 val context =
                     ChallengeContext(
                         challenger.name,
@@ -119,7 +139,10 @@ class DuelController(
                 challenger.sendMessage(locales.notice(challenger, "controller.sent", LocaleService.text("player", target.name)))
                 scheduleChallengeExpiry(challenge)
             }
-            .onFailure { challenger.sendMessage(locales.notice(challenger, "controller.failed")) }
+            .onFailure {
+                DuelLog.warn("challenge-create-failed", challenger, "target={} error={}", target.name, it.message)
+                challenger.sendMessage(locales.notice(challenger, "controller.failed"))
+            }
     }
 
     fun accept(
@@ -127,6 +150,7 @@ class DuelController(
         challengeId: ChallengeId? = null,
     ) {
         val challenge = resolveCandidate(player, challengeId, incoming = true) ?: return
+        DuelLog.debug("challenge-accept-request", MatchId(challenge.id.value), player, "player={}", player.name)
         if (challenge.challenger in networkPendingPlayers || challenge.target in networkPendingPlayers) {
             player.sendMessage(locales.notice(player, "controller.busy"))
             return
@@ -149,9 +173,20 @@ class DuelController(
                 }
         cancelChallengeExpiry(challenge.id)
         if (accepted.status != ChallengeStatus.ACCEPTED) {
+            DuelLog.info("challenge-expired-during-accept", MatchId(accepted.id.value), player, "status={}", accepted.status)
             announceExpired(accepted)
             return
         }
+        DuelLog.info(
+            "challenge-accepted",
+            MatchId(accepted.id.value),
+            player,
+            "host={} both_local={} mode={} objective={}",
+            matchServer?.value ?: localServer.value,
+            bothLocal,
+            accepted.rules.mode,
+            accepted.rules.objective,
+        )
         val continuesFromArenaLobby =
             returnOffers.containsKey(challenge.challenger) || returnOffers.containsKey(challenge.target)
         if (shouldStartDirectLocalMatch(bothLocal, continuesFromArenaLobby, matchServer, localServer)) {
@@ -166,6 +201,7 @@ class DuelController(
         challengeId: ChallengeId? = null,
     ) {
         val challenge = resolveCandidate(player, challengeId, incoming = true) ?: return
+        DuelLog.info("challenge-deny-request", MatchId(challenge.id.value), player, "player={}", player.name)
         runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.DENIED) }
             .onSuccess { resolved ->
                 cancelChallengeExpiry(resolved.id)
@@ -182,6 +218,7 @@ class DuelController(
 
     fun cancel(player: Player) {
         val challenge = resolveCandidate(player, null, incoming = false) ?: return
+        DuelLog.info("challenge-cancel-request", MatchId(challenge.id.value), player, "player={}", player.name)
         runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.CANCELLED) }
             .onSuccess { resolved ->
                 cancelChallengeExpiry(resolved.id)
@@ -197,6 +234,7 @@ class DuelController(
     }
 
     fun leave(player: Player) {
+        DuelLog.info("leave-request", sessions.matchFor(player)?.id, player, "player={}", player.name)
         if (sessions.handleForfeit(player)) {
             player.sendMessage(locales.notice(player, "controller.forfeit"))
         } else {
@@ -286,6 +324,15 @@ class DuelController(
     private fun receiveOffer(message: CrossServerChallengeMessage) {
         val target = plugin.server.getPlayer(message.challenge.target.value) ?: return
         if (!clock.instant().isBefore(message.challenge.expiresAt)) return
+        DuelLog.debug(
+            "challenge-network-offer",
+            MatchId(message.challenge.id.value),
+            target,
+            "source={} challenger={} target={}",
+            message.sourceServer.value,
+            message.challengerName,
+            message.targetName,
+        )
         rememberContext(
             message.challenge.id,
             ChallengeContext(
@@ -312,6 +359,14 @@ class DuelController(
     }
 
     private fun receiveResolution(message: CrossServerChallengeMessage) {
+        DuelLog.debug(
+            "challenge-network-resolution",
+            MatchId(message.challenge.id.value),
+            "source={} status={} match_server={}",
+            message.sourceServer.value,
+            message.challenge.status,
+            message.matchServer?.value,
+        )
         runCatching { challenges.registerResolution(message.challenge) }
             .getOrElse {
                 plugin.logger.warning("Rejected network challenge resolution ${message.challenge.id}: ${it.message}")
@@ -401,6 +456,15 @@ class DuelController(
             return
         }
         val accepted = AcceptedMatch(challenge, host, networkMessage, clock.millis() + transferTimeout.toMillis())
+        DuelLog.info(
+            "match-routing-start",
+            MatchId(challenge.id.value),
+            "local_server={} host={} network={} timeout_ms={}",
+            localServer.value,
+            host.value,
+            networkMessage != null,
+            transferTimeout.toMillis(),
+        )
         acceptedMatches.putIfAbsent(challenge.id, accepted)
         // Only the arena host must suppress join-time recovery while transferred
         // participants arrive. Origin nodes must remain ready to recover a player
@@ -446,6 +510,15 @@ class DuelController(
             localParticipants.forEach { player ->
                 val request = challengeId to PlayerId(player.uniqueId)
                 if (transferRequests.add(request)) {
+                    DuelLog.info(
+                        "player-transfer-request",
+                        MatchId(challenge.id.value),
+                        player,
+                        "player={} from={} to={}",
+                        player.name,
+                        localServer.value,
+                        accepted.host.value,
+                    )
                     player.sendMessage(locales.notice(player, "controller.network-transfer", LocaleService.text("server", accepted.host.value)))
                     transfer?.connect(player, accepted.host)
                 }
@@ -493,6 +566,15 @@ class DuelController(
         challenge: DuelChallenge,
         networkMessage: CrossServerChallengeMessage? = null,
     ) {
+        DuelLog.info(
+            "match-start-request",
+            MatchId(challenge.id.value),
+            "server={} network={} challenger={} target={}",
+            localServer.value,
+            networkMessage != null,
+            challenge.challenger.value,
+            challenge.target.value,
+        )
         val start =
             if (networkMessage == null) {
                 runCatching { sessions.start(challenge) }
@@ -513,6 +595,13 @@ class DuelController(
                 runSync {
                     if (failure != null) {
                         val cause = unwrap(failure)
+                        DuelLog.warn(
+                            "match-start-failed",
+                            MatchId(challenge.id.value),
+                            "error_type={} error={}",
+                            cause.javaClass.simpleName,
+                            cause.message,
+                        )
                         participants(challenge).forEach {
                             val reasonKey = if (cause is CancellationException) "controller.wait-cancelled" else "controller.start-internal"
                             it.sendMessage(locales.notice(it, "controller.start-failed", LocaleService.component("reason", locales.component(it, reasonKey))))
@@ -523,6 +612,7 @@ class DuelController(
                             )
                         }
                     } else if (networkMessage != null) {
+                        DuelLog.info("match-started", requireNotNull(match).id, "network=true server={}", localServer.value)
                         returnRoutes[requireNotNull(match).id] =
                             ReturnRoutes(
                                 byPlayer =
@@ -694,6 +784,13 @@ class DuelController(
 
     private fun scheduleChallengeExpiry(challenge: DuelChallenge, broadcast: Boolean = true) {
         val delay = challengeExpiryDelayTicks(clock.millis(), challenge.expiresAt.toEpochMilli())
+        DuelLog.debug(
+            "challenge-expiry-scheduled",
+            MatchId(challenge.id.value),
+            "delay_ticks={} broadcast={}",
+            delay,
+            broadcast,
+        )
         val task =
             plugin.server.scheduler.runTaskLater(
                 plugin,
@@ -702,7 +799,17 @@ class DuelController(
                     val expired = challenges.expireIfDue(challenge.id) ?: return@Runnable
                     when (expired.status) {
                         ChallengeStatus.PENDING -> scheduleChallengeExpiry(expired, broadcast)
-                        ChallengeStatus.EXPIRED -> announceExpired(expired, broadcast)
+                        ChallengeStatus.EXPIRED -> {
+                            DuelLog.info(
+                                "challenge-expired",
+                                MatchId(expired.id.value),
+                                "challenger={} target={} broadcast={}",
+                                expired.challenger.value,
+                                expired.target.value,
+                                broadcast,
+                            )
+                            announceExpired(expired, broadcast)
+                        }
                         else -> Unit
                     }
                 },

@@ -81,6 +81,26 @@ internal class DuelGameplayListener(
         if (sessions.isHitRace(attacker)) sessions.recordMeleeHit(attacker, victim)
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onAcceptedDamageTrace(event: EntityDamageEvent) {
+        val victim = event.entity as? Player ?: return
+        val match = sessions.matchFor(victim) ?: return
+        if (match.state != MatchState.ACTIVE) return
+        val attacker = (event as? EntityDamageByEntityEvent)?.damager?.attackingPlayer()
+        DuelLog.debug(
+            "damage-accepted",
+            match.id,
+            victim,
+            "victim={} attacker={} cause={} raw={} final={} health_before={}",
+            victim.name,
+            attacker?.name ?: "environment",
+            event.cause,
+            event.damage,
+            event.finalDamage,
+            victim.health,
+        )
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onLethalDamage(event: EntityDamageEvent) {
         if (event is EntityDamageByEntityEvent && CelebrationEffects.isDecorativeFirework(event.damager)) {
@@ -102,6 +122,16 @@ internal class DuelGameplayListener(
             return
         }
         if (event.finalDamage >= player.health) {
+            DuelLog.info(
+                "damage-lethal",
+                match.id,
+                player,
+                "victim={} cause={} final_damage={} health={}",
+                player.name,
+                event.cause,
+                event.finalDamage,
+                player.health,
+            )
             event.isCancelled = true
             player.noDamageTicks = 20
             sessions.handleElimination(player)
@@ -154,6 +184,15 @@ internal class DuelGameplayListener(
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onTeleport(event: PlayerTeleportEvent) {
         if (!sessions.isTeleportAllowed(event.player, event.to, event.cause)) {
+            DuelLog.debug(
+                "teleport-blocked",
+                sessions.matchFor(event.player)?.id,
+                event.player,
+                "player={} cause={} destination_world={}",
+                event.player.name,
+                event.cause,
+                event.to.world.name,
+            )
             event.isCancelled = true
         }
     }
@@ -254,6 +293,14 @@ internal class DuelGameplayListener(
     @EventHandler(priority = EventPriority.LOWEST)
     fun onCommandEarly(event: PlayerCommandPreprocessEvent) {
         if (!shouldBlockCommand(event)) return
+        DuelLog.debug(
+            "command-blocked",
+            sessions.matchFor(event.player)?.id,
+            event.player,
+            "player={} command={}",
+            event.player.name,
+            event.message.substringBefore(' '),
+        )
         event.isCancelled = true
         event.player.sendMessage(locales.notice(event.player, "session.command-blocked"))
     }

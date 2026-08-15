@@ -1,0 +1,7 @@
+# ArcDuels uses arc-core's structured logging facade. DEBUG is intentional:
+# duel traffic is low, while complete lifecycle evidence is valuable when
+# diagnosing cross-server transfers and inventory recovery.
+level: DEBUG
+enabled: false
+labels:
+  service_name: arcduels

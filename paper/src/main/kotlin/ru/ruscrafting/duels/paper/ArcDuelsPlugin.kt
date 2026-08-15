@@ -41,6 +41,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     override fun onEnable() {
         saveDefaultConfig()
+        runCatching { DuelLog.install(this) }
+            .onFailure { logger.warning("Could not initialize arc-core diagnostics: ${it.message}") }
         runCatching { bootstrap() }
             .onFailure { failure ->
                 logger.severe("ArcDuels could not start: ${failure.javaClass.simpleName}: ${failure.message}")
@@ -50,6 +52,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
     }
 
     override fun onDisable() {
+        DuelLog.info("plugin-disable", "shutting down sessions and resources")
         sessions?.shutdown()
         sessions = null
         closeResources()
@@ -57,6 +60,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     private fun bootstrap() {
         val serverId = ServerId(config.getString("server-id", server.name)!!)
+        DuelLog.info("plugin-bootstrap", "server={} version={}", serverId.value, pluginMeta.version)
         val locales = LocaleService.load(this)
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
@@ -199,6 +203,16 @@ open class ArcDuelsPlugin : JavaPlugin() {
             server.scheduler.runTaskTimer(this, publishArenaStatus, ARENA_HEARTBEAT_TICKS, ARENA_HEARTBEAT_TICKS)
         }
         logger.info("ArcDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
+        DuelLog.info(
+            "plugin-ready",
+            "server={} arenas={} kits={} mysql={} redis={} sync_provider={}",
+            serverId.value,
+            arenas.size(),
+            kits.all().size,
+            config.getBoolean("mysql.enabled"),
+            config.getBoolean("redis.enabled"),
+            syncProvider,
+        )
         if (arenas.size() == 0) {
             if (hasUsableArenaRoute(arenas.size(), network.arenas != null)) {
                 logger.info("No local duel arenas are configured; compatible Redis arena routing is enabled")
