@@ -277,17 +277,15 @@ controller:
   rematch-choose: '<#92bed8>Выбрать другую арену</#92bed8>'
   rematch-choose-hover: '<#8c8c8c>Открыть обычную настройку дуэли с этим соперником</#8c8c8c>'
   rematch-pending: '<#8c8c8c>Запрос на реванш уже ожидает ответа соперника.</#8c8c8c>'
-  rematch-offer: |-
-    <#e6fff3>Реванш с <player>?</#e6fff3>
-    <#8c8c8c>Те же правила и арена доступны ещё <seconds> с.</#8c8c8c>
-    <action>
+  match-summary: |-
+    <result> <#8c8c8c>в бою с</#8c8c8c> <player> <#666666>•</#666666> <#8c8c8c>счёт</#8c8c8c> <#e6fff3><score></#e6fff3>
+    <#8c8c8c>Те же правила и арена доступны для реванша ещё <seconds> с.</#8c8c8c>
+    <actions>
+  result-win: '<#2bba43>Победа</#2bba43>'
+  result-loss: '<#c42323>Поражение</#c42323>'
   rematch-action: '<#92bed8>⚔ Предложить реванш</#92bed8>'
   rematch-hover: '<#8c8c8c>Соперник подтверждает реванш той же кнопкой</#8c8c8c>'
-  return-offer: |-
-    <#e6fff3>Бой завершён. Твои вещи защищены.</#e6fff3>
-    <#8c8c8c>Исходный сервер:</#8c8c8c> <#92bed8><server></#92bed8>
-    <action>
-  return-action: '<#92bed8>↩ Вернуться обратно</#92bed8>'
+  return-action: '<#92bed8>↩ Вернуться на <server></#92bed8>'
   return-hover: '<#8c8c8c>Вернуться на исходный сервер и проверить вещи</#8c8c8c>'
   no-return-offer: '<#8c8c8c>Сейчас нет ожидающего возврата после дуэли.</#8c8c8c>'
   network-timeout: '<#c42323>Не удалось вовремя подготовить обоих игроков к дуэли.</#c42323>'
@@ -309,29 +307,54 @@ controller:
   no-incoming: '<#c42323>У тебя нет входящих вызовов.</#c42323>'
   no-outgoing: '<#c42323>У тебя нет исходящих вызовов.</#c42323>'
   loadout-kit: '<#8c8c8c>кит <#e6fff3><kit></#e6fff3></#8c8c8c>'
+  loadout-kit-hover: '<#8c8c8c>На время боя личное снаряжение безопасно заменяется выбранным набором.</#8c8c8c>'
   loadout-own: '<#8c8c8c>своё снаряжение</#8c8c8c>'
+  loadout-own-hover: '<#8c8c8c>Ты сражаешься предметами, которые сейчас находятся в твоём инвентаре.</#8c8c8c>'
   arena-auto: '<#8c8c8c>автовыбор по всей сети</#8c8c8c>'
+  arena-auto-hover: '<#8c8c8c>ArcDuels выберет свободную совместимую арену на любом сервере сети.</#8c8c8c>'
   arena-selected: '<#e6fff3><arena></#e6fff3> <#666666>·</#666666> <server>'
+  arena-selected-hover: '<#8c8c8c>Бой пройдёт именно на этой арене, если она останется доступна.</#8c8c8c>'
+  best-of: '<#92bed8>BO<bestof></#92bed8>'
+  best-of-hover: '<#8c8c8c>BO1 — одна победа. BO3 — две победы. BO5 — три победы.</#8c8c8c>'
   received: |-
     <#e6fff3><player> предлагает дуэль</#e6fff3>
     <objective> <#666666>•</#666666> <ranked>
-    <#8c8c8c>Снаряжение</#8c8c8c> <loadout> <#666666>•</#666666> <#92bed8>BO<bestof></#92bed8>
+    <#8c8c8c>Снаряжение</#8c8c8c> <loadout> <#666666>•</#666666> <bestof>
     <#8c8c8c>Арена</#8c8c8c> <arena>
     <rules>
   combat-summary: |-
-    <#8c8c8c>Смерть</#8c8c8c> <white><sudden> с</white> <#666666>•</#666666> <#8c8c8c>Снаряды</#8c8c8c> <projectiles>
-    <#8c8c8c>Расходники</#8c8c8c> <consumables> <#666666>•</#666666> <#8c8c8c>Жемчуг</#8c8c8c> <pearls>
-    <#8c8c8c>Регенерация</#8c8c8c> <regeneration>
-  hit-race-summary: '<#8c8c8c>Цель</#8c8c8c> <white><hits> попаданий</white> <#666666>•</#666666> <#8c8c8c>без урона</#8c8c8c>'
+    <sudden> <#666666>•</#666666> <projectiles>
+    <consumables> <#666666>•</#666666> <pearls>
+    <regeneration>
+  hit-race-summary: '<target> <#666666>•</#666666> <#8c8c8c>урон отключён</#8c8c8c>'
+  hit-target: '<#8c8c8c>Цель</#8c8c8c> <#e6fff3><hits> попаданий</#e6fff3>'
+  hit-target-hover: '<#8c8c8c>Побеждает игрок, который первым нанесёт указанное количество засчитанных ударов.</#8c8c8c>'
+  sudden-death: '<#8c8c8c>Смерть</#8c8c8c> <#e6fff3><seconds> с</#e6fff3>'
+  sudden-death-hover: '<#8c8c8c>После этого времени оба игрока начнут постоянно терять здоровье.</#8c8c8c>'
+  projectiles: '<#8c8c8c>Снаряды</#8c8c8c> <state>'
+  projectiles-hover: '<#8c8c8c>Разрешает наносить урон луками, арбалетами и трезубцами.</#8c8c8c>'
+  consumables: '<#8c8c8c>Расходники</#8c8c8c> <state>'
+  consumables-hover: '<#8c8c8c>Разрешает использовать еду, зелья и золотые яблоки.</#8c8c8c>'
+  pearls: '<#8c8c8c>Жемчуг</#8c8c8c> <state>'
+  pearls-hover: '<#8c8c8c>Разрешает телепортацию жемчугом Края во время боя.</#8c8c8c>'
+  regeneration: '<#8c8c8c>Регенерация</#8c8c8c> <state>'
+  regeneration-hover: '<#8c8c8c>Определяет, восстанавливается ли здоровье естественным образом.</#8c8c8c>'
   state-on: '<#92bed8>✔ да</#92bed8>'
   state-off: '<#8c8c8c>✕ нет</#8c8c8c>'
   ranked: '<#92bed8>рейтинговая</#92bed8>'
+  ranked-hover: '<#8c8c8c>Результат изменяет рейтинг обоих игроков.</#8c8c8c>'
   unranked: '<#8c8c8c>обычная</#8c8c8c>'
+  unranked-hover: '<#8c8c8c>Результат сохраняется в истории, но не изменяет рейтинг.</#8c8c8c>'
   objective-elimination: '<#e6fff3>Классическая дуэль</#e6fff3>'
+  objective-elimination-hover: '<#8c8c8c>Раунд заканчивается после победы над соперником в обычном бою.</#8c8c8c>'
   objective-koth: '<#e6fff3>Царь горы</#e6fff3>'
+  objective-koth-hover: '<#8c8c8c>Нужно удерживать отмеченную точку арены дольше соперника.</#8c8c8c>'
   objective-sumo: '<#e6fff3>Сумо</#e6fff3>'
+  objective-sumo-hover: '<#8c8c8c>Нужно вытолкнуть соперника за границу арены. Обычный урон отключён.</#8c8c8c>'
   objective-boxing: '<#e6fff3>Боксинг</#e6fff3>'
+  objective-boxing-hover: '<#8c8c8c>Побеждает игрок, который первым наберёт нужное количество ударов.</#8c8c8c>'
   objective-combo: '<#e6fff3>Комбо</#e6fff3>'
+  objective-combo-hover: '<#8c8c8c>Побеждает игрок, который первым соберёт непрерывную серию ударов.</#8c8c8c>'
 
   accept: '<newline><newline><#2bba43>✔ Принять</#2bba43>'
   accept-hover: '<#2bba43>Начать дуэль</#2bba43>'

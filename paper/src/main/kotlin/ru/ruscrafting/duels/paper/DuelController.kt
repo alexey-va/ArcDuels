@@ -118,11 +118,11 @@ class DuelController(
                 )
                 val context =
                     ChallengeContext(
-                        challenger.name,
-                        target.name,
-                        returnOffers[challenge.challenger]?.destination ?: localServer,
-                        returnOffers[challenge.target]?.destination ?: target.server,
-                        challenge.expiresAt.toEpochMilli(),
+                        challengerName = challenger.name,
+                        targetName = target.name,
+                        challengerRoute = participantRoute(localServer, returnOffers[challenge.challenger]?.destination),
+                        targetRoute = participantRoute(target.server, returnOffers[challenge.target]?.destination),
+                        expiresAtMillis = challenge.expiresAt.toEpochMilli(),
                     )
                 rememberContext(challenge.id, context)
                 if (localTarget != null) {
@@ -141,9 +141,11 @@ class DuelController(
                             challenge = challenge,
                             challengerName = context.challengerName,
                             targetName = context.targetName,
-                            challengerServer = context.challengerServer,
-                            targetServer = context.targetServer,
+                            challengerServer = context.challengerRoute.originServer,
+                            targetServer = context.targetRoute.originServer,
                             matchServer = null,
+                            challengerCurrentServer = context.challengerRoute.currentServer,
+                            targetCurrentServer = context.targetRoute.currentServer,
                         ),
                     )
                 }
@@ -440,11 +442,11 @@ class DuelController(
         rememberContext(
             message.challenge.id,
             ChallengeContext(
-                message.challengerName,
-                message.targetName,
-                message.challengerServer,
-                returnOffers[message.challenge.target]?.destination ?: localServer,
-                message.challenge.expiresAt.toEpochMilli(),
+                challengerName = message.challengerName,
+                targetName = message.targetName,
+                challengerRoute = ParticipantRoute(message.challengerCurrentServer, message.challengerServer),
+                targetRoute = participantRoute(localServer, returnOffers[message.challenge.target]?.destination ?: message.targetServer),
+                expiresAtMillis = message.challenge.expiresAt.toEpochMilli(),
             ),
         )
         if (sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
@@ -480,11 +482,11 @@ class DuelController(
         rememberContext(
             message.challenge.id,
             ChallengeContext(
-                message.challengerName,
-                message.targetName,
-                message.challengerServer,
-                message.targetServer,
-                message.challenge.expiresAt.toEpochMilli(),
+                challengerName = message.challengerName,
+                targetName = message.targetName,
+                challengerRoute = ParticipantRoute(message.challengerCurrentServer, message.challengerServer),
+                targetRoute = ParticipantRoute(message.targetCurrentServer, message.targetServer),
+                expiresAtMillis = message.challenge.expiresAt.toEpochMilli(),
             ),
         )
         when (message.challenge.status) {
@@ -499,14 +501,24 @@ class DuelController(
     private fun publishResolution(challenge: DuelChallenge, matchServer: ServerId?) {
         val bus = challengeBus ?: return
         val existing = contexts[challenge.id]
+        val observedChallenger = targets.find(challenge.challenger.value)?.server
+        val observedTarget = targets.find(challenge.target.value)?.server
         val context =
             ChallengeContext(
                 challengerName = existing?.challengerName ?: resolveName(challenge.challenger),
                 targetName = existing?.targetName ?: resolveName(challenge.target),
-                challengerServer = returnOffers[challenge.challenger]?.destination
-                    ?: selectOriginServer(existing?.challengerServer, targets.find(challenge.challenger.value)?.server, localServer),
-                targetServer = returnOffers[challenge.target]?.destination
-                    ?: selectOriginServer(existing?.targetServer, targets.find(challenge.target.value)?.server, localServer),
+                challengerRoute =
+                    participantRoute(
+                        existing?.challengerRoute?.currentServer ?: observedChallenger ?: localServer,
+                        returnOffers[challenge.challenger]?.destination
+                            ?: selectOriginServer(existing?.challengerRoute?.originServer, observedChallenger, localServer),
+                    ),
+                targetRoute =
+                    participantRoute(
+                        existing?.targetRoute?.currentServer ?: observedTarget ?: localServer,
+                        returnOffers[challenge.target]?.destination
+                            ?: selectOriginServer(existing?.targetRoute?.originServer, observedTarget, localServer),
+                    ),
                 expiresAtMillis = challenge.expiresAt.toEpochMilli(),
             )
         bus.publish(
@@ -517,9 +529,11 @@ class DuelController(
                 challenge = challenge,
                 challengerName = context.challengerName,
                 targetName = context.targetName,
-                challengerServer = context.challengerServer,
-                targetServer = context.targetServer,
+                challengerServer = context.challengerRoute.originServer,
+                targetServer = context.targetRoute.originServer,
                 matchServer = matchServer,
+                challengerCurrentServer = context.challengerRoute.currentServer,
+                targetCurrentServer = context.targetRoute.currentServer,
             ),
         )
     }
@@ -801,10 +815,14 @@ class DuelController(
         }
 
     private fun onMatchCompleted(match: DuelMatch) {
-        offerRematch(match)
-        val routes = returnRoutes.remove(match.id) ?: return
+        val routes = returnRoutes.remove(match.id)
+        val promptedRoutes = routes?.takeIf { returnPolicy == PostMatchReturnPolicy.PROMPT }
+        promptedRoutes?.byPlayer?.forEach { (playerId, destination) ->
+            returnOffers[playerId] = ReturnOffer(match.id, destination)
+        }
+        offerMatchSummary(match, promptedRoutes)
+        if (routes == null) return
         if (returnPolicy == PostMatchReturnPolicy.PROMPT) {
-            offerReturns(match, routes)
             return
         }
         val deadline = clock.millis() + RETURN_TIMEOUT.toMillis()
@@ -818,7 +836,7 @@ class DuelController(
         returnTasks.putIfAbsent(match.id, task)?.let { task.cancel() }
     }
 
-    private fun offerRematch(match: DuelMatch) {
+    private fun offerMatchSummary(match: DuelMatch, routes: ReturnRoutes?) {
         listOf(match.firstPlayer, match.secondPlayer).forEach { playerId ->
             val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
             val opponentId = match.opponentOf(playerId)
@@ -830,40 +848,35 @@ class DuelController(
                         locales.component(player, "controller.rematch-action")
                             .clickEvent(ClickEvent.runCommand("/duel rematch ${match.id}"))
                             .hoverEvent(HoverEvent.showText(locales.component(player, "controller.rematch-hover")))
+                    val actions =
+                        routes?.forPlayer(playerId)?.let { destination ->
+                            val returnAction =
+                                locales.component(
+                                    player,
+                                    "controller.return-action",
+                                    LocaleService.component("server", serverNames.display(destination)),
+                                ).clickEvent(ClickEvent.runCommand("/duel return"))
+                                    .hoverEvent(HoverEvent.showText(locales.component(player, "controller.return-hover")))
+                            action.append(Component.newline()).append(returnAction)
+                        } ?: action
                     player.sendMessage(
                         locales.notice(
                             player,
-                            "controller.rematch-offer",
+                            "controller.match-summary",
+                            LocaleService.component(
+                                "result",
+                                locales.component(
+                                    player,
+                                    if (playerId == match.winner) "controller.result-win" else "controller.result-loss",
+                                ),
+                            ),
                             LocaleService.component("player", requireNotNull(opponent)),
-                            LocaleService.component("action", action),
+                            LocaleService.text("score", viewerScore(match, playerId)),
+                            LocaleService.component("actions", actions),
                             LocaleService.text("seconds", rematchWindow.seconds.coerceAtLeast(1L)),
                         ),
                     )
                 }
-            }
-        }
-    }
-
-    private fun offerReturns(
-        match: DuelMatch,
-        routes: ReturnRoutes,
-    ) {
-        listOf(match.firstPlayer, match.secondPlayer).forEach { playerId ->
-            val destination = routes.forPlayer(playerId)
-            returnOffers[playerId] = ReturnOffer(match.id, destination)
-            plugin.server.getPlayer(playerId.value)?.let { player ->
-                val action =
-                    locales.component(player, "controller.return-action")
-                        .clickEvent(ClickEvent.runCommand("/duel return"))
-                        .hoverEvent(HoverEvent.showText(locales.component(player, "controller.return-hover")))
-                player.sendMessage(
-                    locales.notice(
-                        player,
-                        "controller.return-offer",
-                        LocaleService.component("server", serverNames.display(destination)),
-                        LocaleService.component("action", action),
-                    ),
-                )
             }
         }
     }
@@ -999,15 +1012,20 @@ class DuelController(
 
     private fun challengeMessage(recipient: Player, challenger: Component, challenge: DuelChallenge): Component {
         val kitId = challenge.rules.kitId
-        val mode =
+        fun withHelp(component: Component, key: String): Component =
+            component.hoverEvent(HoverEvent.showText(locales.component(recipient, key)))
+        val loadout =
             if (kitId != null) {
                 val key = "kit.${kitId.value}.name"
                 val kitName =
                     if (locales.hasKey(locales.language(recipient), key)) locales.component(recipient, key)
                     else Component.text(kitId.value)
-                locales.component(recipient, "controller.loadout-kit", LocaleService.component("kit", kitName))
+                withHelp(
+                    locales.component(recipient, "controller.loadout-kit", LocaleService.component("kit", kitName)),
+                    "controller.loadout-kit-hover",
+                )
             } else {
-                locales.component(recipient, "controller.loadout-own")
+                withHelp(locales.component(recipient, "controller.loadout-own"), "controller.loadout-own-hover")
             }
         val objectiveKey =
             when (challenge.rules.objective) {
@@ -1017,7 +1035,27 @@ class DuelController(
                 ru.ruscrafting.duels.domain.DuelObjectiveType.BOXING -> "controller.objective-boxing"
                 ru.ruscrafting.duels.domain.DuelObjectiveType.COMBO -> "controller.objective-combo"
             }
+        val objective =
+            withHelp(
+                locales.component(recipient, objectiveKey),
+                "$objectiveKey-hover",
+            )
+        val ranked =
+            withHelp(
+                locales.component(recipient, if (challenge.rules.ranked) "controller.ranked" else "controller.unranked"),
+                if (challenge.rules.ranked) "controller.ranked-hover" else "controller.unranked-hover",
+            )
+        val bestOf =
+            withHelp(
+                locales.component(recipient, "controller.best-of", LocaleService.text("bestof", challenge.rules.bestOf)),
+                "controller.best-of-hover",
+            )
         fun state(value: Boolean) = locales.component(recipient, if (value) "controller.state-on" else "controller.state-off")
+        fun toggleParameter(key: String, enabled: Boolean): Component =
+            withHelp(
+                locales.component(recipient, "controller.$key", LocaleService.component("state", state(enabled))),
+                "controller.$key-hover",
+            )
         val arena =
             challenge.arenaSelection?.let { selection ->
                 val displayName =
@@ -1025,13 +1063,16 @@ class DuelController(
                         ?.firstOrNull { it.selection == selection }
                         ?.displayName
                         ?: selection.arenaId.value
-                locales.component(
-                    recipient,
-                    "controller.arena-selected",
-                    LocaleService.text("arena", displayName),
-                    LocaleService.component("server", serverNames.display(selection.serverId)),
+                withHelp(
+                    locales.component(
+                        recipient,
+                        "controller.arena-selected",
+                        LocaleService.text("arena", displayName),
+                        LocaleService.component("server", serverNames.display(selection.serverId)),
+                    ),
+                    "controller.arena-selected-hover",
                 )
-            } ?: locales.component(recipient, "controller.arena-auto")
+            } ?: withHelp(locales.component(recipient, "controller.arena-auto"), "controller.arena-auto-hover")
         val ruleSummary =
             if (challenge.rules.objective.isHitRace) {
                 val target =
@@ -1040,16 +1081,36 @@ class DuelController(
                     } else {
                         challenge.rules.modifiers.comboHitsToWin
                     }
-                locales.component(recipient, "controller.hit-race-summary", LocaleService.text("hits", target))
+                locales.component(
+                    recipient,
+                    "controller.hit-race-summary",
+                    LocaleService.component(
+                        "target",
+                        withHelp(
+                            locales.component(recipient, "controller.hit-target", LocaleService.text("hits", target)),
+                            "controller.hit-target-hover",
+                        ),
+                    ),
+                )
             } else {
                 locales.component(
                     recipient,
                     "controller.combat-summary",
-                    LocaleService.text("sudden", challenge.rules.modifiers.suddenDeathAfterSeconds),
-                    LocaleService.component("projectiles", state(challenge.rules.modifiers.projectiles)),
-                    LocaleService.component("consumables", state(challenge.rules.modifiers.consumables)),
-                    LocaleService.component("pearls", state(challenge.rules.modifiers.enderPearls)),
-                    LocaleService.component("regeneration", state(challenge.rules.modifiers.naturalRegeneration)),
+                    LocaleService.component(
+                        "sudden",
+                        withHelp(
+                            locales.component(
+                                recipient,
+                                "controller.sudden-death",
+                                LocaleService.text("seconds", challenge.rules.modifiers.suddenDeathAfterSeconds),
+                            ),
+                            "controller.sudden-death-hover",
+                        ),
+                    ),
+                    LocaleService.component("projectiles", toggleParameter("projectiles", challenge.rules.modifiers.projectiles)),
+                    LocaleService.component("consumables", toggleParameter("consumables", challenge.rules.modifiers.consumables)),
+                    LocaleService.component("pearls", toggleParameter("pearls", challenge.rules.modifiers.enderPearls)),
+                    LocaleService.component("regeneration", toggleParameter("regeneration", challenge.rules.modifiers.naturalRegeneration)),
                 )
             }
         val prefix =
@@ -1057,13 +1118,10 @@ class DuelController(
                 recipient,
                 "controller.received",
                 LocaleService.component("player", challenger),
-                LocaleService.component("objective", locales.component(recipient, objectiveKey)),
-                LocaleService.component("loadout", mode),
-                LocaleService.text("bestof", challenge.rules.bestOf),
-                LocaleService.component(
-                    "ranked",
-                    locales.component(recipient, if (challenge.rules.ranked) "controller.ranked" else "controller.unranked"),
-                ),
+                LocaleService.component("objective", objective),
+                LocaleService.component("loadout", loadout),
+                LocaleService.component("bestof", bestOf),
+                LocaleService.component("ranked", ranked),
                 LocaleService.component("rules", ruleSummary),
                 LocaleService.component("arena", arena),
             )
@@ -1127,8 +1185,8 @@ class DuelController(
     private data class ChallengeContext(
         val challengerName: String,
         val targetName: String,
-        val challengerServer: ServerId,
-        val targetServer: ServerId,
+        val challengerRoute: ParticipantRoute,
+        val targetRoute: ParticipantRoute,
         val expiresAtMillis: Long,
     )
 
@@ -1174,6 +1232,21 @@ internal fun selectOriginServer(
     observed: ServerId?,
     fallback: ServerId,
 ): ServerId = recorded ?: observed ?: fallback
+
+internal data class ParticipantRoute(
+    val currentServer: ServerId,
+    val originServer: ServerId,
+)
+
+internal fun participantRoute(currentServer: ServerId, originServer: ServerId?): ParticipantRoute =
+    ParticipantRoute(currentServer, originServer ?: currentServer)
+
+internal fun viewerScore(match: DuelMatch, viewer: PlayerId): String =
+    when (viewer) {
+        match.firstPlayer -> "${match.score.first}:${match.score.second}"
+        match.secondPlayer -> "${match.score.second}:${match.score.first}"
+        else -> error("Player is not a match participant")
+    }
 
 internal fun shouldStartDirectLocalMatch(
     bothPlayersLocal: Boolean,

@@ -277,17 +277,15 @@ controller:
   rematch-choose: '<#92bed8>Choose another arena</#92bed8>'
   rematch-choose-hover: '<#8c8c8c>Open the normal duel setup with this opponent</#8c8c8c>'
   rematch-pending: '<#8c8c8c>Your rematch request is already waiting for the opponent.</#8c8c8c>'
-  rematch-offer: |-
-    <#e6fff3>Rematch with <player>?</#e6fff3>
-    <#8c8c8c>The same rules and arena are available for <seconds> seconds.</#8c8c8c>
-    <action>
+  match-summary: |-
+    <result> <gray>against</gray> <player> <dark_gray>•</dark_gray> <gray>score</gray> <#e6fff3><score></#e6fff3>
+    <gray>The same rules and arena remain available for a rematch for <seconds>s.</gray>
+    <actions>
+  result-win: '<green>Victory</green>'
+  result-loss: '<red>Defeat</red>'
   rematch-action: '<#92bed8>⚔ Request rematch</#92bed8>'
   rematch-hover: '<#8c8c8c>The opponent confirms with the same button</#8c8c8c>'
-  return-offer: |-
-    <#e6fff3>The fight is over. Your items are protected.</#e6fff3>
-    <#8c8c8c>Origin server:</#8c8c8c> <#92bed8><server></#92bed8>
-    <action>
-  return-action: '<#92bed8>↩ Return</#92bed8>'
+  return-action: '<#92bed8>↩ Return to <server></#92bed8>'
   return-hover: '<gray>Return to your origin server and verify your inventory</gray>'
   no-return-offer: '<gray>You have no pending duel return.</gray>'
   network-timeout: '<red>Both players could not be prepared for the duel in time.</red>'
@@ -310,29 +308,54 @@ controller:
   no-incoming: '<red>You have no incoming challenges.</red>'
   no-outgoing: '<red>You have no outgoing challenges.</red>'
   loadout-kit: '<gray>kit <white><kit></white></gray>'
+  loadout-kit-hover: '<gray>Your personal inventory is safely replaced with the selected kit for the match.</gray>'
   loadout-own: '<gray>own inventory</gray>'
+  loadout-own-hover: '<gray>You fight with the items currently in your inventory.</gray>'
   arena-auto: '<gray>automatic network selection</gray>'
+  arena-auto-hover: '<gray>ArcDuels selects a free compatible arena on any network server.</gray>'
   arena-selected: '<#e6fff3><arena></#e6fff3> <dark_gray>·</dark_gray> <server>'
+  arena-selected-hover: '<gray>The match uses this exact arena if it remains available.</gray>'
+  best-of: '<#92bed8>BO<bestof></#92bed8>'
+  best-of-hover: '<gray>BO1 needs one round win. BO3 needs two. BO5 needs three.</gray>'
   received: |-
     <#e6fff3><player> offers you a duel</#e6fff3>
     <objective> <dark_gray>•</dark_gray> <ranked>
-    <gray>Loadout</gray> <loadout> <dark_gray>•</dark_gray> <#92bed8>BO<bestof></#92bed8>
+    <gray>Loadout</gray> <loadout> <dark_gray>•</dark_gray> <bestof>
     <gray>Arena</gray> <arena>
     <rules>
   combat-summary: |-
-    <gray>Sudden death</gray> <white><sudden>s</white> <dark_gray>•</dark_gray> <gray>Projectiles</gray> <projectiles>
-    <gray>Consumables</gray> <consumables> <dark_gray>•</dark_gray> <gray>Pearls</gray> <pearls>
-    <gray>Regeneration</gray> <regeneration>
-  hit-race-summary: '<gray>Target</gray> <white><hits> hits</white> <dark_gray>•</dark_gray> <gray>no damage</gray>'
+    <sudden> <dark_gray>•</dark_gray> <projectiles>
+    <consumables> <dark_gray>•</dark_gray> <pearls>
+    <regeneration>
+  hit-race-summary: '<target> <dark_gray>•</dark_gray> <gray>damage disabled</gray>'
+  hit-target: '<gray>Target</gray> <#e6fff3><hits> hits</#e6fff3>'
+  hit-target-hover: '<gray>The first player to land the required number of counted hits wins.</gray>'
+  sudden-death: '<gray>Sudden death</gray> <#e6fff3><seconds>s</#e6fff3>'
+  sudden-death-hover: '<gray>After this time both players continuously lose health.</gray>'
+  projectiles: '<gray>Projectiles</gray> <state>'
+  projectiles-hover: '<gray>Allows damage from bows, crossbows, and tridents.</gray>'
+  consumables: '<gray>Consumables</gray> <state>'
+  consumables-hover: '<gray>Allows food, potions, and golden apples.</gray>'
+  pearls: '<gray>Pearls</gray> <state>'
+  pearls-hover: '<gray>Allows ender pearl teleportation during the match.</gray>'
+  regeneration: '<gray>Regeneration</gray> <state>'
+  regeneration-hover: '<gray>Controls whether health regenerates naturally.</gray>'
   state-on: '<#92bed8>✔ yes</#92bed8>'
   state-off: '<gray>✕ no</gray>'
   ranked: '<#92bed8>ranked</#92bed8>'
+  ranked-hover: '<gray>The result changes both players’ ratings.</gray>'
   unranked: '<gray>unranked</gray>'
+  unranked-hover: '<gray>The result is saved to history without changing rating.</gray>'
   objective-elimination: '<#e6fff3>Classic duel</#e6fff3>'
+  objective-elimination-hover: '<gray>The round ends when one player defeats the other in regular combat.</gray>'
   objective-koth: '<#e6fff3>King of the hill</#e6fff3>'
+  objective-koth-hover: '<gray>Hold the marked arena point longer than your opponent.</gray>'
   objective-sumo: '<#e6fff3>Sumo</#e6fff3>'
+  objective-sumo-hover: '<gray>Knock your opponent outside the arena boundary. Normal damage is disabled.</gray>'
   objective-boxing: '<#e6fff3>Boxing</#e6fff3>'
+  objective-boxing-hover: '<gray>The first player to reach the required hit count wins.</gray>'
   objective-combo: '<#e6fff3>Combo</#e6fff3>'
+  objective-combo-hover: '<gray>The first player to build the required uninterrupted hit combo wins.</gray>'
 
   accept: '<newline><newline><#2bba43>✔ Accept</#2bba43>'
   accept-hover: '<green>Start the duel</green>'

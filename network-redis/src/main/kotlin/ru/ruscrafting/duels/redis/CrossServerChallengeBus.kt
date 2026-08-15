@@ -26,13 +26,15 @@ data class CrossServerChallengeMessage(
     val challengerServer: ServerId,
     val targetServer: ServerId,
     val matchServer: ServerId?,
+    val challengerCurrentServer: ServerId = challengerServer,
+    val targetCurrentServer: ServerId = targetServer,
 ) {
     init {
         require(messageId.matches(Regex("[A-Za-z0-9:._-]{1,160}"))) { "Unsafe challenge message id" }
         require(challengerName.matches(USERNAME_PATTERN) && targetName.matches(USERNAME_PATTERN)) { "Unsafe challenge player name" }
         when (type) {
             ChallengeMessageType.OFFER -> {
-                require(sourceServer == challengerServer) { "A challenge offer must come from the challenger server" }
+                require(sourceServer == challengerCurrentServer) { "A challenge offer must come from the current challenger server" }
                 require(challenge.status == ChallengeStatus.PENDING) { "An offer must be pending" }
                 require(matchServer == null) { "An offer cannot select an arena server before acceptance" }
             }
@@ -41,8 +43,8 @@ data class CrossServerChallengeMessage(
                 require(challenge.status != ChallengeStatus.PENDING) { "A resolution must be terminal" }
                 val expectedSource =
                     when (challenge.status) {
-                        ChallengeStatus.ACCEPTED, ChallengeStatus.DENIED -> targetServer
-                        ChallengeStatus.CANCELLED, ChallengeStatus.EXPIRED -> challengerServer
+                        ChallengeStatus.ACCEPTED, ChallengeStatus.DENIED -> targetCurrentServer
+                        ChallengeStatus.CANCELLED, ChallengeStatus.EXPIRED -> challengerCurrentServer
                         ChallengeStatus.PENDING -> error("A resolution cannot be pending")
                     }
                 require(sourceServer == expectedSource) { "Challenge resolution came from the wrong participant server" }

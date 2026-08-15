@@ -33,6 +33,8 @@ internal class ChallengeMessageCodec(
                 targetName = message.targetName,
                 challengerServer = message.challengerServer.value,
                 targetServer = message.targetServer.value,
+                challengerCurrentServer = message.challengerCurrentServer.value,
+                targetCurrentServer = message.targetCurrentServer.value,
                 matchServer = message.matchServer?.value,
                 selectedArenaServer = message.challenge.arenaSelection?.serverId?.value,
                 selectedArenaId = message.challenge.arenaSelection?.arenaId?.value,
@@ -104,6 +106,8 @@ internal class ChallengeMessageCodec(
             challengerServer = ServerId(wire.challengerServer),
             targetServer = ServerId(wire.targetServer),
             matchServer = wire.matchServer?.let(::ServerId),
+            challengerCurrentServer = ServerId(wire.challengerCurrentServer ?: wire.challengerServer),
+            targetCurrentServer = ServerId(wire.targetCurrentServer ?: wire.targetServer),
         )
     }
 
@@ -120,6 +124,8 @@ internal class ChallengeMessageCodec(
         val targetName: String,
         val challengerServer: String,
         val targetServer: String,
+        val challengerCurrentServer: String? = null,
+        val targetCurrentServer: String? = null,
         val matchServer: String?,
         val selectedArenaServer: String?,
         val selectedArenaId: String?,

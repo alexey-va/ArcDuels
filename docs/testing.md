@@ -23,7 +23,8 @@ The suite covers:
 - Redis event and challenge codec validation, authenticated origins, listener
   isolation, dedupe, source collisions, player-snapshot TTL expiry, blank
   backend handling, schema-version rejection, dynamic objective/loadout-compatible
-  arena-node selection, exact server/arena pinning, and no-fallback FIFO reservation;
+  arena-node selection, exact server/arena pinning, arena-lobby rematches with
+  distinct current and recovery-origin servers, and no-fallback FIFO reservation;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
   arena and kit validation, explicit sync-provider detection, origin-before-transfer
   single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
@@ -33,7 +34,8 @@ The suite covers:
   bypass behavior, damage-free celebration entities, default-kit presence,
   player-facing network server names, BO1 boss bars without a meaningless
   `0:0`, bounded graceful-shutdown retention draining that preserves timed-out
-  active snapshots, interactive player-name hover/click events, and strict
+  active snapshots, combined result/rematch cards, contextual rule hover help,
+  interactive player-name hover/click events, and strict
   Russian / English locale-key and MiniMessage parity.
 
 The separate `scripts/player-bot` suite recognizes the BO1 opponent/time boss

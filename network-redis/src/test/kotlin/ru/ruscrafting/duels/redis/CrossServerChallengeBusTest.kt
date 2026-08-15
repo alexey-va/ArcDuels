@@ -1,5 +1,6 @@
 package ru.ruscrafting.duels.redis
 
+import com.google.gson.JsonParser
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
@@ -73,6 +74,32 @@ class CrossServerChallengeBusTest : StringSpec({
                 matchServer = ServerId("parkour"),
             )
         codec.decode(codec.encode(resolution)) shouldBe resolution
+    }
+
+    "rematch resolution keeps current acceptance servers separate from inventory origins" {
+        val resolution =
+            offer.copy(
+                messageId = "challenge:accepted:arena-lobby",
+                sourceServer = ServerId("spawn"),
+                type = ChallengeMessageType.RESOLUTION,
+                challenge = offer.challenge.resolve(ChallengeStatus.ACCEPTED, offer.challenge.createdAt),
+                challengerServer = ServerId("spawn"),
+                targetServer = ServerId("survival"),
+                matchServer = ServerId("parkour"),
+                challengerCurrentServer = ServerId("spawn"),
+                targetCurrentServer = ServerId("spawn"),
+            )
+
+        ChallengeMessageCodec().decode(ChallengeMessageCodec().encode(resolution)) shouldBe resolution
+    }
+
+    "codec accepts version three messages produced before current server routes were added" {
+        val codec = ChallengeMessageCodec()
+        val legacyPayload = JsonParser.parseString(codec.encode(offer)).asJsonObject
+        legacyPayload.remove("challengerCurrentServer")
+        legacyPayload.remove("targetCurrentServer")
+
+        codec.decode(legacyPayload.toString()) shouldBe offer
     }
 
     "codec carries objective-specific hit targets and rejects the previous schema" {

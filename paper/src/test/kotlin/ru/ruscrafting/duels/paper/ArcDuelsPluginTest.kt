@@ -5,6 +5,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import io.mockk.every
+import io.mockk.slot
 import io.mockk.verify
 import org.bukkit.GameMode
 import org.bukkit.Location
@@ -32,6 +33,9 @@ import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchEndReason
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
+import ru.ruscrafting.duels.domain.MatchScore
+import ru.ruscrafting.duels.domain.MatchState
+import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
@@ -204,6 +208,11 @@ class ArcDuelsPluginTest : StringSpec({
         invitation.contains("\n  ✔ Принять\n  ✕ Отклонить\n") shouldBe true
         invitationComponent.containsRunCommand("/duel Challenger") shouldBe true
         invitationComponent.containsHoverText("Рейтинг: 1000") shouldBe true
+        invitationComponent.containsHoverText("предметами, которые сейчас находятся") shouldBe true
+        invitationComponent.containsHoverText("BO1 — одна победа") shouldBe true
+        invitationComponent.containsHoverText("именно на этой арене") shouldBe true
+        invitationComponent.containsHoverText("постоянно терять здоровье") shouldBe true
+        invitationComponent.containsHoverText("урон луками") shouldBe true
         val sent = requireNotNull(challenger.nextComponentMessage())
         PlainTextComponentSerializer.plainText().serialize(sent).contains("Вызов отправлен") shouldBe true
         sent.containsRunCommand("/duel Target") shouldBe true
@@ -214,6 +223,55 @@ class ArcDuelsPluginTest : StringSpec({
 
         PlainTextComponentSerializer.plainText().serialize(requireNotNull(challenger.nextComponentMessage())).contains("Target истёк") shouldBe true
         PlainTextComponentSerializer.plainText().serialize(requireNotNull(target.nextComponentMessage())).contains("Challenger истёк") shouldBe true
+        controller.close()
+    }
+
+    "match participants receive one combined result and rematch card" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        val completion = slot<(DuelMatch) -> Unit>()
+        every { sessions.onCompleted(capture(completion)) } returns AutoCloseable { }
+        val winner = server.addPlayer("SummaryWinner")
+        val loser = server.addPlayer("SummaryLoser")
+        winner.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        loser.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        val controller =
+            DuelController(
+                plugin,
+                ChallengeRegistry(Clock.systemUTC()),
+                sessions,
+                InMemoryStatisticsRepository(),
+                LocaleService.load(plugin),
+                DuelTargetDirectory(plugin, ServerId("spawn"), null),
+                ServerId("spawn"),
+            )
+        val match =
+            DuelMatch(
+                id = MatchId.random(),
+                firstPlayer = PlayerId(winner.uniqueId),
+                secondPlayer = PlayerId(loser.uniqueId),
+                arenaId = ArenaId("kit-test"),
+                serverId = ServerId("spawn"),
+                rules = DuelRules(DuelMode.KIT, KitId("classic"), bestOf = 3),
+                state = MatchState.COMPLETED,
+                score = MatchScore(2, 1),
+                createdAt = Instant.parse("2026-08-15T12:00:00Z"),
+                completedAt = Instant.parse("2026-08-15T12:01:00Z"),
+                winner = PlayerId(winner.uniqueId),
+                endReason = MatchEndReason.ELIMINATION,
+            )
+
+        completion.captured(match)
+
+        val winnerCard = requireNotNull(winner.nextComponentMessage())
+        val loserCard = requireNotNull(loser.nextComponentMessage())
+        PlainTextComponentSerializer.plainText().serialize(winnerCard).contains("Победа в бою с SummaryLoser • счёт 2:1") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(loserCard).contains("Поражение в бою с SummaryWinner • счёт 1:2") shouldBe true
+        winnerCard.containsRunCommand("/duel rematch ${match.id}") shouldBe true
+        loserCard.containsRunCommand("/duel rematch ${match.id}") shouldBe true
+        isMatchParticipant(winner.uniqueId, winner.uniqueId, loser.uniqueId) shouldBe true
+        isMatchParticipant(UUID.randomUUID(), winner.uniqueId, loser.uniqueId) shouldBe false
+        viewerScore(match, PlayerId(winner.uniqueId)) shouldBe "2:1"
+        viewerScore(match, PlayerId(loser.uniqueId)) shouldBe "1:2"
         controller.close()
     }
 
@@ -453,6 +511,14 @@ class ArcDuelsPluginTest : StringSpec({
         missingArenaController.rematch(first, outcome.matchId)
         missingRegistry.pendingFor(PlayerId(first.uniqueId)) shouldBe emptyList()
         missingArenaController.close()
+    }
+
+    "participant routing keeps the current server distinct from the recovery origin" {
+        val route = participantRoute(ServerId("spawn"), ServerId("survival"))
+
+        route.currentServer shouldBe ServerId("spawn")
+        route.originServer shouldBe ServerId("survival")
+        participantRoute(ServerId("parkour"), null).originServer shouldBe ServerId("parkour")
     }
 
     "case-normalized kit and arena ids cannot silently overwrite each other" {

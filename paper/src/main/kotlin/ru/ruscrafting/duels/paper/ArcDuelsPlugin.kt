@@ -31,6 +31,7 @@ import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
@@ -332,6 +333,11 @@ open class ArcDuelsPlugin : JavaPlugin() {
                                 val loser = resolved?.first?.second ?: server.getOfflinePlayer(event.loser.value).name ?: event.loser.toString().take(8)
                                 val recipients = server.onlinePlayers.toList() + server.consoleSender
                                 recipients.forEach { recipient ->
+                                    if (recipient is org.bukkit.entity.Player &&
+                                        isMatchParticipant(recipient.uniqueId, event.winner.value, event.loser.value)
+                                    ) {
+                                        return@forEach
+                                    }
                                     val winnerComponent =
                                         if (recipient is org.bukkit.entity.Player) {
                                             playerComponents.component(recipient, event.winner.value, winner, resolved?.second?.first)
@@ -476,3 +482,6 @@ internal fun hasUsableArenaRoute(
     localArenaCount: Int,
     networkArenaRoutingEnabled: Boolean,
 ): Boolean = localArenaCount > 0 || networkArenaRoutingEnabled
+
+internal fun isMatchParticipant(playerId: UUID, winner: UUID, loser: UUID): Boolean =
+    playerId == winner || playerId == loser
