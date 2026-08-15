@@ -20,14 +20,16 @@ class CmiCombatTagIntegrationTest : StringSpec({
             )
         val first = mockk<Player>()
         every { first.uniqueId } returns firstId
+        CMIUser.reset()
 
         bridge.isTagged(firstId) shouldBe true
-        bridge.remove(first)
+        bridge.remove(first) shouldBe true
 
         bridge.isTagged(firstId) shouldBe false
         bridge.isTagged(secondId) shouldBe true
         manager.timestampResetCount shouldBe 6
         manager.removeCount shouldBe 1
+        CMIUser.removedBossBars(firstId) shouldBe listOf("pvptimer")
     }
 })
 

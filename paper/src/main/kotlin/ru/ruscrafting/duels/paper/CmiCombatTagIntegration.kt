@@ -62,18 +62,19 @@ internal class CmiCombatTagIntegration(
     ) {
         runCatching {
             val before = activeBridge.isTagged(player.uniqueId)
-            activeBridge.remove(player)
+            val bossBarRemovalSupported = activeBridge.remove(player)
             val after = activeBridge.isTagged(player.uniqueId)
             DuelLog.debug(
                 "cmi-combat-tag-clear",
                 matchId,
                 player,
-                "player={} reason={} settled={} tagged_before={} tagged_after={}",
+                "player={} reason={} settled={} tagged_before={} tagged_after={} bossbar_removed={}",
                 player.name,
                 reason,
                 settled,
                 before,
                 after,
+                bossBarRemovalSupported,
             )
         }.onFailure { failure ->
             if (warned.compareAndSet(false, true)) {
@@ -124,12 +125,15 @@ internal class CmiCombatTagIntegration(
         private val setGotLastDamageAt: Method?,
         private val setGotLastDamageFromPlayer: Method?,
         private val setDidLastDamageToPlayer: Method?,
+        private val removeBossBar: Method?,
     ) {
-        fun remove(player: Player) {
+        fun remove(player: Player): Boolean {
             expireCombatTimestamps(player.uniqueId)
             val user = getUser.invoke(null, player) ?: error("CMI did not return a user for ${player.uniqueId}")
             removePlayerFromCombat.invoke(manager, user)
             expireCombatTimestamps(player.uniqueId)
+            removeBossBar?.invoke(user, CMI_PVP_BOSSBAR_KEY)
+            return removeBossBar != null
         }
 
         fun isTagged(playerId: UUID): Boolean = isInCombatWithPlayer.invoke(manager, playerId) as Boolean
@@ -158,6 +162,8 @@ internal class CmiCombatTagIntegration(
                         optionalTimestampSetter(manager, "setGotLastDamageFromPlayer"),
                     setDidLastDamageToPlayer =
                         optionalTimestampSetter(manager, "setDidLastDamageToPlayer"),
+                    removeBossBar =
+                        runCatching { userClass.getMethod("removeBossBar", String::class.java) }.getOrNull(),
                 )
             }
 
@@ -175,5 +181,6 @@ internal class CmiCombatTagIntegration(
         const val CMI_USER_CLASS = "com.Zrips.CMI.Containers.CMIUser"
         const val SETTLE_DELAY_TICKS = 1L
         const val EXPIRED_TIMESTAMP = 0L
+        const val CMI_PVP_BOSSBAR_KEY = "pvptimer"
     }
 }
