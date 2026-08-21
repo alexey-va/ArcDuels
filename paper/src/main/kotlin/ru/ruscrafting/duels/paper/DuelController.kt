@@ -83,6 +83,8 @@ class DuelController(
         arenaSelection: ArenaSelection? = null,
     ) = challengeInternal(challenger, requestedTarget, rules, arenaSelection, null)
 
+    internal fun hasReturnOffer(player: Player): Boolean = returnOffers.containsKey(PlayerId(player.uniqueId))
+
     private fun challengeInternal(
         challenger: Player,
         requestedTarget: DuelTarget,

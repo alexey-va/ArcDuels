@@ -31,6 +31,7 @@ class KitHealthIsolationTest : StringSpec({
         val isolation = KitHealthIsolation(key)
 
         isolation.enforce(player) shouldBe true
+        isolation.isApplied(player) shouldBe true
 
         requireNotNull(cap).operation shouldBe AttributeModifier.Operation.MULTIPLY_SCALAR_1
         attribute.value.shouldBeExactly(20.0)
@@ -38,6 +39,7 @@ class KitHealthIsolationTest : StringSpec({
         absorption.shouldBeExactly(0.0)
 
         isolation.clear(player)
+        isolation.isApplied(player) shouldBe false
         attribute.value.shouldBeExactly(40.0)
     }
 })

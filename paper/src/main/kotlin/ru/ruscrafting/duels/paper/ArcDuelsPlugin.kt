@@ -194,7 +194,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 arenaChoices = { rules -> network.arenas?.choices(rules) ?: arenas.choices(serverId, rules) },
             )
         closeables += controller
-        val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames)
+        val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames, controller::hasReturnOffer)
         val gui =
             DuelGuiService(
                 this,

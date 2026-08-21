@@ -182,6 +182,8 @@ class PaperArenaCatalog private constructor(
 
     fun reservedCount(): Int = synchronized(lock) { reserved.size }
 
+    fun isReserved(id: ArenaId): Boolean = synchronized(lock) { id in reserved }
+
     fun choices(
         serverId: ServerId,
         rules: DuelRules,

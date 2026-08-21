@@ -409,6 +409,11 @@ class DuelSessionManager internal constructor(
 
     fun pendingRecoveryCount(): Int = playerStates.pendingCount()
 
+    fun modifiedBlockCount(player: Player): Int =
+        matchFor(player)?.let { match -> sessions[match.id]?.modifiedBlocks?.size } ?: 0
+
+    fun isKitHealthCapApplied(player: Player): Boolean = kitHealthIsolation.isApplied(player)
+
     fun hasPendingRecovery(player: Player): Boolean =
         matchFor(player) == null && !pendingStarts.containsKey(player.uniqueId) && playerStates.isPending(player.uniqueId)
 

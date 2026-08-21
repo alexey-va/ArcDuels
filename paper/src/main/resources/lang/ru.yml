@@ -469,6 +469,7 @@ admin:
     - '<white>/duels admin arena enable|disable (id)</white>'
     - '<white>/duels admin arena list|info (id)|reload</white>'
     - '<white>/duels admin status</white>'
+    - '<white>/duels admin debug server|player [игрок]|arena (id)</white>'
     - '<white>/duels admin recover (онлайн-игрок)</white>'
 
 help:

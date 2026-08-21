@@ -1,14 +1,17 @@
 package ru.ruscrafting.duels.paper
 
+import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver
 import org.bukkit.Location
+import org.bukkit.attribute.Attribute
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.ServerId
+import java.util.Locale
 
 internal class DuelAdminCommand(
     private val plugin: JavaPlugin,
@@ -16,6 +19,7 @@ internal class DuelAdminCommand(
     private val sessions: DuelSessionManager,
     private val locales: LocaleService? = null,
     private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
+    private val hasReturnOffer: (Player) -> Boolean = { false },
 ) {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -46,6 +50,7 @@ internal class DuelAdminCommand(
                 )
             "recover" -> recover(sender, args)
             "arena" -> arena(sender, args.drop(1))
+            "debug" -> debug(sender, args.drop(1))
             else -> help(sender)
         }
     }
@@ -55,9 +60,17 @@ internal class DuelAdminCommand(
         args: List<String>,
     ): List<String> {
         if (!sender.hasPermission(ADMIN_PERMISSION)) return emptyList()
-        if (args.size <= 1) return filter(listOf("arena", "status", "recover", "help"), args.lastOrNull().orEmpty())
+        if (args.size <= 1) return filter(listOf("arena", "status", "recover", "debug", "help"), args.lastOrNull().orEmpty())
         if (args[0].equals("recover", true) && args.size == 2) {
             return filter(sender.server.onlinePlayers.map(Player::getName), args[1])
+        }
+        if (args[0].equals("debug", true)) {
+            if (args.size == 2) return filter(listOf("server", "player", "arena"), args[1])
+            if (args.size == 3 && args[1].equals("player", true)) {
+                return filter(sender.server.onlinePlayers.map(Player::getName), args[2])
+            }
+            if (args.size == 3 && args[1].equals("arena", true)) return filter(arenaIds(), args[2])
+            return emptyList()
         }
         if (!args[0].equals("arena", true)) return emptyList()
         if (args.size == 2) return filter(listOf("create", "setspawn", "setlobby", "setcorner", "sethill", "setloadouts", "setobjectives", "enable", "disable", "list", "info", "reload"), args[1])
@@ -319,6 +332,139 @@ internal class DuelAdminCommand(
         }
     }
 
+    private fun debug(
+        sender: CommandSender,
+        args: List<String>,
+    ) {
+        when (args.firstOrNull()?.lowercase()) {
+            "server" -> debugServer(sender)
+            "player" -> debugPlayer(sender, args.getOrNull(1))
+            "arena" -> debugArena(sender, args.getOrNull(1))
+            else -> sender.sendDebug("error", "code" to "usage", "expected" to "server|player_[name]|arena_<id>")
+        }
+    }
+
+    private fun debugServer(sender: CommandSender) {
+        sender.sendDebug(
+            "server",
+            "version" to plugin.pluginMeta.version,
+            "server" to plugin.config.getString("server-id", plugin.server.name),
+            "arenas" to arenas.size(),
+            "active" to sessions.activeArenaCount(),
+            "queue" to sessions.queueSize(),
+            "recoveries" to sessions.pendingRecoveryCount(),
+        )
+    }
+
+    private fun debugPlayer(
+        sender: CommandSender,
+        rawName: String?,
+    ) {
+        val player = rawName?.let(sender.server::getPlayerExact) ?: (sender as? Player).takeIf { rawName == null }
+        if (player == null) {
+            sender.sendDebug("error", "code" to if (rawName == null) "player_required" else "player_offline")
+            return
+        }
+        val match = sessions.matchFor(player)
+        sender.sendDebug(
+            "player",
+            "name" to player.name,
+            "uuid" to player.uniqueId,
+            "preparing" to sessions.isPreparing(player),
+            "locked" to sessions.isStateLocked(player),
+            "post_match" to sessions.isPostMatchWaiting(player),
+            "pending_recovery" to sessions.hasPendingRecovery(player),
+            "return_offer" to hasReturnOffer(player),
+        )
+        if (match == null) {
+            sender.sendDebug("match", "player" to player.name, "match" to "none")
+        } else {
+            sender.sendDebug(
+                "match",
+                "player" to player.name,
+                "match" to match.id.value,
+                "arena" to match.arenaId.value,
+                "state" to match.state,
+                "mode" to match.rules.mode,
+                "objective" to match.rules.objective,
+                "score" to "${match.score.first}:${match.score.second}",
+                "best_of" to match.rules.bestOf,
+                "modified_blocks" to sessions.modifiedBlockCount(player),
+            )
+        }
+        val maximumHealth = player.getAttribute(Attribute.MAX_HEALTH)?.value
+        sender.sendDebug(
+            "health",
+            "player" to player.name,
+            "health" to formatDecimal(player.health),
+            "max" to formatDecimal(maximumHealth),
+            "absorption" to formatDecimal(player.absorptionAmount),
+            "kit_cap" to sessions.isKitHealthCapApplied(player),
+        )
+        val distance = sessions.boundaryDistance(player, player.location)
+        sender.sendDebug(
+            "position",
+            "player" to player.name,
+            "world" to player.world.name,
+            "x" to formatDecimal(player.location.x),
+            "y" to formatDecimal(player.location.y),
+            "z" to formatDecimal(player.location.z),
+            "in_bounds" to (match == null || sessions.isInsideArena(player, player.location)),
+            "boundary_distance" to (distance?.let(::formatDecimal) ?: if (match == null) "n/a" else "outside"),
+        )
+    }
+
+    private fun debugArena(
+        sender: CommandSender,
+        rawId: String?,
+    ) {
+        val id = rawId?.let { runCatching { ArenaId(it.lowercase()) }.getOrNull() }
+        if (id == null) {
+            sender.sendDebug("error", "code" to "arena_id_invalid")
+            return
+        }
+        val path = "arenas.${id.value}"
+        if (!plugin.config.contains(path)) {
+            sender.sendDebug("error", "code" to "arena_not_found", "arena" to id.value)
+            return
+        }
+        val arena = runCatching { arenas.get(id) }.getOrNull()
+        val configuredAction = plugin.config.getString("$path.post-match-action") ?: "INHERIT"
+        sender.sendDebug(
+            "arena",
+            "id" to id.value,
+            "enabled" to plugin.config.getBoolean("$path.enabled", false),
+            "loaded" to (arena != null),
+            "reserved" to arenas.isReserved(id),
+            "post_match" to (arena?.postMatchAction?.name ?: configuredAction),
+            "lobby" to (arena?.lobby != null || plugin.config.isConfigurationSection("$path.lobby")),
+        )
+        if (arena == null) return
+        sender.sendDebug(
+            "arena_rules",
+            "id" to id.value,
+            "loadouts" to arena.allowedLoadouts.map(Enum<*>::name).sorted().joinToString(","),
+            "objectives" to arena.allowedObjectives.map(Enum<*>::name).sorted().joinToString(","),
+        )
+        sender.sendDebug(
+            "arena_bounds",
+            "id" to id.value,
+            "world" to arena.firstSpawn.world?.name,
+            "min" to "${formatDecimal(arena.bounds.minX)},${formatDecimal(arena.bounds.minY)},${formatDecimal(arena.bounds.minZ)}",
+            "max" to "${formatDecimal(arena.bounds.maxX)},${formatDecimal(arena.bounds.maxY)},${formatDecimal(arena.bounds.maxZ)}",
+            "warning_distance" to formatDecimal(plugin.config.getDouble("boundary-warning-distance", 5.0)),
+        )
+    }
+
+    private fun CommandSender.sendDebug(
+        kind: String,
+        vararg fields: Pair<String, Any?>,
+    ) {
+        sendMessage(Component.text(DuelDebugFormatter.line(kind, fields.asList())))
+    }
+
+    private fun formatDecimal(value: Double?): String = value?.let { String.format(Locale.ROOT, "%.3f", it) } ?: "n/a"
+
     private fun runSync(block: () -> Unit) {
         if (!plugin.isEnabled) return
         if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable(block))
@@ -423,4 +569,15 @@ internal class DuelAdminCommand(
     private companion object {
         const val ADMIN_PERMISSION = "arcduels.admin"
     }
+}
+
+internal object DuelDebugFormatter {
+    fun line(
+        kind: String,
+        fields: List<Pair<String, Any?>>,
+    ): String =
+        buildString {
+            append("ARCDUELS_DEBUG kind=").append(kind)
+            fields.forEach { (key, value) -> append(' ').append(key).append('=').append(value ?: "null") }
+        }
 }

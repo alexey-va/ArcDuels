@@ -38,6 +38,8 @@ This repository is under active development. The first vertical slice targets:
 - bounded arenas with per-arena loadout and objective compatibility, scoped
   internal teleports and protected player inventories;
 - FIFO waiting for a free arena and in-game `/duels admin` GUI and commands;
+- permission-gated `ARCDUELS_DEBUG` readback for deterministic bot QA of server,
+  player/match, health, boundary, recovery, and arena state;
 - an explicit per-node player-data synchronization policy (`AUTO`, `HUSKSYNC`, or `NONE`);
 - crash-safe, versioned MySQL player-state escrow on each origin backend before
   any cross-server transfer or duel mutation,

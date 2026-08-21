@@ -355,6 +355,11 @@ hard-codes resource-pack numbers. Standard roles include `background`, `back`,
 - `/duel history` — open personal match history and head-to-head records;
 - `/duel rematch [match-id]` — request the latest or selected exact rematch;
 - `/duels admin status` — active arenas and FIFO waiters;
+- `/duels admin debug server` — stable machine-readable runtime counts;
+- `/duels admin debug player [online-player]` — match phase, arena boundary,
+  recovery/return state, effective health and the kit-health cap;
+- `/duels admin debug arena <id>` — loaded/reserved state, post-match action,
+  compatible rules and exact bounds;
 - `/duels admin recover <online-player>` — claim an exact pending recovery, or
   replay the newest claimed snapshot as an administrator.
 

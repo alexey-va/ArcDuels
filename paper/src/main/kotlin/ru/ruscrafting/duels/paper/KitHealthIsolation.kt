@@ -42,6 +42,9 @@ internal class KitHealthIsolation(
         player.getAttribute(Attribute.MAX_HEALTH)?.removeModifier(modifierKey)
     }
 
+    fun isApplied(player: Player): Boolean =
+        player.getAttribute(Attribute.MAX_HEALTH)?.getModifier(modifierKey) != null
+
     companion object {
         const val VANILLA_MAX_HEALTH = 20.0
         private const val EPSILON = 0.001
