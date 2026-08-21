@@ -64,6 +64,9 @@ Join-time recovery also waits for that event and a configured post-sync delay.
 It compares the loaded inventory to the origin snapshot first and applies
 nothing when they already match. A `NONE` arena node restores only its local
 pre-fight state before moving players to its lobby; it never claims an origin row.
+An exact rematch carries that original recovery match id through the challenge
+wire message, reuses the same two origin snapshots, and starts directly from the
+arena lobby. The snapshots remain active until the players actually return.
 After each arena teleport, the assigned spawn remains the server-authoritative
 movement anchor for a bounded stabilization window. This is separate from
 inventory recovery and from the combat-state command lock.
@@ -90,3 +93,7 @@ Boxing and Combo use the same path with event-driven score frames: Boxing counts
 total accepted direct melee hits, while Combo resets the struck player's streak.
 Both require the controlled boxing kit and cannot deal health damage. Objectives
 cannot mutate statistics directly.
+
+The Paper adapter enforces a transient 20 HP ceiling only for `KIT` matches and
+revalidates it while the round is live. Arena-owned fluid changes are tracked as
+original block states and restored before another round or shutdown.

@@ -118,9 +118,10 @@ class CrossServerChallengeBusTest : StringSpec({
                     ),
             )
 
-        codec.decode(codec.encode(boxing)) shouldBe boxing
+        val continuation = boxing.copy(recoveryMatchId = ru.ruscrafting.duels.domain.MatchId.random())
+        codec.decode(codec.encode(continuation)) shouldBe continuation
         io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
-            codec.decode(codec.encode(boxing).replace("\"version\":3", "\"version\":2"))
+            codec.decode(codec.encode(boxing).replace("\"version\":4", "\"version\":3"))
         }
     }
 

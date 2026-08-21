@@ -128,7 +128,7 @@ class ArcDuelsPluginTest : StringSpec({
         val notice = locales.frameNotice(player, body)
         val plain = PlainTextComponentSerializer.plainText().serialize(notice)
 
-        plain shouldBe "\n  ⚔ • Первая строка\n  Вернуться\n"
+        plain shouldBe "\n  ⚔ Первая строка\n  Вернуться\n"
         ("\\n" in plain) shouldBe false
         notice.containsRunCommand("/duel return") shouldBe true
     }
@@ -159,7 +159,7 @@ class ArcDuelsPluginTest : StringSpec({
                     LocaleService.text("server", "Выживание"),
                 ),
             )
-            PlainTextComponentSerializer.plainText().serialize(notice) shouldBe "\n  ⚔ • Возврат на Выживание.\n"
+            PlainTextComponentSerializer.plainText().serialize(notice) shouldBe "\n  ⚔ Возврат на Выживание.\n"
         } finally {
             locale.set("controller.network-return", "")
             locale.save(localeFile)
@@ -203,7 +203,7 @@ class ArcDuelsPluginTest : StringSpec({
         )
         val invitationComponent = requireNotNull(target.nextComponentMessage())
         val invitation = PlainTextComponentSerializer.plainText().serialize(invitationComponent)
-        invitation.contains("\n  ⚔ • Challenger предлагает дуэль\n") shouldBe true
+        invitation.contains("\n  ⚔ Challenger предлагает дуэль\n") shouldBe true
         invitation.contains("Арена kit-test · Спавн") shouldBe true
         invitation.contains("\n  ✔ Принять\n  ✕ Отклонить\n") shouldBe true
         invitationComponent.containsRunCommand("/duel Challenger") shouldBe true
@@ -264,14 +264,22 @@ class ArcDuelsPluginTest : StringSpec({
 
         val winnerCard = requireNotNull(winner.nextComponentMessage())
         val loserCard = requireNotNull(loser.nextComponentMessage())
-        PlainTextComponentSerializer.plainText().serialize(winnerCard).contains("Победа в бою с SummaryLoser • счёт 2:1") shouldBe true
-        PlainTextComponentSerializer.plainText().serialize(loserCard).contains("Поражение в бою с SummaryWinner • счёт 1:2") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(winnerCard).contains("Победа над SummaryLoser · счёт 2:1") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(loserCard).contains("Поражение от SummaryWinner · счёт 1:2") shouldBe true
         winnerCard.containsRunCommand("/duel rematch ${match.id}") shouldBe true
         loserCard.containsRunCommand("/duel rematch ${match.id}") shouldBe true
         isMatchParticipant(winner.uniqueId, winner.uniqueId, loser.uniqueId) shouldBe true
         isMatchParticipant(UUID.randomUUID(), winner.uniqueId, loser.uniqueId) shouldBe false
         viewerScore(match, PlayerId(winner.uniqueId)) shouldBe "2:1"
         viewerScore(match, PlayerId(loser.uniqueId)) shouldBe "1:2"
+
+        val singleRound = match.copy(id = MatchId.random(), rules = match.rules.copy(bestOf = 1), score = MatchScore(1, 0))
+        completion.captured(singleRound)
+        val singleRoundCard = requireNotNull(winner.nextComponentMessage())
+        val singleRoundPlain = PlainTextComponentSerializer.plainText().serialize(singleRoundCard)
+        singleRoundPlain.contains("Победа над SummaryLoser") shouldBe true
+        singleRoundPlain.contains("счёт") shouldBe false
+        singleRoundPlain.contains("\n  \n  ▶ Предложить реванш") shouldBe true
         controller.close()
     }
 
@@ -404,8 +412,10 @@ class ArcDuelsPluginTest : StringSpec({
     "enabled arena requires valid bounds containing both spawns" {
         server.addSimpleWorld("world")
         plugin.config.set("arenas.example.enabled", true)
+        plugin.config.set("arenas.example.post-match-action", "RETURN_TO_ORIGIN")
 
-        PaperArenaCatalog.load(plugin).size() shouldBe 1
+        val arena = PaperArenaCatalog.load(plugin).get(ArenaId("example"))
+        arena.postMatchAction shouldBe ArenaPostMatchAction.RETURN_TO_ORIGIN
 
         plugin.config.set("arenas.example.bounds.min.x", 20.0)
         shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }

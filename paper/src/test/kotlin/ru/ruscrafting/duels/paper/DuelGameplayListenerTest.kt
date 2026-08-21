@@ -25,6 +25,69 @@ import java.time.Instant
 import java.util.UUID
 
 class DuelGameplayListenerTest : StringSpec({
+    "active movement shows a throttled title near the arena edge" {
+        val player = mockk<Player>(relaxed = true)
+        val playerId = PlayerId(UUID.randomUUID())
+        every { player.uniqueId } returns playerId.value
+        val world = mockk<World>(relaxed = true)
+        val from = Location(world, 6.0, 70.0, 0.0)
+        val destination = Location(world, 7.0, 70.0, 0.0)
+        val match =
+            DuelMatch.reserve(
+                playerId,
+                PlayerId(UUID.randomUUID()),
+                ArenaId("warned"),
+                ServerId("test"),
+                DuelRules(DuelMode.OWN_INVENTORY),
+                Instant.EPOCH,
+            ).beginCountdown().activate(Instant.EPOCH)
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.matchFor(player) } returns match
+        every { sessions.isInsideArena(player, destination) } returns true
+        every { sessions.boundaryDistance(player, destination) } returns 3.0
+        every { sessions.boundaryDistance(player, from) } returns 4.0
+        val event = mockk<PlayerMoveEvent>(relaxed = true)
+        every { event.player } returns player
+        every { event.from } returns from
+        every { event.to } returns destination
+
+        DuelGameplayListener(sessions, mockk(relaxed = true), nowMillis = { 1_000L }).onMove(event)
+
+        verify(exactly = 1) { player.showTitle(any<net.kyori.adventure.title.Title>()) }
+        verify(exactly = 0) { sessions.handleBoundaryExit(any(), any()) }
+    }
+
+    "crossing the arena boundary names the loss and records the boundary exit" {
+        val player = mockk<Player>(relaxed = true)
+        val playerId = PlayerId(UUID.randomUUID())
+        every { player.uniqueId } returns playerId.value
+        val world = mockk<World>(relaxed = true)
+        val from = Location(world, 9.9, 70.0, 0.0)
+        val destination = Location(world, 10.1, 70.0, 0.0)
+        val match =
+            DuelMatch.reserve(
+                playerId,
+                PlayerId(UUID.randomUUID()),
+                ArenaId("warned"),
+                ServerId("test"),
+                DuelRules(DuelMode.OWN_INVENTORY),
+                Instant.EPOCH,
+            ).beginCountdown().activate(Instant.EPOCH)
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.matchFor(player) } returns match
+        every { sessions.isInsideArena(player, destination) } returns false
+        val event = mockk<PlayerMoveEvent>(relaxed = true)
+        every { event.player } returns player
+        every { event.from } returns from
+        every { event.to } returns destination
+
+        DuelGameplayListener(sessions, mockk(relaxed = true)).onMove(event)
+
+        verify(exactly = 1) { event.to = from }
+        verify(exactly = 1) { player.showTitle(any<net.kyori.adventure.title.Title>()) }
+        verify(exactly = 1) { sessions.handleBoundaryExit(player, destination) }
+    }
+
     "countdown movement is anchored to the arena spawn instead of a stale client position" {
         val player = mockk<Player>(relaxed = true)
         val playerId = PlayerId(UUID.randomUUID())

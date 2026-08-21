@@ -7,6 +7,7 @@ import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
 import ru.ruscrafting.duels.domain.ChallengeId
+import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.ChallengeRegistry
 import ru.ruscrafting.duels.domain.ChallengeStatus
@@ -45,6 +46,7 @@ class DuelController(
     private val clock: Clock = Clock.systemUTC(),
     private val transferTimeout: Duration = Duration.ofSeconds(30),
     private val returnPolicy: PostMatchReturnPolicy = PostMatchReturnPolicy.PROMPT,
+    private val arenaReturnPolicy: (ArenaId) -> PostMatchReturnPolicy? = { null },
     private val rematchWindow: Duration = Duration.ofMinutes(3),
     private val arenaChoices: ((DuelRules) -> List<ArenaChoice>)? = arenaDirectory?.let { directory -> directory::choices },
 ) : AutoCloseable {
@@ -79,6 +81,14 @@ class DuelController(
         requestedTarget: DuelTarget,
         rules: DuelRules,
         arenaSelection: ArenaSelection? = null,
+    ) = challengeInternal(challenger, requestedTarget, rules, arenaSelection, null)
+
+    private fun challengeInternal(
+        challenger: Player,
+        requestedTarget: DuelTarget,
+        rules: DuelRules,
+        arenaSelection: ArenaSelection?,
+        recoveryMatchId: MatchId?,
     ) {
         DuelLog.debug(
             "challenge-request",
@@ -123,6 +133,7 @@ class DuelController(
                         challengerRoute = participantRoute(localServer, returnOffers[challenge.challenger]?.destination),
                         targetRoute = participantRoute(target.server, returnOffers[challenge.target]?.destination),
                         expiresAtMillis = challenge.expiresAt.toEpochMilli(),
+                        recoveryMatchId = recoveryMatchId,
                     )
                 rememberContext(challenge.id, context)
                 if (localTarget != null) {
@@ -146,6 +157,7 @@ class DuelController(
                             matchServer = null,
                             challengerCurrentServer = context.challengerRoute.currentServer,
                             targetCurrentServer = context.targetRoute.currentServer,
+                            recoveryMatchId = context.recoveryMatchId,
                         ),
                     )
                 }
@@ -393,10 +405,29 @@ class DuelController(
                     selection.serverId.value,
                     selection.arenaId.value,
                 )
-                challenge(player, target, outcome.rules, selection)
+                val recoveryMatchId =
+                    continuationRecoveryMatchId(
+                        outcome.matchId,
+                        returnOffers[playerId],
+                        returnOffers[opponentId],
+                    )
+                challengeInternal(player, target, outcome.rules, selection, recoveryMatchId)
             }
         }
     }
+
+    private fun continuationRecoveryMatchId(
+        completedMatchId: MatchId,
+        first: ReturnOffer?,
+        second: ReturnOffer?,
+    ): MatchId? =
+        continuationRecoveryMatchId(
+            completedMatchId,
+            first?.matchId,
+            first?.recoveryMatchId,
+            second?.matchId,
+            second?.recoveryMatchId,
+        )
 
     override fun close() {
         networkSubscription?.close()
@@ -447,6 +478,7 @@ class DuelController(
                 challengerRoute = ParticipantRoute(message.challengerCurrentServer, message.challengerServer),
                 targetRoute = participantRoute(localServer, returnOffers[message.challenge.target]?.destination ?: message.targetServer),
                 expiresAtMillis = message.challenge.expiresAt.toEpochMilli(),
+                recoveryMatchId = message.recoveryMatchId,
             ),
         )
         if (sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
@@ -487,6 +519,7 @@ class DuelController(
                 challengerRoute = ParticipantRoute(message.challengerCurrentServer, message.challengerServer),
                 targetRoute = ParticipantRoute(message.targetCurrentServer, message.targetServer),
                 expiresAtMillis = message.challenge.expiresAt.toEpochMilli(),
+                recoveryMatchId = message.recoveryMatchId,
             ),
         )
         when (message.challenge.status) {
@@ -520,6 +553,7 @@ class DuelController(
                             ?: selectOriginServer(existing?.targetRoute?.originServer, observedTarget, localServer),
                     ),
                 expiresAtMillis = challenge.expiresAt.toEpochMilli(),
+                recoveryMatchId = existing?.recoveryMatchId,
             )
         bus.publish(
             CrossServerChallengeMessage(
@@ -534,17 +568,24 @@ class DuelController(
                 matchServer = matchServer,
                 challengerCurrentServer = context.challengerRoute.currentServer,
                 targetCurrentServer = context.targetRoute.currentServer,
+                recoveryMatchId = context.recoveryMatchId,
             ),
         )
     }
 
     private fun acceptNetworkMatch(message: CrossServerChallengeMessage) {
         val host = requireNotNull(message.matchServer)
-        returnLobbyPlayersForRematch(message.challenge)
+        if (message.recoveryMatchId == null) {
+            returnLobbyPlayersForNewMatch(message.challenge)
+        } else if (localServer == host) {
+            participants(message.challenge).forEach { player ->
+                player.sendMessage(locales.notice(player, "controller.rematch-return"))
+            }
+        }
         scheduleAcceptedMatch(message.challenge, host, message)
     }
 
-    private fun returnLobbyPlayersForRematch(challenge: DuelChallenge) {
+    private fun returnLobbyPlayersForNewMatch(challenge: DuelChallenge) {
         participants(challenge).forEach { player ->
             val playerId = PlayerId(player.uniqueId)
             val offer = returnOffers[playerId] ?: return@forEach
@@ -568,6 +609,7 @@ class DuelController(
         host: ServerId,
         networkMessage: CrossServerChallengeMessage? = null,
     ) {
+        if (networkMessage?.recoveryMatchId != null && localServer != host) return
         if (networkMessage != null && localServer != host &&
             localServer != networkMessage.challengerServer && localServer != networkMessage.targetServer
         ) {
@@ -655,7 +697,8 @@ class DuelController(
                 localParticipants.map { participant ->
                     AcceptedParticipantReadiness(
                         stateLocked =
-                            returnOffers.containsKey(PlayerId(participant.uniqueId)) ||
+                            returnOffers[PlayerId(participant.uniqueId)]
+                                ?.takeUnless { offer -> offer.recoveryMatchId == accepted.networkMessage?.recoveryMatchId } != null ||
                                 (sessions.isStateLocked(participant) &&
                                     !sessions.hasOriginSnapshot(participant, challenge)),
                         playerDataReady = playerDataReady(participant),
@@ -710,6 +753,7 @@ class DuelController(
                             challenge.challenger to networkMessage.challengerServer,
                             challenge.target to networkMessage.targetServer,
                         ),
+                        networkMessage.recoveryMatchId,
                     )
                 }
             }
@@ -744,7 +788,12 @@ class DuelController(
                                         networkMessage.challenge.challenger to networkMessage.challengerServer,
                                         networkMessage.challenge.target to networkMessage.targetServer,
                                     ),
+                                recoveryMatchId = networkMessage.recoveryMatchId ?: requireNotNull(match).id,
                             )
+                        listOf(challenge.challenger, challenge.target).forEach { playerId ->
+                            returnOffers[playerId]?.takeIf { it.recoveryMatchId == networkMessage.recoveryMatchId }
+                                ?.let { returnOffers.remove(playerId, it) }
+                        }
                     }
                 }
             }
@@ -755,6 +804,7 @@ class DuelController(
         localParticipants: List<Player>,
     ): OriginPreparation {
         val message = requireNotNull(accepted.networkMessage)
+        if (message.recoveryMatchId != null) return OriginPreparation.READY
         val localOrigins =
             localParticipants.filter { player ->
                 val playerId = PlayerId(player.uniqueId)
@@ -794,6 +844,7 @@ class DuelController(
 
     private fun returnAcceptedPlayers(accepted: AcceptedMatch) {
         val message = accepted.networkMessage ?: return
+        if (message.recoveryMatchId != null) return
         participants(accepted.challenge).forEach { player ->
             val destination = originFor(message, PlayerId(player.uniqueId))
             if (destination == localServer) {
@@ -816,13 +867,15 @@ class DuelController(
 
     private fun onMatchCompleted(match: DuelMatch) {
         val routes = returnRoutes.remove(match.id)
-        val promptedRoutes = routes?.takeIf { returnPolicy == PostMatchReturnPolicy.PROMPT }
+        val effectiveReturnPolicy =
+            arenaReturnPolicy(match.arenaId) ?: returnPolicy
+        val promptedRoutes = routes?.takeIf { effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT }
         promptedRoutes?.byPlayer?.forEach { (playerId, destination) ->
-            returnOffers[playerId] = ReturnOffer(match.id, destination)
+            returnOffers[playerId] = ReturnOffer(match.id, destination, promptedRoutes.recoveryMatchId)
         }
         offerMatchSummary(match, promptedRoutes)
         if (routes == null) return
-        if (returnPolicy == PostMatchReturnPolicy.PROMPT) {
+        if (effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT) {
             return
         }
         val deadline = clock.millis() + RETURN_TIMEOUT.toMillis()
@@ -847,7 +900,15 @@ class DuelController(
                     val action =
                         locales.component(player, "controller.rematch-action")
                             .clickEvent(ClickEvent.runCommand("/duel rematch ${match.id}"))
-                            .hoverEvent(HoverEvent.showText(locales.component(player, "controller.rematch-hover")))
+                            .hoverEvent(
+                                HoverEvent.showText(
+                                    locales.component(
+                                        player,
+                                        "controller.rematch-hover",
+                                        LocaleService.text("seconds", rematchWindow.seconds.coerceAtLeast(1L)),
+                                    ),
+                                ),
+                            )
                     val actions =
                         routes?.forPlayer(playerId)?.let { destination ->
                             val returnAction =
@@ -862,15 +923,15 @@ class DuelController(
                     player.sendMessage(
                         locales.notice(
                             player,
-                            "controller.match-summary",
+                            if (match.rules.bestOf == 1) "controller.match-summary-single" else "controller.match-summary-series",
                             LocaleService.component(
                                 "result",
                                 locales.component(
                                     player,
                                     if (playerId == match.winner) "controller.result-win" else "controller.result-loss",
+                                    LocaleService.component("player", requireNotNull(opponent)),
                                 ),
                             ),
-                            LocaleService.component("player", requireNotNull(opponent)),
                             LocaleService.text("score", viewerScore(match, playerId)),
                             LocaleService.component("actions", actions),
                             LocaleService.text("seconds", rematchWindow.seconds.coerceAtLeast(1L)),
@@ -1188,6 +1249,7 @@ class DuelController(
         val challengerRoute: ParticipantRoute,
         val targetRoute: ParticipantRoute,
         val expiresAtMillis: Long,
+        val recoveryMatchId: MatchId?,
     )
 
     private data class AcceptedMatch(
@@ -1199,6 +1261,7 @@ class DuelController(
 
     private data class ReturnRoutes(
         val byPlayer: Map<PlayerId, ServerId>,
+        val recoveryMatchId: MatchId,
     ) {
         init {
             require(byPlayer.size == 2) { "Return routes require exactly two players" }
@@ -1210,6 +1273,7 @@ class DuelController(
     private data class ReturnOffer(
         val matchId: MatchId,
         val destination: ServerId,
+        val recoveryMatchId: MatchId,
     )
 
     private enum class OriginPreparation {
@@ -1220,7 +1284,7 @@ class DuelController(
 
     private companion object {
         const val NETWORK_MATCH_POLL_TICKS = 10L
-        const val RETURN_DELAY_TICKS = 60L
+        const val RETURN_DELAY_TICKS = 1L
         const val MAX_CONTEXTS = 4_096
         val RETURN_TIMEOUT: Duration = Duration.ofMinutes(2)
         val CONTEXT_RETENTION: Duration = Duration.ofMinutes(10)
@@ -1259,6 +1323,19 @@ internal fun challengeExpiryDelayTicks(nowMillis: Long, expiresAtMillis: Long): 
     val remainingMillis = (expiresAtMillis - nowMillis).coerceAtLeast(1L)
     return ((remainingMillis + 49L) / 50L).coerceAtLeast(1L)
 }
+
+internal fun continuationRecoveryMatchId(
+    completedMatchId: MatchId,
+    firstOfferMatchId: MatchId?,
+    firstRecoveryMatchId: MatchId?,
+    secondOfferMatchId: MatchId?,
+    secondRecoveryMatchId: MatchId?,
+): MatchId? =
+    firstRecoveryMatchId?.takeIf { recoveryMatchId ->
+        firstOfferMatchId == completedMatchId &&
+            secondOfferMatchId == completedMatchId &&
+            secondRecoveryMatchId == recoveryMatchId
+    }
 
 internal data class AcceptedParticipantReadiness(
     val stateLocked: Boolean,

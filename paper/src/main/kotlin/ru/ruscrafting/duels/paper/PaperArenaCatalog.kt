@@ -56,6 +56,19 @@ data class ArenaBounds(
             contains(worldId, hill.center.x + hill.radius, hill.center.y + hill.height, hill.center.z + hill.radius)
     }
 
+    fun distanceToEdge(location: Location): Double? {
+        val world = location.world ?: return null
+        if (world.uid != worldId || !contains(location)) return null
+        return minOf(
+            location.x - minX,
+            maxX - location.x,
+            location.y - minY,
+            maxY - location.y,
+            location.z - minZ,
+            maxZ - location.z,
+        )
+    }
+
     fun overlaps(other: ArenaBounds): Boolean =
         worldId == other.worldId &&
             minX <= other.maxX && maxX >= other.minX &&
@@ -73,6 +86,7 @@ data class PaperArena(
     val allowedLoadouts: Set<DuelMode> = DuelMode.entries.toSet(),
     val allowedObjectives: Set<DuelObjectiveType> = DuelObjectiveType.entries.toSet(),
     val lobby: Location? = null,
+    val postMatchAction: ArenaPostMatchAction? = null,
 ) {
     init {
         require(displayName.isNotBlank() && displayName.length <= 64 && displayName.none(Char::isISOControl)) {
@@ -301,6 +315,10 @@ class PaperArenaCatalog private constructor(
                     require(bounds.contains(first) && bounds.contains(second)) { "Arena $id spawns must be inside its bounds" }
                     val hill = section.getConfigurationSection("hill")?.readHill(plugin)
                     val lobby = section.getConfigurationSection("lobby")?.let { section.readLocation(plugin, "lobby") }
+                    val postMatchAction =
+                        section.getString("post-match-action")
+                            ?.takeIf(String::isNotBlank)
+                            ?.let(ArenaPostMatchAction::parse)
                     require(hill == null || bounds.contains(hill)) { "Arena $id hill zone must be fully inside its bounds" }
                     id to
                         PaperArena(
@@ -313,6 +331,7 @@ class PaperArenaCatalog private constructor(
                             readArenaAllowedLoadouts(section),
                             readArenaAllowedObjectives(section),
                             lobby,
+                            postMatchAction,
                         )
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {

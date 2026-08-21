@@ -3,6 +3,7 @@ package ru.ruscrafting.duels.paper
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import ru.ruscrafting.duels.domain.ServerId
+import ru.ruscrafting.duels.domain.MatchId
 
 class AcceptedMatchDecisionTest : StringSpec({
     val ready = AcceptedParticipantReadiness(stateLocked = false, playerDataReady = true, engaged = false)
@@ -32,11 +33,16 @@ class AcceptedMatchDecisionTest : StringSpec({
         selectOriginServer(null, ServerId("observed"), ServerId("fallback")) shouldBe ServerId("observed")
     }
 
-    "a rematch accepted from the arena lobby must pass through origin recovery" {
+    "an arena-lobby rematch stays on the network path instead of becoming a fresh local snapshot" {
         val local = ServerId("parkour")
 
         shouldStartDirectLocalMatch(true, false, local, local) shouldBe true
         shouldStartDirectLocalMatch(true, true, local, local) shouldBe false
         shouldStartDirectLocalMatch(false, false, local, local) shouldBe false
+
+        val completed = MatchId.random()
+        val originalRecovery = MatchId.random()
+        continuationRecoveryMatchId(completed, completed, originalRecovery, completed, originalRecovery) shouldBe originalRecovery
+        continuationRecoveryMatchId(completed, completed, originalRecovery, MatchId.random(), originalRecovery) shouldBe null
     }
 })

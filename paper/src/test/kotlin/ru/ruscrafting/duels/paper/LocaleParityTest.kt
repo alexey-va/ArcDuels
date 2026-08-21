@@ -50,7 +50,7 @@ class LocaleParityTest : StringSpec({
     "chat identity is calm and legacy bracket prefixes cannot return" {
         for (language in listOf("ru", "en")) {
             val bundle = loadBundle(language)
-            bundle.getString("identity") shouldBe "<#32d6ff>⚔</#32d6ff> <#8795a5>•</#8795a5> "
+            bundle.getString("identity") shouldBe "<#32d6ff>⚔</#32d6ff> "
             for ((key, values) in leaves(bundle)) {
                 values.forEach { value ->
                     withClue("$language:$key") {

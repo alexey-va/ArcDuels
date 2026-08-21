@@ -2,6 +2,10 @@ package ru.ruscrafting.duels.paper
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.mockk.every
+import io.mockk.mockk
+import org.bukkit.Location
+import org.bukkit.World
 import java.util.UUID
 
 class ArenaBoundsTest : StringSpec({
@@ -23,5 +27,17 @@ class ArenaBoundsTest : StringSpec({
         bounds.overlaps(ArenaBounds(worldId, 10.0, 70.0, -5.0, 20.0, 80.0, 5.0)) shouldBe true
         bounds.overlaps(ArenaBounds(worldId, 10.01, 70.0, -5.0, 20.0, 80.0, 5.0)) shouldBe false
         bounds.overlaps(ArenaBounds(UUID.randomUUID(), -5.0, 70.0, -5.0, 5.0, 80.0, 5.0)) shouldBe false
+    }
+
+    "edge distance drives a warning before the player crosses the boundary" {
+        val worldId = UUID.fromString("00000000-0000-0000-0000-000000000001")
+        val world = mockk<World>()
+        every { world.uid } returns worldId
+        val bounds = ArenaBounds(worldId, -10.0, 60.0, -20.0, 10.0, 100.0, 20.0)
+
+        bounds.distanceToEdge(Location(world, 8.0, 70.0, 0.0)) shouldBe 2.0
+        bounds.distanceToEdge(Location(world, 0.0, 70.0, 0.0)) shouldBe 10.0
+        bounds.distanceToEdge(Location(world, 0.0, 62.0, 0.0)) shouldBe 2.0
+        bounds.distanceToEdge(Location(world, 11.0, 70.0, 0.0)) shouldBe null
     }
 })

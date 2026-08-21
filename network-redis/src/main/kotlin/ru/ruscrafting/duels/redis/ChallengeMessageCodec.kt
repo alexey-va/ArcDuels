@@ -12,6 +12,7 @@ import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
+import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Instant
@@ -35,6 +36,7 @@ internal class ChallengeMessageCodec(
                 targetServer = message.targetServer.value,
                 challengerCurrentServer = message.challengerCurrentServer.value,
                 targetCurrentServer = message.targetCurrentServer.value,
+                recoveryMatchId = message.recoveryMatchId?.toString(),
                 matchServer = message.matchServer?.value,
                 selectedArenaServer = message.challenge.arenaSelection?.serverId?.value,
                 selectedArenaId = message.challenge.arenaSelection?.arenaId?.value,
@@ -108,6 +110,7 @@ internal class ChallengeMessageCodec(
             matchServer = wire.matchServer?.let(::ServerId),
             challengerCurrentServer = ServerId(wire.challengerCurrentServer ?: wire.challengerServer),
             targetCurrentServer = ServerId(wire.targetCurrentServer ?: wire.targetServer),
+            recoveryMatchId = wire.recoveryMatchId?.let { MatchId(UUID.fromString(it)) },
         )
     }
 
@@ -126,6 +129,7 @@ internal class ChallengeMessageCodec(
         val targetServer: String,
         val challengerCurrentServer: String? = null,
         val targetCurrentServer: String? = null,
+        val recoveryMatchId: String? = null,
         val matchServer: String?,
         val selectedArenaServer: String?,
         val selectedArenaId: String?,
@@ -148,7 +152,7 @@ internal class ChallengeMessageCodec(
     )
 
     private companion object {
-        const val WIRE_VERSION = 3
+        const val WIRE_VERSION = 4
         const val MAX_MESSAGE_CHARACTERS = 16_384
     }
 }

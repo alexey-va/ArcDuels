@@ -6,6 +6,7 @@ import ru.arc.redis.ChannelListener
 import ru.arc.redis.RedisOperations
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelChallenge
+import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Duration
@@ -28,6 +29,7 @@ data class CrossServerChallengeMessage(
     val matchServer: ServerId?,
     val challengerCurrentServer: ServerId = challengerServer,
     val targetCurrentServer: ServerId = targetServer,
+    val recoveryMatchId: MatchId? = null,
 ) {
     init {
         require(messageId.matches(Regex("[A-Za-z0-9:._-]{1,160}"))) { "Unsafe challenge message id" }

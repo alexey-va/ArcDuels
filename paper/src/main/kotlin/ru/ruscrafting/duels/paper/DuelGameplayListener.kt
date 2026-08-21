@@ -33,6 +33,10 @@ import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.projectiles.ProjectileSource
+import net.kyori.adventure.title.Title
+import java.time.Duration
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import ru.ruscrafting.duels.domain.MatchState
 import ru.ruscrafting.duels.domain.PlayerId
 
@@ -41,7 +45,14 @@ internal class DuelGameplayListener(
     private val locales: LocaleService,
     private val commandPolicy: DuelCommandPolicy = DuelCommandPolicy(),
     private val controller: DuelController? = null,
+    private val boundaryWarningDistance: Double = 5.0,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) : Listener {
+    private val boundaryWarnings = ConcurrentHashMap<UUID, Long>()
+
+    init {
+        require(boundaryWarningDistance in 1.0..16.0) { "Boundary warning distance must be between 1 and 16 blocks" }
+    }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onDecorativeFireworkDamage(event: EntityDamageByEntityEvent) {
@@ -157,6 +168,7 @@ internal class DuelGameplayListener(
         val match = sessions.matchFor(event.player)
         val destination = event.to
         if (match == null) {
+            boundaryWarnings.remove(event.player.uniqueId)
             if (sessions.isStateLocked(event.player) &&
                 (event.from.x != destination.x || event.from.y != destination.y || event.from.z != destination.z)
             ) {
@@ -179,7 +191,21 @@ internal class DuelGameplayListener(
             MatchState.ACTIVE -> {
                 if (!sessions.isInsideArena(event.player, destination)) {
                     event.to = event.from
-                    sessions.handleElimination(event.player)
+                    showBoundaryTitle(event.player, leftArena = true)
+                    sessions.handleBoundaryExit(event.player, destination)
+                } else {
+                    val distance = sessions.boundaryDistance(event.player, destination) ?: return
+                    val previousDistance = sessions.boundaryDistance(event.player, event.from)
+                    if (distance <= boundaryWarningDistance && (previousDistance == null || distance < previousDistance)) {
+                        val now = nowMillis()
+                        val previous = boundaryWarnings[event.player.uniqueId]
+                        if (previous == null || now - previous >= BOUNDARY_WARNING_COOLDOWN_MILLIS) {
+                            boundaryWarnings[event.player.uniqueId] = now
+                            showBoundaryTitle(event.player, leftArena = false)
+                        }
+                    } else if (distance > boundaryWarningDistance + 1.0) {
+                        boundaryWarnings.remove(event.player.uniqueId)
+                    }
                 }
             }
             else -> Unit
@@ -188,6 +214,7 @@ internal class DuelGameplayListener(
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onQuit(event: PlayerQuitEvent) {
+        boundaryWarnings.remove(event.player.uniqueId)
         controller?.handleQuit(event.player)
         sessions.handleQuit(event.player)
     }
@@ -366,7 +393,26 @@ internal class DuelGameplayListener(
             !event.player.hasPermission(COMMAND_BYPASS_PERMISSION) &&
             !commandPolicy.isAllowed(event.message)
 
+    private fun showBoundaryTitle(player: Player, leftArena: Boolean) {
+        val sumo = sessions.isSumo(player)
+        val titleKey = if (leftArena) "session.boundary-left-title" else "session.boundary-warning-title"
+        val subtitleKey =
+            when {
+                leftArena -> "session.boundary-left-subtitle"
+                sumo -> "session.boundary-warning-sumo-subtitle"
+                else -> "session.boundary-warning-subtitle"
+            }
+        player.showTitle(
+            Title.title(
+                locales.component(player, titleKey),
+                locales.component(player, subtitleKey),
+                Title.Times.times(Duration.ZERO, Duration.ofMillis(1_200), Duration.ofMillis(250)),
+            ),
+        )
+    }
+
     private companion object {
         const val COMMAND_BYPASS_PERMISSION = "arcduels.bypass"
+        const val BOUNDARY_WARNING_COOLDOWN_MILLIS = 3_000L
     }
 }

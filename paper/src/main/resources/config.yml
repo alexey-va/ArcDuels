@@ -15,6 +15,8 @@ countdown-seconds: 3
 # avoids client/anticheat rubber-banding before the countdown begins.
 teleport-stabilization-ticks: 3
 rematch-window-seconds: 180
+# Show a title before a player crosses a configured arena boundary.
+boundary-warning-distance: 5.0
 
 player-data-sync:
   # AUTO detects HuskSync. Use HUSKSYNC or NONE to declare the node contract
@@ -225,6 +227,9 @@ arenas:
       z: 24.5
       yaw: 180.0
       pitch: 0.0
+    # Optional per-arena override. LOCAL_LOBBY keeps recovered players here;
+    # RETURN_TO_ORIGIN sends them back immediately after the finale.
+    post-match-action: LOCAL_LOBBY
     bounds:
       min:
         x: -15.0

@@ -78,8 +78,9 @@ arenas but ArcDuels suppresses its cross-server own-inventory capacity.
 `PROMPT` keeps players at the arena's configured lobby and offers a return to
 their origin server. If the arena has no lobby, each participant is moved to
 their assigned arena spawn; ArcDuels never falls back to an unrelated primary
-world. Accepting another duel from this waiting state automatically returns the
-player through the origin recovery flow before the next arena transfer.
+world. An exact rematch accepted by both players reuses the original durable
+snapshot and starts from that lobby without a round trip through the origin.
+An unrelated challenge still completes the normal recovery flow first.
 
 ## Localization
 
@@ -151,6 +152,7 @@ arenas:
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
     second-spawn: { world: duels, x: 8.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
     lobby: { world: duels, x: 0.5, y: 65, z: 20.5, yaw: 180, pitch: 0 }
+    post-match-action: LOCAL_LOBBY # or RETURN_TO_ORIGIN
     bounds:
       min: { x: -12, y: 60, z: -12 }
       max: { x: 12, y: 85, z: 12 }
@@ -165,6 +167,12 @@ arenas:
 backward compatibility. This lets one network dedicate individual arenas to
 personal items or kits without ArcDuels knowing server names or topology.
 
+`post-match-action` overrides the node-wide `post-match.return-policy` for one
+arena. `LOCAL_LOBBY` keeps recovered players at its lobby and offers the safe
+return action for network fights. `RETURN_TO_ORIGIN` returns them on the next
+tick after the finale. For a same-server fight, `LOCAL_LOBBY` applies the saved
+state first and then moves the player to the configured lobby.
+
 `display-name` is plain player-facing text; it falls back to the arena id. The
 server name is rendered separately through `server-display-names`.
 
@@ -177,9 +185,11 @@ network's local arena policy without hard-coding server names.
 Arena reservations are exclusive. If all arenas are occupied, accepted pairs
 wait in FIFO order without touching either player's inventory. Queue ownership
 prevents either participant from entering another duel. Both spawns must be
-inside the bounds and use the same loaded world. Leaving the bounds loses the
-round; only scoped ArcDuels teleports and in-bounds combat teleports are
-accepted while a player owns an arena.
+inside the bounds and use the same loaded world. A title appears within
+`boundary-warning-distance` blocks while the player approaches an edge;
+leaving the bounds shows the explicit reason and loses the round. Only scoped
+ArcDuels teleports and in-bounds combat teleports are accepted while a player
+owns an arena.
 
 Network arena heartbeats distinguish both objective support and allowed
 loadouts. A challenge is never routed to a node without a compatible arena.
@@ -228,6 +238,11 @@ transaction response is safe to retry. Archived rows are never auto-applied, so
 retention cannot rewind or duplicate a player's later inventory. A crash before
 that transaction commits leaves the active row and causes the same idempotent
 restore on the next join.
+
+Controlled `KIT` matches temporarily cap `MAX_HEALTH` at 20 and clear absorption
+for the whole round, including health modifiers added by AuraSkills, EliteMobs,
+or another plugin. The transient cap is removed before recovery. `OWN_INVENTORY`
+matches deliberately retain the player's current maximum health and bonuses.
 
 The active row is an unclaimed recovery and appears in the player's `/duel`
 menu when no live match owns it. Applying and verifying the exact state, saving
@@ -355,4 +370,7 @@ teleport, inventory, and state plugins from breaking match isolation.
 When WorldGuard is installed, enabled arenas are sampled at load time and a
 warning names points covered by a PvP denial. ArcDuels cancels WorldGuard's
 denial event only when both players belong to the same active duel and remain
-inside that arena. Spawn protection and unrelated combat remain unchanged.
+inside that arena. Bucket placement and pickup are likewise overridden only for
+an active participant, inside the assigned arena, when consumables are enabled.
+Fluid propagation is bounded and every affected block is restored after the
+round. Spawn protection and unrelated combat or building remain unchanged.

@@ -4,6 +4,10 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.bossbar.BossBar
 import net.kyori.adventure.title.Title
 import org.bukkit.GameMode
+import org.bukkit.Material
+import org.bukkit.NamespacedKey
+import org.bukkit.block.Block
+import org.bukkit.block.BlockState
 import org.bukkit.Sound
 import org.bukkit.Particle
 import org.bukkit.attribute.Attribute
@@ -55,6 +59,7 @@ class DuelSessionManager internal constructor(
     private val celebrationDurationTicks: Long = 80L,
     private val externalCombatTagClear: (Player, MatchId, String) -> Unit = { _, _, _ -> },
     private val shutdownRecoveryTimeoutMillis: Long = 5_000L,
+    private val defaultPostMatchReturnPolicy: PostMatchReturnPolicy = PostMatchReturnPolicy.PROMPT,
 ) {
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
@@ -63,6 +68,7 @@ class DuelSessionManager internal constructor(
     private val matchDisplayTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val finaleTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val teleportStabilizationTasks = ConcurrentHashMap<MatchId, BukkitTask>()
+    private val healthIsolationTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val pendingStarts = ConcurrentHashMap<UUID, CompletableFuture<DuelMatch>>()
     private val preparingPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val recoveryTokens = ConcurrentHashMap<UUID, UUID>()
@@ -72,6 +78,7 @@ class DuelSessionManager internal constructor(
     private val networkLobbyPlayers = ConcurrentHashMap<UUID, MatchId>()
     private val internalTeleports = InternalTeleportAuthorizer()
     private val celebrationEffects = CelebrationEffects(plugin)
+    private val kitHealthIsolation = KitHealthIsolation(NamespacedKey(plugin, "kit_health_cap"))
     private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
 
     init {
@@ -279,6 +286,7 @@ class DuelSessionManager internal constructor(
     fun startNetwork(
         challenge: DuelChallenge,
         origins: Map<PlayerId, ServerId>,
+        recoveryMatchId: MatchId? = null,
     ): CompletableFuture<DuelMatch> {
         check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
         val first = plugin.server.getPlayer(challenge.challenger.value)
@@ -295,7 +303,7 @@ class DuelSessionManager internal constructor(
             origins.entries.joinToString(",") { "${it.key.value}:${it.value.value}" },
         )
         val result = CompletableFuture<DuelMatch>()
-        val snapshotsFuture = playerStates.findMatchSnapshots(matchId, origins)
+        val snapshotsFuture = playerStates.findMatchSnapshots(recoveryMatchId ?: matchId, origins)
         val reservation =
             runCatching {
                 coordinator.reserve(
@@ -725,6 +733,48 @@ class DuelSessionManager internal constructor(
 
     fun allowsNaturalRegeneration(player: Player): Boolean = matchFor(player)?.rules?.modifiers?.naturalRegeneration ?: true
 
+    fun allowsFluidPlacement(
+        player: Player,
+        block: Block,
+        bucket: Material,
+    ): Boolean {
+        if (bucket !in DUEL_FLUID_BUCKETS) return false
+        val match = matchFor(player) ?: return false
+        if (match.state != MatchState.ACTIVE || !match.rules.modifiers.consumables) return false
+        return arenas.get(match.arenaId).bounds.contains(block.location.add(0.5, 0.5, 0.5))
+    }
+
+    fun allowsFluidPickup(
+        player: Player,
+        block: Block,
+    ): Boolean {
+        val match = matchFor(player) ?: return false
+        val session = sessions[match.id] ?: return false
+        return match.state == MatchState.ACTIVE &&
+            match.rules.modifiers.consumables &&
+            session.modifiedBlocks.containsKey(BlockKey.of(block))
+    }
+
+    fun trackFluidPlacement(
+        player: Player,
+        block: Block,
+    ): Boolean {
+        val match = matchFor(player) ?: return false
+        return sessions[match.id]?.rememberOriginal(block) == true
+    }
+
+    fun trackFluidFlow(
+        from: Block,
+        to: Block,
+    ): Boolean? {
+        val sourceKey = BlockKey.of(from)
+        val session = sessions.values.firstOrNull { sourceKey in it.modifiedBlocks } ?: return null
+        val match = coordinator.find(session.matchId) ?: return false
+        if (match.state !in setOf(MatchState.COUNTDOWN, MatchState.ACTIVE)) return false
+        if (!arenas.get(match.arenaId).bounds.contains(to.location.add(0.5, 0.5, 0.5))) return false
+        return session.rememberOriginal(to)
+    }
+
     fun isSumo(player: Player): Boolean = matchFor(player)?.rules?.objective == DuelObjectiveType.SUMO
 
     fun isHitRace(player: Player): Boolean = matchFor(player)?.rules?.objective?.isHitRace == true
@@ -827,6 +877,34 @@ class DuelSessionManager internal constructor(
         return arenas.get(match.arenaId).bounds.contains(destination)
     }
 
+    fun boundaryDistance(
+        player: Player,
+        location: org.bukkit.Location,
+    ): Double? {
+        val match = matchFor(player) ?: return null
+        return arenas.get(match.arenaId).bounds.distanceToEdge(location)
+    }
+
+    fun handleBoundaryExit(
+        player: Player,
+        attemptedLocation: org.bukkit.Location = player.location,
+    ) {
+        val match = matchFor(player) ?: return
+        DuelLog.info(
+            "arena-boundary-exit",
+            match.id,
+            player,
+            "player={} arena={} objective={} x={} y={} z={}",
+            player.name,
+            match.arenaId.value,
+            match.rules.objective,
+            attemptedLocation.x,
+            attemptedLocation.y,
+            attemptedLocation.z,
+        )
+        handleElimination(player)
+    }
+
     fun isTeleportAllowed(
         player: Player,
         destination: org.bukkit.Location?,
@@ -867,6 +945,8 @@ class DuelSessionManager internal constructor(
         countdownTasks.clear()
         teleportStabilizationTasks.values.forEach(BukkitTask::cancel)
         teleportStabilizationTasks.clear()
+        healthIsolationTasks.values.forEach(BukkitTask::cancel)
+        healthIsolationTasks.clear()
         objectiveTasks.values.forEach(BukkitTask::cancel)
         objectiveTasks.clear()
         matchDisplayTasks.values.forEach(BukkitTask::cancel)
@@ -881,6 +961,7 @@ class DuelSessionManager internal constructor(
         var localSnapshotsApplied = 0
         var networkPlayersNormalized = 0
         for ((matchId, session) in sessions) {
+            restoreArenaBlocks(session)
             hideMatchDisplay(session)
             val match = coordinator.find(matchId)
             match?.let {
@@ -960,6 +1041,7 @@ class DuelSessionManager internal constructor(
         session.snapshots.keys.forEach { sessionByPlayer[it] = match.id }
         try {
             prepareRound(match)
+            session.snapshots.keys.forEach { networkLobbyPlayers -= it }
             coordinator.beginCountdown(match.id)
             scheduleCountdown(match.id)
             return coordinator.find(match.id) ?: error("Match disappeared during Paper setup")
@@ -971,8 +1053,13 @@ class DuelSessionManager internal constructor(
                 failure.javaClass.simpleName,
                 failure.message,
             )
+            restoreArenaBlocks(session)
             hideMatchDisplay(session)
             teleportStabilizationTasks.remove(match.id)?.cancel()
+            healthIsolationTasks.remove(match.id)?.cancel()
+            session.snapshots.keys.forEach { playerId ->
+                plugin.server.getPlayer(playerId)?.let(kitHealthIsolation::clear)
+            }
             sessions.remove(match.id)
             session.snapshots.keys.forEach { sessionByPlayer.remove(it, match.id) }
             if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) restore(session)
@@ -1032,6 +1119,7 @@ class DuelSessionManager internal constructor(
         }
         resetPlayer(first, match.rules.mode, match.rules.kitId)
         resetPlayer(second, match.rules.mode, match.rules.kitId)
+        scheduleKitHealthIsolation(match)
         session.arenaAnchors[first.uniqueId] = arena.firstSpawn.clone()
         session.arenaAnchors[second.uniqueId] = arena.secondSpawn.clone()
         check(teleportInternally(first, arena.firstSpawn)) { "Could not teleport the first player to the arena" }
@@ -1068,7 +1156,6 @@ class DuelSessionManager internal constructor(
         player.foodLevel = 20
         player.saturation = 5f
         player.activePotionEffects.forEach { player.removePotionEffect(it.type) }
-        player.health = player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
         if (mode == DuelMode.KIT) {
             val kit = kits.get(requireNotNull(kitId))
             player.setItemOnCursor(ItemStack.empty())
@@ -1080,6 +1167,11 @@ class DuelSessionManager internal constructor(
             player.inventory.chestplate = kit.chestplate?.clone()
             player.inventory.leggings = kit.leggings?.clone()
             player.inventory.boots = kit.boots?.clone()
+            check(kitHealthIsolation.enforce(player)) { "Could not isolate kit health for ${player.uniqueId}" }
+            player.health = minOf(KitHealthIsolation.VANILLA_MAX_HEALTH, player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0)
+        } else {
+            kitHealthIsolation.clear(player)
+            player.health = player.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
         }
         player.updateInventory()
     }
@@ -1141,6 +1233,29 @@ class DuelSessionManager internal constructor(
                 }
             }.runTaskTimer(plugin, teleportStabilizationTicks, 20L)
         countdownTasks[matchId] = task
+    }
+
+    private fun scheduleKitHealthIsolation(match: DuelMatch) {
+        healthIsolationTasks.remove(match.id)?.cancel()
+        if (match.rules.mode != DuelMode.KIT) return
+        healthIsolationTasks[match.id] =
+            plugin.server.scheduler.runTaskTimer(
+                plugin,
+                Runnable {
+                    val current = coordinator.find(match.id)
+                    if (current == null || current.state !in setOf(MatchState.COUNTDOWN, MatchState.ACTIVE)) {
+                        healthIsolationTasks.remove(match.id)?.cancel()
+                        return@Runnable
+                    }
+                    participants(current).forEach { player ->
+                        if (!kitHealthIsolation.enforce(player)) {
+                            plugin.logger.severe("Could not maintain the 20 HP kit cap for ${player.uniqueId} in ${current.id}")
+                        }
+                    }
+                },
+                1L,
+                1L,
+            )
     }
 
     private fun scheduleTeleportStabilization(
@@ -1411,6 +1526,7 @@ class DuelSessionManager internal constructor(
         updated: DuelMatch?,
         failure: Throwable?,
     ) {
+        sessions[matchId]?.let(::restoreArenaBlocks)
         objectiveTasks.remove(matchId)?.cancel()
         matchDisplayTasks.remove(matchId)?.cancel()
         if (failure != null) {
@@ -1482,6 +1598,7 @@ class DuelSessionManager internal constructor(
         clearExternalCombatTags(match, "match-complete")
         countdownTasks.remove(match.id)?.cancel()
         teleportStabilizationTasks.remove(match.id)?.cancel()
+        healthIsolationTasks.remove(match.id)?.cancel()
         objectiveTasks.remove(match.id)?.cancel()
         matchDisplayTasks.remove(match.id)?.cancel()
         val winnerId = requireNotNull(match.winner)
@@ -1538,6 +1655,13 @@ class DuelSessionManager internal constructor(
         )
         if (session.recoveryOwner == RecoveryOwner.ARENA_SERVER) {
             if (!restore(session)) {
+                scheduleFinalization(match, session, 20L)
+                return
+            }
+            val arena = arenas.get(match.arenaId)
+            if ((arena.postMatchAction?.asReturnPolicy() ?: defaultPostMatchReturnPolicy) == PostMatchReturnPolicy.PROMPT &&
+                !moveLocalPlayersToLobby(match, session, arena)
+            ) {
                 scheduleFinalization(match, session, 20L)
                 return
             }
@@ -1609,6 +1733,7 @@ class DuelSessionManager internal constructor(
             if (playerId in session.postMatchMovedPlayers) return@forEach
             val player = plugin.server.getPlayer(playerId) ?: return@forEach
             runCatching {
+                kitHealthIsolation.clear(player)
                 if (syncProvider.sharesInventoryBetweenServers) {
                     if (origin.escrow.inventoryReplaced) {
                         origin.state.restoreState(player)
@@ -1629,6 +1754,41 @@ class DuelSessionManager internal constructor(
             }
         }
         return moved
+    }
+
+    private fun moveLocalPlayersToLobby(
+        match: DuelMatch,
+        session: PaperSession,
+        arena: PaperArena,
+    ): Boolean {
+        var moved = true
+        session.snapshots.keys.forEach { playerId ->
+            if (playerId in session.postMatchMovedPlayers) return@forEach
+            val player = plugin.server.getPlayer(playerId) ?: return@forEach
+            runCatching {
+                check(teleportInternally(player, postMatchDestination(arena, match, PlayerId(playerId)))) {
+                    "Could not move ${player.uniqueId} to the local arena lobby"
+                }
+                playerDataSaver(player)
+                session.postMatchMovedPlayers += playerId
+            }.onFailure { failure ->
+                moved = false
+                plugin.logger.severe("Could not safely move ${player.uniqueId} to the local arena lobby: ${failure.message}")
+            }
+        }
+        return moved
+    }
+
+    private fun restoreArenaBlocks(session: PaperSession) {
+        session.modifiedBlocks.values.toList().asReversed().forEach { original ->
+            runCatching { original.update(true, false) }
+                .onFailure { failure ->
+                    plugin.logger.warning(
+                        "Could not restore duel-modified block ${original.world.name}:${original.x},${original.y},${original.z}: ${failure.message}",
+                    )
+                }
+        }
+        session.modifiedBlocks.clear()
     }
 
     private fun restore(session: PaperSession): Boolean {
@@ -1674,6 +1834,7 @@ class DuelSessionManager internal constructor(
             alreadyMatches,
         )
         val restored = runCatching {
+            kitHealthIsolation.clear(player)
             if (preserveInventory) {
                 stored.state.restoreWithoutInventory(player, ::teleportInternally)
                 playerDataSaver(player)
@@ -1819,11 +1980,20 @@ class DuelSessionManager internal constructor(
         val hitRace: HitRaceTracker = HitRaceTracker(),
         val bossBars: MutableMap<UUID, BossBar> = ConcurrentHashMap(),
         val postMatchMovedPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
+        val modifiedBlocks: MutableMap<BlockKey, BlockState> = LinkedHashMap(),
         var roundElapsedTicks: Long = 0L,
         var suddenDeathStarted: Boolean = false,
         var roundsPrepared: Int = 0,
         val finishing: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(),
-    )
+    ) {
+        fun rememberOriginal(block: Block): Boolean {
+            val key = BlockKey.of(block)
+            if (key in modifiedBlocks) return true
+            if (modifiedBlocks.size >= MAX_MODIFIED_BLOCKS) return false
+            modifiedBlocks[key] = block.state
+            return true
+        }
+    }
 
     private enum class RecoveryOwner {
         ARENA_SERVER,
@@ -1838,6 +2008,19 @@ class DuelSessionManager internal constructor(
         const val RECOVERY_RETRY_TICKS = 60L
         const val REMOTE_RECOVERY_RETRY_TICKS = 100L
         const val RECOVERY_READY_POLL_TICKS = 5L
+        val DUEL_FLUID_BUCKETS = setOf(Material.LAVA_BUCKET, Material.WATER_BUCKET, Material.POWDER_SNOW_BUCKET)
+        const val MAX_MODIFIED_BLOCKS = 4_096
+    }
+}
+
+private data class BlockKey(
+    val worldId: UUID,
+    val x: Int,
+    val y: Int,
+    val z: Int,
+) {
+    companion object {
+        fun of(block: Block): BlockKey = BlockKey(block.world.uid, block.x, block.y, block.z)
     }
 }
 

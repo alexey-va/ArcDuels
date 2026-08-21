@@ -1,4 +1,4 @@
-identity: '<#32d6ff>⚔</#32d6ff> <#8795a5>•</#8795a5> '
+identity: '<#32d6ff>⚔</#32d6ff> '
 
 menu:
   common:
@@ -269,7 +269,7 @@ controller:
   no-network-arena: '<#c42323>Выбранная арена недоступна или не поддерживает эти правила.</#c42323>'
   network-transfer: '<#fff4d6>Вызов принят.</#fff4d6><newline><#9aa7b5>Перемещаю на арену:</#9aa7b5> <server>'
   network-return: ''
-  rematch-return: '<#e6fff3>Новый бой принят.</#e6fff3><newline><#8c8c8c>Сначала безопасно восстановлю состояние на</#8c8c8c> <#92bed8><server></#92bed8><#8c8c8c>, затем отправлю на арену.</#8c8c8c>'
+  rematch-return: '<#2bba43>Реванш принят.</#2bba43>'
   rematch-unavailable: '<#c42323>Этот бой недоступен для реванша.</#c42323>'
   rematch-expired: '<#8c8c8c>Время для реванша истекло.</#8c8c8c>'
   rematch-arena-unavailable: '<#c42323>Исходная арена не записана, поэтому безопасно повторить бой нельзя.</#c42323>'
@@ -277,15 +277,19 @@ controller:
   rematch-choose: '<#92bed8>Выбрать другую арену</#92bed8>'
   rematch-choose-hover: '<#8c8c8c>Открыть обычную настройку дуэли с этим соперником</#8c8c8c>'
   rematch-pending: '<#8c8c8c>Запрос на реванш уже ожидает ответа соперника.</#8c8c8c>'
-  match-summary: |-
-    <result> <#8c8c8c>в бою с</#8c8c8c> <player> <#666666>•</#666666> <#8c8c8c>счёт</#8c8c8c> <#e6fff3><score></#e6fff3>
-    <#8c8c8c>Те же правила и арена доступны для реванша ещё <seconds> с.</#8c8c8c>
+  match-summary-single: |-
+    <result>
+
     <actions>
-  result-win: '<#2bba43>Победа</#2bba43>'
-  result-loss: '<#c42323>Поражение</#c42323>'
-  rematch-action: '<#92bed8>⚔ Предложить реванш</#92bed8>'
-  rematch-hover: '<#8c8c8c>Соперник подтверждает реванш той же кнопкой</#8c8c8c>'
-  return-action: '<#92bed8>↩ Вернуться на <server></#92bed8>'
+  match-summary-series: |-
+    <result> <#666666>·</#666666> <#8c8c8c>счёт</#8c8c8c> <#e6fff3><score></#e6fff3>
+
+    <actions>
+  result-win: '<#2bba43>Победа</#2bba43> <#8c8c8c>над</#8c8c8c> <player>'
+  result-loss: '<#c42323>Поражение</#c42323> <#8c8c8c>от</#8c8c8c> <player>'
+  rematch-action: '<#92bed8>▶ Предложить реванш</#92bed8>'
+  rematch-hover: '<#8c8c8c>Те же правила и арена доступны <seconds> с.</#8c8c8c>'
+  return-action: '<#92bed8>▶ Вернуться на <server></#92bed8>'
   return-hover: '<#8c8c8c>Вернуться на исходный сервер и проверить вещи</#8c8c8c>'
   no-return-offer: '<#8c8c8c>Сейчас нет ожидающего возврата после дуэли.</#8c8c8c>'
   network-timeout: '<#c42323>Не удалось вовремя подготовить обоих игроков к дуэли.</#c42323>'
@@ -362,6 +366,11 @@ controller:
   deny-hover: '<#c42323>Отклонить вызов</#c42323>'
 
 session:
+  boundary-warning-title: '<#ffb347>Вы покидаете арену</#ffb347>'
+  boundary-warning-subtitle: '<#fff4d6>Вернитесь назад</#fff4d6>'
+  boundary-warning-sumo-subtitle: '<#fff4d6>За границей — поражение</#fff4d6>'
+  boundary-left-title: '<#c42323>Вы покинули арену</#c42323>'
+  boundary-left-subtitle: '<#ffb347>Раунд проигран</#ffb347>'
   queued: '<yellow>Все совместимые арены заняты. Ваша пара в очереди: <white>#<position></white>.</yellow>'
   recovery-check-retry: '<red>Проверка восстановления временно недоступна.</red> <yellow>Состояние надёжно заблокировано; ArcDuels повторит попытку автоматически.</yellow>'
   remote-recovery: '<gray>Незавершённое восстановление находится на сервере <white><server></white>. Перемещаю тебя туда…</gray>'

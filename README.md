@@ -43,10 +43,12 @@ This repository is under active development. The first vertical slice targets:
   any cross-server transfer or duel mutation,
   a player recovery entry for unclaimed snapshots, and administrator-only replay
   of claimed snapshots retained for configurable N days;
-- post-match arena lobbies with a clickable, player-controlled return to the
-  origin backend and compare-before-apply inventory recovery;
-- arena-scoped WorldGuard PvP compatibility with startup warnings instead of
-  broad changes to a world's region policy;
+- per-arena post-match routing to either the local lobby or the original
+  backend, with compare-before-apply inventory recovery and direct lobby rematches;
+- arena-scoped WorldGuard PvP and temporary fluid compatibility with startup
+  warnings instead of broad changes to a world's region policy;
+- visible boundary warnings before an out-of-bounds round loss, and a temporary
+  20 HP cap for controlled kit matches without changing own-inventory health;
 - real KOTH capture zones with contested progress, particles, action bars, and
   objective-compatible arena allocation;
 - resource-pack-neutral GUI roles with optional production ItemsAdder

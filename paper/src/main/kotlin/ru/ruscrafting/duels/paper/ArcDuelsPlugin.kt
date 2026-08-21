@@ -144,6 +144,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 config.getLong("recovery.apply-delay-ticks", 40L)
             }
         require(recoveryApplyDelayTicks in 0L..1_200L) { "player-data-sync.settle-delay-ticks must be between 0 and 1200" }
+        val defaultPostMatchReturnPolicy =
+            PostMatchReturnPolicy.parse(config.getString("post-match.return-policy", "PROMPT")!!)
         val sessionManager =
             DuelSessionManager(
                 this,
@@ -162,6 +164,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 celebrationDurationTicks = celebrationDurationTicks,
                 externalCombatTagClear = cmiCombatTags::clear,
                 shutdownRecoveryTimeoutMillis = shutdownRecoveryTimeoutMillis,
+                defaultPostMatchReturnPolicy = defaultPostMatchReturnPolicy,
             )
         sessions = sessionManager
         val challenges =
@@ -185,7 +188,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 transfer = transfer,
                 playerDataReady = playerDataSync::isReady,
                 transferTimeout = Duration.ofSeconds(config.getLong("redis.transfer-timeout-seconds", 30L).coerceIn(10L, 120L)),
-                returnPolicy = PostMatchReturnPolicy.parse(config.getString("post-match.return-policy", "PROMPT")!!),
+                returnPolicy = defaultPostMatchReturnPolicy,
+                arenaReturnPolicy = { arenaId -> arenas.get(arenaId).postMatchAction?.asReturnPolicy() },
                 rematchWindow = Duration.ofSeconds(config.getLong("rematch-window-seconds", 180L).coerceIn(30L, 900L)),
                 arenaChoices = { rules -> network.arenas?.choices(rules) ?: arenas.choices(serverId, rules) },
             )
@@ -213,10 +217,22 @@ open class ArcDuelsPlugin : JavaPlugin() {
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command
         server.pluginManager.registerEvents(gui, this)
-        server.pluginManager.registerEvents(DuelGameplayListener(sessionManager, locales, controller = controller), this)
-        if (server.pluginManager.isPluginEnabled("WorldGuard")) {
+        val boundaryWarningDistance = config.getDouble("boundary-warning-distance", 5.0)
+        require(boundaryWarningDistance in 1.0..16.0) { "boundary-warning-distance must be between 1 and 16" }
+        server.pluginManager.registerEvents(
+            DuelGameplayListener(
+                sessionManager,
+                locales,
+                controller = controller,
+                boundaryWarningDistance = boundaryWarningDistance,
+            ),
+            this,
+        )
+        val worldGuardEnabled = server.pluginManager.isPluginEnabled("WorldGuard")
+        server.pluginManager.registerEvents(DuelFluidListener(sessionManager, worldGuardEnabled), this)
+        if (worldGuardEnabled) {
             server.pluginManager.registerEvents(WorldGuardDuelListener(sessionManager, logger), this)
-            logger.info("WorldGuard duel PvP compatibility enabled")
+            logger.info("WorldGuard duel PvP and arena-fluid compatibility enabled")
         }
         val identities = PlayerIdentityListener(this, statistics)
         server.pluginManager.registerEvents(identities, this)

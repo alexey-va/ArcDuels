@@ -9,6 +9,9 @@ import org.bukkit.Location
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
+import org.bukkit.event.block.BlockFromToEvent
+import org.bukkit.event.player.PlayerBucketEmptyEvent
+import org.bukkit.event.player.PlayerBucketFillEvent
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.MatchState
@@ -71,6 +74,35 @@ internal class WorldGuardDuelListener(
                 "WorldGuard denied PvP in active arena ${attackerMatch.arenaId}; " +
                     "ArcDuels applied its participant-only arena override",
             )
+        }
+    }
+}
+
+internal class DuelFluidListener(
+    private val sessions: DuelSessionManager,
+    private val overrideWorldGuard: Boolean,
+) : Listener {
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onBucketEmpty(event: PlayerBucketEmptyEvent) {
+        if (!sessions.allowsFluidPlacement(event.player, event.block, event.bucket)) return
+        if (event.isCancelled && !overrideWorldGuard) return
+        event.isCancelled = !sessions.trackFluidPlacement(event.player, event.block)
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onBucketFill(event: PlayerBucketFillEvent) {
+        if (!sessions.allowsFluidPickup(event.player, event.block)) return
+        if (event.isCancelled && !overrideWorldGuard) return
+        event.isCancelled = false
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onFluidFlow(event: BlockFromToEvent) {
+        val allowed = sessions.trackFluidFlow(event.block, event.toBlock) ?: return
+        if (!allowed) {
+            event.isCancelled = true
+        } else if (!event.isCancelled || overrideWorldGuard) {
+            event.isCancelled = false
         }
     }
 }
