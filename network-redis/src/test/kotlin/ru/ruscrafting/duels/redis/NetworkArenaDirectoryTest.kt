@@ -190,4 +190,22 @@ class NetworkArenaDirectoryTest : StringSpec({
         directory.activeNodes() shouldBe emptyList()
         directory.close()
     }
+
+    "a backwards wall-clock jump cannot keep routing to an unverified arena heartbeat" {
+        val redis = InMemoryRedis(ServerIdentity { "spawn" })
+        val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)
+        val rules = DuelRules(DuelMode.KIT, KitId("classic"))
+        directory.publish(
+            ArenaNodeStatus(
+                ServerId("spawn"),
+                listOf(arena("kit", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true)),
+                queuedPairs = 0,
+            ),
+        )
+
+        now = now.minusSeconds(1)
+
+        directory.select(rules) shouldBe null
+        directory.close()
+    }
 })

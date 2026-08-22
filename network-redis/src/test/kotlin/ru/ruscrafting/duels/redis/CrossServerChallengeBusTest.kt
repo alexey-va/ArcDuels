@@ -5,6 +5,9 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.mockk.every
+import io.mockk.mockk
+import ru.arc.redis.RedisOperations
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.ChallengeStatus
@@ -153,5 +156,18 @@ class CrossServerChallengeBusTest : StringSpec({
                 matchServer = ServerId("parkour"),
             )
         }
+    }
+
+    "a failed Redis publication cannot advance the local challenge state" {
+        val redis = mockk<RedisOperations>(relaxed = true)
+        every { redis.publish(any(), any()) } throws IllegalStateException("redis unavailable")
+        val bus = CrossServerChallengeBus(redis, ServerId("spawn"))
+        val received = mutableListOf<CrossServerChallengeMessage>()
+        bus.subscribe(received::add)
+
+        shouldThrow<IllegalStateException> { bus.publish(offer) }
+
+        received shouldBe emptyList()
+        bus.close()
     }
 })

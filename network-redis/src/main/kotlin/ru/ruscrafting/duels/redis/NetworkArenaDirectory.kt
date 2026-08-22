@@ -143,7 +143,7 @@ class NetworkArenaDirectory(
     fun activeNodes(): List<ArenaNodeStatus> {
         val now = clock.millis()
         return nodes.values
-            .filter { now - it.receivedAtMillis < staleAfter.toMillis() }
+            .filter { isFreshObservation(now, it.receivedAtMillis, staleAfter.toMillis()) }
             .map(ObservedStatus::status)
             .sortedBy { it.server.value }
     }

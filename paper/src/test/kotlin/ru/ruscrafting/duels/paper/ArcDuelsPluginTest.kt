@@ -38,6 +38,8 @@ import ru.ruscrafting.duels.domain.MatchState
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
+import ru.ruscrafting.duels.redis.CrossServerChallengeBus
+import ru.ruscrafting.duels.redis.NetworkArenaDirectory
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -46,6 +48,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 import java.util.logging.Handler
 import java.util.logging.LogRecord
+import ru.arc.logging.ArcLogging
 
 @Suppress("DEPRECATION")
 class ArcDuelsPluginTest : StringSpec({
@@ -64,6 +67,7 @@ class ArcDuelsPluginTest : StringSpec({
         plugin = MockBukkit.load(ArcDuelsPlugin::class.java)
 
         plugin.isEnabled shouldBe true
+        ArcLogging.disableStructuredEmit shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
         plugin.config.getInt("countdown-seconds") shouldBe 3
         plugin.config.getLong("teleport-stabilization-ticks") shouldBe 3L
@@ -223,6 +227,44 @@ class ArcDuelsPluginTest : StringSpec({
 
         PlainTextComponentSerializer.plainText().serialize(requireNotNull(challenger.nextComponentMessage())).contains("Target истёк") shouldBe true
         PlainTextComponentSerializer.plainText().serialize(requireNotNull(target.nextComponentMessage())).contains("Challenger истёк") shouldBe true
+        controller.close()
+    }
+
+    "a Redis publication failure cancels the local offer instead of leaking a pending challenge" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val bus = mockk<CrossServerChallengeBus>()
+        every { bus.subscribe(any()) } returns AutoCloseable { }
+        every { bus.publish(any()) } throws IllegalStateException("redis unavailable")
+        val arenas = mockk<NetworkArenaDirectory>(relaxed = true)
+        val transfer = mockk<PlayerTransfer>(relaxed = true)
+        val targets = mockk<DuelTargetDirectory>()
+        val challenger = server.addPlayer("RedisFailure")
+        challenger.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
+        val remoteId = UUID.randomUUID()
+        val remote = DuelTarget(remoteId, "RemotePlayer", ServerId("survival"), local = false)
+        every { targets.find(remoteId) } returns remote
+        val challenges = ChallengeRegistry(Clock.systemUTC())
+        val controller =
+            DuelController(
+                plugin,
+                challenges,
+                sessions,
+                InMemoryStatisticsRepository(),
+                LocaleService.load(plugin),
+                targets,
+                ServerId("spawn"),
+                challengeBus = bus,
+                arenaDirectory = arenas,
+                transfer = transfer,
+            )
+
+        controller.challenge(challenger, remote, DuelRules(DuelMode.OWN_INVENTORY))
+
+        challenges.pendingFor(PlayerId(challenger.uniqueId)) shouldBe emptyList()
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(challenger.nextComponentMessage()))
+            .contains("Сетевые вызовы сейчас недоступны") shouldBe true
+        verify(exactly = 1) { bus.publish(any()) }
         controller.close()
     }
 
@@ -407,6 +449,15 @@ class ArcDuelsPluginTest : StringSpec({
         player.itemOnCursor.amount shouldBe 11
         val corrupt = payload.copyOf().also { it[0] = (it[0].toInt() xor 0x7f).toByte() }
         shouldThrow<IllegalArgumentException> { codec.decode(corrupt) }
+    }
+
+    "snapshot encoding rejects non-finite view angles before durable storage" {
+        val player = server.addPlayer()
+        val codec = PlayerSnapshotCodec(server)
+        val snapshot = PlayerSnapshot.capture(player)
+        val invalidLocation = snapshot.location.clone().apply { yaw = Float.NaN }
+
+        shouldThrow<IllegalArgumentException> { codec.encode(snapshot.copy(location = invalidLocation)) }
     }
 
     "enabled arena requires valid bounds containing both spawns" {

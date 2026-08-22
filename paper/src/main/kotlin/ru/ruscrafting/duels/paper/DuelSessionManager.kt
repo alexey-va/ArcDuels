@@ -8,6 +8,7 @@ import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.block.Block
 import org.bukkit.block.BlockState
+import org.bukkit.block.BlockFace
 import org.bukkit.Sound
 import org.bukkit.Particle
 import org.bukkit.attribute.Attribute
@@ -117,6 +118,7 @@ class DuelSessionManager internal constructor(
                     PlayerId(first.uniqueId),
                     PlayerId(second.uniqueId),
                     challenge.rules,
+                    matchId = requestedMatchId,
                     arenaId = challenge.arenaSelection?.arenaId,
                 )
             }
@@ -323,7 +325,9 @@ class DuelSessionManager internal constructor(
             .whenComplete { prepared, failure ->
                 runSync {
                     if (failure != null) {
-                        reservation.thenAccept { match -> runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) } }
+                        cancelOrReleaseReservation(reservation) { match ->
+                            runCatching { coordinator.cancel(match.id, MatchEndReason.ADMIN_CANCEL) }
+                        }
                         stopExpectingNetworkMatch(challenge)
                         result.completeExceptionally(unwrap(failure))
                         return@runSync
@@ -778,6 +782,25 @@ class DuelSessionManager internal constructor(
         if (match.state !in setOf(MatchState.COUNTDOWN, MatchState.ACTIVE)) return false
         if (!arenas.get(match.arenaId).bounds.contains(to.location.add(0.5, 0.5, 0.5))) return false
         return session.rememberOriginal(to)
+    }
+
+    /** Tracks lava fire, burning, and water/lava block reactions for exact arena rollback. */
+    fun trackFluidSideEffect(
+        source: Block?,
+        affected: Block,
+    ): Boolean? {
+        val affectedKey = BlockKey.of(affected)
+        val sourceKey = source?.let(BlockKey::of)
+        val neighboringKeys = FLUID_REACTION_FACES.map { face -> BlockKey.of(affected.getRelative(face)) }
+        val session =
+            sessions.values.firstOrNull { affectedKey in it.modifiedBlocks }
+                ?: sourceKey?.let { key -> sessions.values.firstOrNull { key in it.modifiedBlocks } }
+                ?: neighboringKeys.firstNotNullOfOrNull { key -> sessions.values.firstOrNull { key in it.modifiedBlocks } }
+                ?: return null
+        val match = coordinator.find(session.matchId) ?: return false
+        if (match.state !in setOf(MatchState.COUNTDOWN, MatchState.ACTIVE) || !match.rules.modifiers.consumables) return false
+        if (!arenas.get(match.arenaId).bounds.contains(affected.location.add(0.5, 0.5, 0.5))) return false
+        return session.rememberOriginal(affected)
     }
 
     fun isSumo(player: Player): Boolean = matchFor(player)?.rules?.objective == DuelObjectiveType.SUMO
@@ -2002,6 +2025,7 @@ class DuelSessionManager internal constructor(
         const val REMOTE_RECOVERY_RETRY_TICKS = 100L
         const val RECOVERY_READY_POLL_TICKS = 5L
         val DUEL_FLUID_BUCKETS = setOf(Material.LAVA_BUCKET, Material.WATER_BUCKET, Material.POWDER_SNOW_BUCKET)
+        val FLUID_REACTION_FACES = listOf(BlockFace.UP, BlockFace.DOWN, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST)
         const val MAX_MODIFIED_BLOCKS = 4_096
     }
 }
@@ -2042,6 +2066,13 @@ internal data class DuelShutdownReport(
 internal fun remainingBossBarProgress(elapsedTicks: Long, durationSeconds: Int): Float {
     if (durationSeconds <= 0) return 0f
     return (1.0 - elapsedTicks.toDouble() / (durationSeconds * 20.0)).coerceIn(0.0, 1.0).toFloat()
+}
+
+internal fun <T> cancelOrReleaseReservation(
+    reservation: CompletableFuture<T>,
+    release: (T) -> Unit,
+) {
+    if (!reservation.cancel(false)) reservation.thenAccept(release)
 }
 
 internal enum class AdminRecoveryStatus {

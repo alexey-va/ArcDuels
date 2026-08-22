@@ -18,6 +18,7 @@ internal class PlayerSnapshotCodec(
     private val server: Server,
 ) {
     fun encode(snapshot: PlayerSnapshot): ByteArray {
+        validateForEncode(snapshot)
         val output = ByteArrayOutputStream()
         DataOutputStream(output).use { data ->
             data.writeInt(MAGIC)
@@ -76,7 +77,9 @@ internal class PlayerSnapshotCodec(
             val world = server.getWorld(worldId) ?: server.getWorld(worldName) ?: fallbackWorld
             requireNotNull(world) { "Snapshot world '$worldName' ($worldId) is not loaded" }
             val location = Location(world, data.readDouble(), data.readDouble(), data.readDouble(), data.readFloat(), data.readFloat())
-            require(listOf(location.x, location.y, location.z).all(Double::isFinite)) { "Snapshot location is not finite" }
+            require(listOf(location.x, location.y, location.z).all(Double::isFinite) && location.yaw.isFinite() && location.pitch.isFinite()) {
+                "Snapshot location is not finite"
+            }
             val storage = data.readItemArray(EXPECTED_STORAGE_SLOTS)
             val armor = data.readItemArray(EXPECTED_ARMOR_SLOTS)
             val offHand = data.readItem()
@@ -132,6 +135,29 @@ internal class PlayerSnapshotCodec(
 
     private fun DataOutputStream.writeItemArray(items: Array<ItemStack?>) =
         writeBlob(ItemStack.serializeItemsAsBytes(items))
+
+    private fun validateForEncode(snapshot: PlayerSnapshot) {
+        requireNotNull(snapshot.location.world) { "Snapshot location has no world" }
+        require(
+            listOf(snapshot.location.x, snapshot.location.y, snapshot.location.z).all(Double::isFinite) &&
+                snapshot.location.yaw.isFinite() && snapshot.location.pitch.isFinite(),
+        ) { "Snapshot location is not finite" }
+        require(snapshot.storage.size == EXPECTED_STORAGE_SLOTS) { "Invalid inventory slot count" }
+        require(snapshot.armor.size == EXPECTED_ARMOR_SLOTS) { "Invalid armor slot count" }
+        require(snapshot.heldItemSlot in 0..8) { "Invalid held item slot" }
+        require(snapshot.health.isFinite() && snapshot.health > 0.0) { "Invalid health" }
+        require(snapshot.foodLevel in 0..20) { "Invalid food level" }
+        require(snapshot.saturation.isFinite() && snapshot.saturation >= 0f) { "Invalid saturation" }
+        require(snapshot.exhaustion.isFinite() && snapshot.exhaustion >= 0f) { "Invalid exhaustion" }
+        require(snapshot.level >= 0 && snapshot.totalExperience >= 0) { "Invalid experience" }
+        require(snapshot.experience.isFinite() && snapshot.experience in 0f..1f) { "Invalid experience progress" }
+        require(snapshot.fallDistance.isFinite()) { "Invalid fall distance" }
+        require(snapshot.absorptionAmount.isFinite() && snapshot.absorptionAmount >= 0.0) { "Invalid absorption" }
+        require(listOf(snapshot.velocity.x, snapshot.velocity.y, snapshot.velocity.z).all(Double::isFinite)) {
+            "Snapshot velocity is not finite"
+        }
+        require(snapshot.potionEffects.size <= MAX_POTION_EFFECTS) { "Too many potion effects in snapshot" }
+    }
 
     private fun DataInputStream.readItemArray(expectedSize: Int): Array<ItemStack?> {
         val items = ItemStack.deserializeItemsFromBytes(readBlob()).map { it.takeUnless(ItemStack::isEmpty) }.toTypedArray()

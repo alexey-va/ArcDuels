@@ -33,7 +33,7 @@ data class CrossServerChallengeMessage(
 ) {
     init {
         require(messageId.matches(Regex("[A-Za-z0-9:._-]{1,160}"))) { "Unsafe challenge message id" }
-        require(challengerName.matches(USERNAME_PATTERN) && targetName.matches(USERNAME_PATTERN)) { "Unsafe challenge player name" }
+        require(isSafeNetworkPlayerName(challengerName) && isSafeNetworkPlayerName(targetName)) { "Unsafe challenge player name" }
         when (type) {
             ChallengeMessageType.OFFER -> {
                 require(sourceServer == challengerCurrentServer) { "A challenge offer must come from the current challenger server" }
@@ -59,10 +59,6 @@ data class CrossServerChallengeMessage(
             }
         }
     }
-
-    private companion object {
-        val USERNAME_PATTERN = Regex("[A-Za-z0-9_]{1,16}")
-    }
 }
 
 class CrossServerChallengeBus(
@@ -83,8 +79,8 @@ class CrossServerChallengeBus(
 
     fun publish(message: CrossServerChallengeMessage) {
         require(message.sourceServer == localServer) { "Cannot publish a challenge message owned by another server" }
-        if (markFirstDelivery(message.sourceServer, message.messageId)) deliver(message)
         redis.publish(CHANNEL, codec.encode(message))
+        if (markFirstDelivery(message.sourceServer, message.messageId)) deliver(message)
     }
 
     fun subscribe(listener: (CrossServerChallengeMessage) -> Unit): AutoCloseable {

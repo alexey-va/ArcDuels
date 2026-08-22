@@ -10,7 +10,7 @@ class ChallengeRegistry(
 ) {
     private val lock = Any()
     private val challenges = ConcurrentHashMap<ChallengeId, DuelChallenge>()
-    private val pendingByPair = ConcurrentHashMap<Set<PlayerId>, ChallengeId>()
+    private val pendingByPlayer = ConcurrentHashMap<PlayerId, ChallengeId>()
 
     fun create(
         challenger: PlayerId,
@@ -20,11 +20,11 @@ class ChallengeRegistry(
     ): DuelChallenge =
         synchronized(lock) {
             expirePending()
-            val pair = setOf(challenger, target)
-            check(pendingByPair[pair] == null) { "These players already have a pending challenge" }
+            check(pendingByPlayer[challenger] == null) { "The challenger already has a pending challenge" }
+            check(pendingByPlayer[target] == null) { "The target already has a pending challenge" }
             DuelChallenge.create(challenger, target, rules, clock.instant(), ttl, arenaSelection).also { challenge ->
                 challenges[challenge.id] = challenge
-                pendingByPair[pair] = challenge.id
+                claimPendingPlayers(challenge)
             }
         }
 
@@ -43,10 +43,10 @@ class ChallengeRegistry(
                 require(existing == challenge) { "Challenge id is already registered with different data" }
                 return@synchronized existing
             }
-            val pair = setOf(challenge.challenger, challenge.target)
             if (challenge.status == ChallengeStatus.PENDING) {
-                check(pendingByPair[pair] == null) { "These players already have a pending challenge" }
-                pendingByPair[pair] = challenge.id
+                check(pendingByPlayer[challenge.challenger] == null) { "The challenger already has a pending challenge" }
+                check(pendingByPlayer[challenge.target] == null) { "The target already has a pending challenge" }
+                claimPendingPlayers(challenge)
             }
             challenges[challenge.id] = challenge
             pruneTerminalChallenges()
@@ -75,7 +75,7 @@ class ChallengeRegistry(
                 }
             }
             challenges[challenge.id] = challenge
-            pendingByPair.remove(setOf(challenge.challenger, challenge.target), challenge.id)
+            releasePendingPlayers(challenge)
             pruneTerminalChallenges()
             challenge
         }
@@ -97,7 +97,7 @@ class ChallengeRegistry(
             }
             val resolved = challenge.resolve(status, clock.instant())
             challenges[id] = resolved
-            pendingByPair.remove(setOf(challenge.challenger, challenge.target), id)
+            releasePendingPlayers(challenge)
             pruneTerminalChallenges()
             resolved
         }
@@ -118,7 +118,7 @@ class ChallengeRegistry(
             }
             val expired = challenge.resolve(ChallengeStatus.EXPIRED, clock.instant())
             challenges[id] = expired
-            pendingByPair.remove(setOf(challenge.challenger, challenge.target), id)
+            releasePendingPlayers(challenge)
             pruneTerminalChallenges()
             expired
         }
@@ -137,7 +137,7 @@ class ChallengeRegistry(
         val now = clock.instant()
         challenges.replaceAll { _, challenge ->
             if (challenge.status == ChallengeStatus.PENDING && !now.isBefore(challenge.expiresAt)) {
-                pendingByPair.remove(setOf(challenge.challenger, challenge.target), challenge.id)
+                releasePendingPlayers(challenge)
                 challenge.resolve(ChallengeStatus.EXPIRED, now)
             } else {
                 challenge
@@ -152,6 +152,16 @@ class ChallengeRegistry(
         terminal.sortedBy(DuelChallenge::createdAt)
             .take(terminal.size - MAX_RETAINED_TERMINAL)
             .forEach { challenges.remove(it.id, it) }
+    }
+
+    private fun claimPendingPlayers(challenge: DuelChallenge) {
+        pendingByPlayer[challenge.challenger] = challenge.id
+        pendingByPlayer[challenge.target] = challenge.id
+    }
+
+    private fun releasePendingPlayers(challenge: DuelChallenge) {
+        pendingByPlayer.remove(challenge.challenger, challenge.id)
+        pendingByPlayer.remove(challenge.target, challenge.id)
     }
 
     private companion object {

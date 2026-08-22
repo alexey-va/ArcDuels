@@ -44,7 +44,7 @@ class NetworkPlayerDirectory(
 
     fun players(): List<NetworkPlayer> {
         val current = snapshot
-        if (clock.millis() - current.receivedAtMillis >= staleAfter.toMillis()) return emptyList()
+        if (!isFreshObservation(clock.millis(), current.receivedAtMillis, staleAfter.toMillis())) return emptyList()
         return current.players
     }
 
@@ -78,7 +78,7 @@ class NetworkPlayerDirectory(
             if (wire.server.isBlank()) return@mapNotNull null
             val uuid = UUID.fromString(wire.uuid)
             require(seen.add(uuid)) { "Duplicate player UUID in proxy snapshot" }
-            require(wire.username.matches(USERNAME_PATTERN)) { "Unsafe player name in proxy snapshot" }
+            require(isSafeNetworkPlayerName(wire.username)) { "Unsafe player name in proxy snapshot" }
             require(wire.joinTime >= 0L) { "Negative player join time in proxy snapshot" }
             NetworkPlayer(uuid, wire.username, ServerId(wire.server), wire.joinTime)
         }
@@ -100,6 +100,5 @@ class NetworkPlayerDirectory(
         const val CHANNEL = "arc.proxy_player_list"
         private const val MAX_PLAYERS = 10_000
         private const val MAX_SNAPSHOT_CHARACTERS = 2_000_000
-        private val USERNAME_PATTERN = Regex("[A-Za-z0-9_]{1,16}")
     }
 }

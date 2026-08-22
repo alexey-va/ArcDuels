@@ -10,7 +10,8 @@ ArcDuels separates fast deterministic checks from disposable-service tests.
 
 The suite covers:
 
-- challenge authorization, expiry, duplicate pairs, and bounded TTL;
+- challenge authorization, expiry, single-pending-challenge player ownership,
+  and bounded TTL;
 - every match transition, BO1/BO3 scoring, forfeits, objectives, and cleanup;
 - exact KOTH capture thresholds, contested-progress pauses, boxing totals,
   combo resets, per-arena objective and loadout selection, and invalid
@@ -21,16 +22,19 @@ The suite covers:
   head-to-head aggregation, exact-arena rematches, and five-slot preset CRUD;
 - long result sequences, rating bounds, streaks, revisions, and leaderboards;
 - Redis event and challenge codec validation, authenticated origins, listener
-  isolation, dedupe, source collisions, player-snapshot TTL expiry, blank
+  isolation, publish-before-local fail-closed behavior, dedupe, source collisions,
+  Floodgate-prefixed names, wall-clock rollback rejection, player-snapshot TTL expiry, blank
   backend handling, schema-version rejection, dynamic objective/loadout-compatible
   arena-node selection, exact server/arena pinning, arena-lobby rematches with
   distinct current and recovery-origin servers, and no-fallback FIFO reservation;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
+  finite snapshot encoding, queued network-reservation cleanup,
   arena and kit validation, explicit sync-provider detection, origin-before-transfer
   single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
   modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization,
   server-authoritative countdown anchoring and pre-countdown teleport stabilization,
-  WorldGuard participant-only PvP, precursor-interaction and tracked-fluid overrides, immutable return routing, command
+  WorldGuard participant-only PvP, precursor-interaction and tracked fluid/fire/reaction overrides,
+  stale asynchronous-menu suppression, immutable return routing, command
   bypass behavior, damage-free celebration entities, default-kit presence,
   player-facing network server names, BO1 boss bars without a meaningless
   `0:0`, bounded graceful-shutdown retention draining that preserves timed-out

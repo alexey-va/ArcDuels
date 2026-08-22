@@ -14,6 +14,10 @@ import org.bukkit.entity.Player
 import org.bukkit.event.Event
 import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockFromToEvent
+import org.bukkit.event.block.BlockBurnEvent
+import org.bukkit.event.block.BlockFormEvent
+import org.bukkit.event.block.BlockIgniteEvent
+import org.bukkit.event.block.BlockSpreadEvent
 import org.bukkit.event.player.PlayerBucketEmptyEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.inventory.ItemStack
@@ -98,6 +102,42 @@ class WorldGuardDuelListenerTest : StringSpec({
         DuelFluidListener(sessions, overrideWorldGuard = true).onFluidFlow(event)
 
         verify(exactly = 1) { event.isCancelled = true }
+    }
+
+    "tracked lava and fluid reactions are admitted for rollback despite WorldGuard" {
+        val source = mockk<Block>()
+        val affected = mockk<Block>()
+        every { source.type } returns Material.FIRE
+        val sessions = mockk<DuelSessionManager>()
+        every { sessions.trackFluidSideEffect(source, affected) } returns true
+        every { sessions.trackFluidSideEffect(null, affected) } returns true
+        val listener = DuelFluidListener(sessions, overrideWorldGuard = true)
+        val form = mockk<BlockFormEvent>(relaxed = true)
+        every { form.block } returns affected
+        every { form.isCancelled } returns true
+        val ignite = mockk<BlockIgniteEvent>(relaxed = true)
+        every { ignite.cause } returns BlockIgniteEvent.IgniteCause.LAVA
+        every { ignite.ignitingBlock } returns source
+        every { ignite.block } returns affected
+        every { ignite.isCancelled } returns true
+        val spread = mockk<BlockSpreadEvent>(relaxed = true)
+        every { spread.source } returns source
+        every { spread.block } returns affected
+        every { spread.isCancelled } returns true
+        val burn = mockk<BlockBurnEvent>(relaxed = true)
+        every { burn.ignitingBlock } returns source
+        every { burn.block } returns affected
+        every { burn.isCancelled } returns true
+
+        listener.onFluidForm(form)
+        listener.onLavaIgnite(ignite)
+        listener.onFluidFireSpread(spread)
+        listener.onFluidBurn(burn)
+
+        verify(exactly = 1) { form.isCancelled = false }
+        verify(exactly = 1) { ignite.isCancelled = false }
+        verify(exactly = 1) { spread.isCancelled = false }
+        verify(exactly = 1) { burn.isCancelled = false }
     }
 
     "WorldGuard denial is overridden only for participants of the same active arena match" {

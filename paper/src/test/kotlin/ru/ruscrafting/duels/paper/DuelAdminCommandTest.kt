@@ -107,7 +107,7 @@ class DuelAdminCommandTest : StringSpec({
 
         admin.execute(player, listOf("debug", "server"))
         plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe
-            "ARCDUELS_DEBUG kind=server version=0.8.2 server=duels-1 arenas=1 active=0 queue=0 recoveries=0"
+            "ARCDUELS_DEBUG kind=server version=${plugin.pluginMeta.version} server=duels-1 arenas=1 active=0 queue=0 recoveries=0"
 
         admin.execute(player, listOf("debug", "player"))
         plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe

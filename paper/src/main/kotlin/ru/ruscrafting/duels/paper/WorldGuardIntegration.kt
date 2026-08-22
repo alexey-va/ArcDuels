@@ -15,6 +15,10 @@ import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockFromToEvent
+import org.bukkit.event.block.BlockBurnEvent
+import org.bukkit.event.block.BlockFormEvent
+import org.bukkit.event.block.BlockIgniteEvent
+import org.bukkit.event.block.BlockSpreadEvent
 import org.bukkit.event.player.PlayerBucketEmptyEvent
 import org.bukkit.event.player.PlayerBucketFillEvent
 import org.bukkit.event.player.PlayerInteractEvent
@@ -124,6 +128,40 @@ internal class DuelFluidListener(
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onFluidFlow(event: BlockFromToEvent) {
         val allowed = sessions.trackFluidFlow(event.block, event.toBlock) ?: return
+        if (!allowed) {
+            event.isCancelled = true
+        } else if (!event.isCancelled || overrideWorldGuard) {
+            event.isCancelled = false
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onFluidForm(event: BlockFormEvent) {
+        applySideEffectDecision(event, sessions.trackFluidSideEffect(null, event.block))
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onLavaIgnite(event: BlockIgniteEvent) {
+        if (event.cause != BlockIgniteEvent.IgniteCause.LAVA) return
+        applySideEffectDecision(event, sessions.trackFluidSideEffect(event.ignitingBlock, event.block))
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onFluidFireSpread(event: BlockSpreadEvent) {
+        if (event.source.type != Material.FIRE && event.source.type != Material.SOUL_FIRE) return
+        applySideEffectDecision(event, sessions.trackFluidSideEffect(event.source, event.block))
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onFluidBurn(event: BlockBurnEvent) {
+        applySideEffectDecision(event, sessions.trackFluidSideEffect(event.ignitingBlock, event.block))
+    }
+
+    private fun applySideEffectDecision(
+        event: org.bukkit.event.Cancellable,
+        allowed: Boolean?,
+    ) {
+        if (allowed == null) return
         if (!allowed) {
             event.isCancelled = true
         } else if (!event.isCancelled || overrideWorldGuard) {

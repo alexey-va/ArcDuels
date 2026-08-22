@@ -12,6 +12,7 @@ import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.inventory.InventoryCloseEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.InventoryHolder
@@ -37,6 +38,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 class DuelGuiService internal constructor(
     private val plugin: JavaPlugin,
@@ -53,6 +55,7 @@ class DuelGuiService internal constructor(
     private val arenaChoices: (DuelRules) -> List<ArenaChoice> = { emptyList() },
 ) : Listener {
     private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
+    private val asyncMenuRequests = LatestRequestTracker()
     private val guiItems = GuiItemCatalog.load(plugin)
 
     fun openChallenge(player: Player, target: DuelTarget) = openObjectives(player, target)
@@ -281,10 +284,11 @@ class DuelGuiService internal constructor(
     }
 
     fun openLeaderboard(player: Player, requestedPage: Int = 0) {
+        val request = asyncMenuRequests.begin(player.uniqueId)
         player.sendActionBar(locales.component(player, "menu.leaderboard.loading"))
         statistics.leaderboard(MAX_LEADERBOARD_ENTRIES).whenComplete { entries, failure ->
             runSync {
-                if (!player.isOnline) return@runSync
+                if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
                     player.sendMessage(locales.notice(player, "error.leaderboard"))
                     return@runSync
@@ -320,11 +324,12 @@ class DuelGuiService internal constructor(
     }
 
     fun openHistory(player: Player, requestedPage: Int = 0) {
+        val request = asyncMenuRequests.begin(player.uniqueId)
         player.sendActionBar(locales.component(player, "menu.history.loading"))
         val playerId = PlayerId(player.uniqueId)
         statistics.recentMatches(playerId, MAX_HISTORY_ENTRIES).whenComplete { matches, failure ->
             runSync {
-                if (!player.isOnline) return@runSync
+                if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
                     player.sendMessage(locales.notice(player, "error.history"))
                     return@runSync
@@ -359,12 +364,13 @@ class DuelGuiService internal constructor(
         recorded: RecordedMatch,
         historyPage: Int,
     ) {
+        val request = asyncMenuRequests.begin(player.uniqueId)
         val playerId = PlayerId(player.uniqueId)
         val opponentId = recorded.opponentOf(playerId)
         val opponentName = recorded.opponentNameOf(playerId) ?: targets.find(opponentId.value)?.name ?: opponentId.toString().take(8)
         statistics.headToHead(playerId, opponentId).whenComplete { comparison, failure ->
             runSync {
-                if (!player.isOnline) return@runSync
+                if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
                     player.sendMessage(locales.notice(player, "error.history"))
                     return@runSync
@@ -426,10 +432,11 @@ class DuelGuiService internal constructor(
         player: Player,
         draft: DuelDraft,
     ) {
+        val request = asyncMenuRequests.begin(player.uniqueId)
         player.sendActionBar(locales.component(player, "menu.presets.loading"))
         presets.presets(PlayerId(player.uniqueId)).whenComplete { saved, failure ->
             runSync {
-                if (!player.isOnline) return@runSync
+                if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
                     player.sendMessage(locales.notice(player, "error.presets"))
                     return@runSync
@@ -786,6 +793,12 @@ class DuelGuiService internal constructor(
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         pendingArenaNames.remove(event.player.uniqueId)
+        asyncMenuRequests.invalidate(event.player.uniqueId)
+    }
+
+    @EventHandler
+    fun onClose(event: InventoryCloseEvent) {
+        if (event.inventory.holder is MenuHolder) asyncMenuRequests.invalidate(event.player.uniqueId)
     }
 
     private fun promptArenaName(player: Player) {
@@ -1011,10 +1024,11 @@ class DuelGuiService internal constructor(
         draft: DuelDraft,
         slot: Int,
     ) {
+        val request = asyncMenuRequests.begin(player.uniqueId)
         val preset = DuelPreset(PlayerId(player.uniqueId), slot, draft.rules(), draft.arenaSelection, Instant.now())
         presets.savePreset(preset).whenComplete { _, failure ->
             runSync {
-                if (!player.isOnline) return@runSync
+                if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
                     player.sendMessage(locales.notice(player, "error.presets"))
                 } else {
@@ -1030,9 +1044,10 @@ class DuelGuiService internal constructor(
         draft: DuelDraft,
         slot: Int,
     ) {
+        val request = asyncMenuRequests.begin(player.uniqueId)
         presets.deletePreset(PlayerId(player.uniqueId), slot).whenComplete { _, failure ->
             runSync {
-                if (!player.isOnline) return@runSync
+                if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
                     player.sendMessage(locales.notice(player, "error.presets"))
                 } else {
@@ -1256,6 +1271,19 @@ class DuelGuiService internal constructor(
                 29 to DuelObjectiveType.BOXING,
                 33 to DuelObjectiveType.COMBO,
             )
+    }
+}
+
+internal class LatestRequestTracker {
+    private val sequence = AtomicLong()
+    private val current = ConcurrentHashMap<UUID, Long>()
+
+    fun begin(playerId: UUID): Long = sequence.incrementAndGet().also { current[playerId] = it }
+
+    fun isCurrent(playerId: UUID, request: Long): Boolean = current[playerId] == request
+
+    fun invalidate(playerId: UUID) {
+        current.remove(playerId)
     }
 }
 

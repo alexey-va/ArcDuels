@@ -19,6 +19,10 @@ object DuelLog {
         val loggingFile = plugin.dataFolder.resolve("logging.yml")
         if (!loggingFile.isFile) plugin.saveResource("logging.yml", false)
         val config = ConfigManager.of(plugin.dataFolder.toPath(), "logging.yml")
+        // ArcDuels does not install a dedicated Log4j/Loki appender. Emitting
+        // through Log4j as well as Paper's console therefore writes every
+        // structured line twice under two logger names.
+        ArcLogging.disableStructuredEmit = true
         ArcLogging.install(
             platform = PaperLoggingPlatform(brandTag = "ArcDuels", julLoggerName = "ArcDuels"),
             configSource = LoggingConfigSource { config },

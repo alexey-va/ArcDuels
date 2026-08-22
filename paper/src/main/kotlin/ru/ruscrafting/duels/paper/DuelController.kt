@@ -146,7 +146,8 @@ class DuelController(
                         challenger.sendMessage(locales.notice(challenger, "controller.network-unavailable"))
                         return@onSuccess
                     }
-                    bus.publish(
+                    val published = publishMessage(
+                        bus,
                         CrossServerChallengeMessage(
                             messageId = "${challenge.id}:offer",
                             sourceServer = localServer,
@@ -162,6 +163,14 @@ class DuelController(
                             recoveryMatchId = context.recoveryMatchId,
                         ),
                     )
+                    if (!published) {
+                        runCatching {
+                            challenges.resolve(challenge.id, challenge.challenger, ChallengeStatus.CANCELLED)
+                        }
+                        contexts.remove(challenge.id)
+                        challenger.sendMessage(locales.notice(challenger, "controller.network-unavailable"))
+                        return@onSuccess
+                    }
                 }
                 sendPlayerNotice(challenger, target.uniqueId, target.name, "controller.sent", challenge.id)
                 scheduleChallengeExpiry(challenge)
@@ -222,7 +231,9 @@ class DuelController(
         if (shouldStartDirectLocalMatch(bothLocal, continuesFromArenaLobby, matchServer, localServer)) {
             scheduleAcceptedMatch(accepted, localServer)
         } else {
-            publishResolution(accepted, requireNotNull(matchServer))
+            if (!publishResolution(accepted, requireNotNull(matchServer))) {
+                participants(accepted).forEach { it.sendMessage(locales.notice(it, "controller.network-unavailable")) }
+            }
         }
     }
 
@@ -240,7 +251,9 @@ class DuelController(
                 } else if (participants(resolved).size == 2 || challengeBus == null) {
                     participants(resolved).forEach { it.sendMessage(locales.notice(it, "controller.denied")) }
                 } else {
-                    publishResolution(resolved, null)
+                    if (!publishResolution(resolved, null)) {
+                        player.sendMessage(locales.notice(player, "controller.network-unavailable"))
+                    }
                 }
             }
             .onFailure { player.sendMessage(locales.notice(player, "controller.failed")) }
@@ -257,7 +270,9 @@ class DuelController(
                 } else if (participants(resolved).size == 2 || challengeBus == null) {
                     participants(resolved).forEach { it.sendMessage(locales.notice(it, "controller.cancelled")) }
                 } else {
-                    publishResolution(resolved, null)
+                    if (!publishResolution(resolved, null)) {
+                        player.sendMessage(locales.notice(player, "controller.network-unavailable"))
+                    }
                 }
             }
             .onFailure { player.sendMessage(locales.notice(player, "controller.failed")) }
@@ -484,7 +499,9 @@ class DuelController(
             ),
         )
         if (sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
-            publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)
+            if (!publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)) {
+                target.sendMessage(locales.notice(target, "controller.network-unavailable"))
+            }
             return
         }
         runCatching { challenges.register(message.challenge) }
@@ -494,7 +511,9 @@ class DuelController(
             }
             .onFailure {
                 plugin.logger.warning("Rejected network challenge ${message.challenge.id}: ${it.message}")
-                publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)
+                if (!publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)) {
+                    target.sendMessage(locales.notice(target, "controller.network-unavailable"))
+                }
             }
     }
 
@@ -533,8 +552,8 @@ class DuelController(
         }
     }
 
-    private fun publishResolution(challenge: DuelChallenge, matchServer: ServerId?) {
-        val bus = challengeBus ?: return
+    private fun publishResolution(challenge: DuelChallenge, matchServer: ServerId?): Boolean {
+        val bus = challengeBus ?: return false
         val existing = contexts[challenge.id]
         val observedChallenger = targets.find(challenge.challenger.value)?.server
         val observedTarget = targets.find(challenge.target.value)?.server
@@ -557,7 +576,8 @@ class DuelController(
                 expiresAtMillis = challenge.expiresAt.toEpochMilli(),
                 recoveryMatchId = existing?.recoveryMatchId,
             )
-        bus.publish(
+        return publishMessage(
+            bus,
             CrossServerChallengeMessage(
                 messageId = "${challenge.id}:${challenge.status.name.lowercase()}:${localServer.value}",
                 sourceServer = localServer,
@@ -574,6 +594,20 @@ class DuelController(
             ),
         )
     }
+
+    private fun publishMessage(
+        bus: CrossServerChallengeBus,
+        message: CrossServerChallengeMessage,
+    ): Boolean =
+        runCatching {
+            bus.publish(message)
+            true
+        }.getOrElse { failure ->
+            plugin.logger.warning(
+                "Could not publish ArcDuels challenge ${message.messageId}: ${unwrap(failure).javaClass.simpleName}: ${unwrap(failure).message}",
+            )
+            false
+        }
 
     private fun acceptNetworkMatch(message: CrossServerChallengeMessage) {
         val host = requireNotNull(message.matchServer)
@@ -1042,8 +1076,8 @@ class DuelController(
     private fun announceExpired(challenge: DuelChallenge, broadcast: Boolean = true) {
         if (challengeBus == null || !broadcast) {
             notifyExpiredParticipants(challenge)
-        } else {
-            publishResolution(challenge, null)
+        } else if (!publishResolution(challenge, null)) {
+            notifyExpiredParticipants(challenge)
         }
     }
 

@@ -38,17 +38,26 @@ score, completion reason, and rating results. History, head-to-head aggregation,
 exact rematches, and per-player rule presets are read models over those durable
 rows; none participates in authoritative match transitions.
 
-Redis is presentation-only. Startup failure closes both bus and client and
-falls back to local operation. Event deduplication is scoped by source server,
-bounded in size, and expires after one hour.
+Redis is a non-durable network coordination layer, never the source of truth.
+Startup failure closes both bus and client and falls back to local operation. A
+challenge message is delivered locally only after Redis accepted its publish;
+a synchronous publication failure therefore cannot advance one node by itself.
+Event deduplication is scoped by source server, bounded in size, and expires
+after one hour. Heartbeats and proxy player snapshots fail closed after a wall
+clock rollback, and the player wire format accepts both Java names and the
+network's configured dot-prefixed Floodgate names.
 
 The arena allocator queues accepted pairs FIFO. Per-arena loadout policies are
 evaluated together with objective compatibility locally and in Redis routing;
 they do not depend on server names. Redis advertises exact arena identities, so
 automatic routing can balance live capacity while a player-selected arena stays
-pinned to its server and its own FIFO reservation. The coordinator owns both
-players while their request is queued, so racing challenges cannot allocate the
-same participant twice. For a cross-server challenge, each origin Paper node
+pinned to its server and its own FIFO reservation. The challenge registry permits
+only one pending challenge per player, and the coordinator owns both players
+while an accepted request is queued, so racing offers and reservations cannot
+allocate the same participant twice. Local and network matches use the challenge
+UUID as their durable match id. A failed network preparation cancels a still-queued
+arena request or releases an already completed reservation immediately. For a
+cross-server challenge, each origin Paper node
 captures and commits its own participant before allowing proxy transfer. The
 arena host verifies that both origin rows have the challenge-derived match id
 and immutable origin server id before it mutates either player. Same-server
@@ -95,5 +104,6 @@ Both require the controlled boxing kit and cannot deal health damage. Objectives
 cannot mutate statistics directly.
 
 The Paper adapter enforces a transient 20 HP ceiling only for `KIT` matches and
-revalidates it while the round is live. Arena-owned fluid changes are tracked as
+revalidates it while the round is live. Arena-owned fluid changes, water/lava
+block reactions, lava ignition, fire spread, and burned blocks are tracked as
 original block states and restored before another round or shutdown.

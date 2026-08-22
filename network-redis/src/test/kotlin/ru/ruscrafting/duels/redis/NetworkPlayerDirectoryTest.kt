@@ -70,4 +70,35 @@ class NetworkPlayerDirectoryTest : StringSpec({
         directory.players().map(NetworkPlayer::username) shouldContainExactly listOf("Ready")
         directory.close()
     }
+
+    "accepts the configured Floodgate dot prefix without rejecting the whole snapshot" {
+        val redis = InMemoryRedis(ServerIdentity { "spawn" })
+        val directory = NetworkPlayerDirectory(redis, clock = clock)
+        val bedrock = UUID.randomUUID()
+        val java = UUID.randomUUID()
+        redis.simulateExternalMessage(
+            NetworkPlayerDirectory.CHANNEL,
+            """[{"username":".Bedrock_User","server":"spawn","uuid":"$bedrock","joinTime":1},{"username":"JavaUser","server":"survival","uuid":"$java","joinTime":2}]""",
+            "proxy",
+        )
+
+        directory.players().map(NetworkPlayer::username) shouldContainExactly listOf(".Bedrock_User", "JavaUser")
+        directory.close()
+    }
+
+    "a backwards wall-clock jump fails closed instead of keeping a stale proxy snapshot" {
+        val redis = InMemoryRedis(ServerIdentity { "spawn" })
+        val directory = NetworkPlayerDirectory(redis, clock = clock)
+        val playerId = UUID.randomUUID()
+        redis.simulateExternalMessage(
+            NetworkPlayerDirectory.CHANNEL,
+            """[{"username":"Alice","server":"spawn","uuid":"$playerId","joinTime":1}]""",
+            "proxy",
+        )
+
+        now = now.minusSeconds(1)
+
+        directory.players() shouldBe emptyList()
+        directory.close()
+    }
 })

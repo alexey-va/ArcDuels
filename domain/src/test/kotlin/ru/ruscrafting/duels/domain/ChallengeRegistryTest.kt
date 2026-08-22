@@ -135,6 +135,24 @@ class ChallengeRegistryTest : StringSpec({
         registry.create(second, first, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
     }
 
+    "one player cannot participate in two pending challenges" {
+        val registry = ChallengeRegistry(clock)
+        val third = PlayerId(UUID.randomUUID())
+        val fourth = PlayerId(UUID.randomUUID())
+        val pending = registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+
+        shouldThrow<IllegalStateException> {
+            registry.create(first, third, DuelRules(DuelMode.OWN_INVENTORY))
+        }
+        shouldThrow<IllegalStateException> {
+            registry.create(third, second, DuelRules(DuelMode.OWN_INVENTORY))
+        }
+
+        registry.resolve(pending.id, second, ChallengeStatus.DENIED)
+        registry.create(first, third, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
+        registry.create(second, fourth, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
+    }
+
     "challenge TTL is bounded" {
         shouldThrow<IllegalArgumentException> {
             DuelChallenge.create(first, second, DuelRules(DuelMode.OWN_INVENTORY), clock.instant(), Duration.ZERO)
