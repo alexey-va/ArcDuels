@@ -287,9 +287,9 @@ controller:
     <actions>
   result-win: '<#2bba43>Победа</#2bba43> <#8c8c8c>над</#8c8c8c> <player>'
   result-loss: '<#c42323>Поражение</#c42323> <#8c8c8c>от</#8c8c8c> <player>'
-  rematch-action: '<#92bed8>▶ Предложить реванш</#92bed8>'
+  rematch-action: '<#666666>●</#666666> <#92bed8>Предложить реванш</#92bed8>'
   rematch-hover: '<#8c8c8c>Те же правила и арена доступны <seconds> с.</#8c8c8c>'
-  return-action: '<#92bed8>▶ Вернуться на <server></#92bed8>'
+  return-action: '<#666666>●</#666666> <#92bed8>Вернуться на <server></#92bed8>'
   return-hover: '<#8c8c8c>Вернуться на исходный сервер и проверить вещи</#8c8c8c>'
   no-return-offer: '<#8c8c8c>Сейчас нет ожидающего возврата после дуэли.</#8c8c8c>'
   network-timeout: '<#c42323>Не удалось вовремя подготовить обоих игроков к дуэли.</#c42323>'
@@ -366,11 +366,11 @@ controller:
   deny-hover: '<#c42323>Отклонить вызов</#c42323>'
 
 session:
-  boundary-warning-title: '<#ffb347>Вы покидаете арену</#ffb347>'
-  boundary-warning-subtitle: '<#fff4d6>Вернитесь назад</#fff4d6>'
-  boundary-warning-sumo-subtitle: '<#fff4d6>За границей — поражение</#fff4d6>'
-  boundary-left-title: '<#c42323>Вы покинули арену</#c42323>'
-  boundary-left-subtitle: '<#ffb347>Раунд проигран</#ffb347>'
+  boundary-warning-title: '<#ffb347>Граница арены</#ffb347>'
+  boundary-warning-subtitle: '<#fff4d6>Впереди красный барьер</#fff4d6>'
+  boundary-warning-sumo-subtitle: '<#fff4d6>За границу пройти нельзя</#fff4d6>'
+  boundary-left-title: '<#c42323>Стойте</#c42323>'
+  boundary-left-subtitle: '<#ffb347>Вы достигли границы арены</#ffb347>'
   queued: '<yellow>Все совместимые арены заняты. Ваша пара в очереди: <white>#<position></white>.</yellow>'
   recovery-check-retry: '<red>Проверка восстановления временно недоступна.</red> <yellow>Состояние надёжно заблокировано; ArcDuels повторит попытку автоматически.</yellow>'
   remote-recovery: '<gray>Незавершённое восстановление находится на сервере <white><server></white>. Перемещаю тебя туда…</gray>'

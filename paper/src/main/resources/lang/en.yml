@@ -287,9 +287,9 @@ controller:
     <actions>
   result-win: '<#2bba43>Victory</#2bba43> <gray>over</gray> <player>'
   result-loss: '<#c42323>Defeat</#c42323> <gray>to</gray> <player>'
-  rematch-action: '<#92bed8>▶ Request rematch</#92bed8>'
+  rematch-action: '<#666666>●</#666666> <#92bed8>Request rematch</#92bed8>'
   rematch-hover: '<#8c8c8c>The same rules and arena remain available for <seconds>s.</#8c8c8c>'
-  return-action: '<#92bed8>▶ Return to <server></#92bed8>'
+  return-action: '<#666666>●</#666666> <#92bed8>Return to <server></#92bed8>'
   return-hover: '<gray>Return to your origin server and verify your inventory</gray>'
   no-return-offer: '<gray>You have no pending duel return.</gray>'
   network-timeout: '<red>Both players could not be prepared for the duel in time.</red>'
@@ -367,11 +367,11 @@ controller:
   deny-hover: '<red>Decline the challenge</red>'
 
 session:
-  boundary-warning-title: '<#ffb347>Leaving the arena</#ffb347>'
-  boundary-warning-subtitle: '<#fff4d6>Turn back</#fff4d6>'
-  boundary-warning-sumo-subtitle: '<#fff4d6>Crossing the edge loses the round</#fff4d6>'
-  boundary-left-title: '<#c42323>Arena left</#c42323>'
-  boundary-left-subtitle: '<#ffb347>Round lost</#ffb347>'
+  boundary-warning-title: '<#ffb347>Arena boundary</#ffb347>'
+  boundary-warning-subtitle: '<#fff4d6>Red barrier ahead</#fff4d6>'
+  boundary-warning-sumo-subtitle: '<#fff4d6>You cannot cross this boundary</#fff4d6>'
+  boundary-left-title: '<#c42323>Stop</#c42323>'
+  boundary-left-subtitle: '<#ffb347>You reached the arena boundary</#ffb347>'
   queued: '<yellow>All compatible arenas are busy. Your pair is queue position <white>#<position></white>.</yellow>'
   recovery-check-retry: '<red>The recovery check is temporarily unavailable.</red> <yellow>Your state is locked safely; ArcDuels will retry automatically.</yellow>'
   remote-recovery: '<gray>Your unfinished recovery belongs to server <white><server></white>. Moving you there…</gray>'

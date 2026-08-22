@@ -102,6 +102,12 @@ internal class DuelAdminCommand(
                 plugin.config.set("$path.enabled", false)
                 plugin.config.set("$path.$ARENA_LOADOUTS_PATH", ArenaLoadoutSelection.ALL.modes.map { it.name })
                 plugin.config.set("$path.$ARENA_OBJECTIVES_PATH", DuelObjectiveType.entries.map { it.name })
+                plugin.config.set("$path.bounds.min.x", player.location.x - DEFAULT_ARENA_HALF_SIZE)
+                plugin.config.set("$path.bounds.min.y", player.world.minHeight.toDouble())
+                plugin.config.set("$path.bounds.min.z", player.location.z - DEFAULT_ARENA_HALF_SIZE)
+                plugin.config.set("$path.bounds.max.x", player.location.x + DEFAULT_ARENA_HALF_SIZE)
+                plugin.config.set("$path.bounds.max.y", player.world.maxHeight.toDouble())
+                plugin.config.set("$path.bounds.max.z", player.location.z + DEFAULT_ARENA_HALF_SIZE)
                 plugin.saveConfig()
                 sender.sendMessage(message(sender, "admin.arena-created", LocaleService.text("arena", id.value)))
                 player.sendActionBar(message(player, "admin.arena-editing", LocaleService.text("arena", id.value)))
@@ -452,7 +458,7 @@ internal class DuelAdminCommand(
             "world" to arena.firstSpawn.world?.name,
             "min" to "${formatDecimal(arena.bounds.minX)},${formatDecimal(arena.bounds.minY)},${formatDecimal(arena.bounds.minZ)}",
             "max" to "${formatDecimal(arena.bounds.maxX)},${formatDecimal(arena.bounds.maxY)},${formatDecimal(arena.bounds.maxZ)}",
-            "warning_distance" to formatDecimal(plugin.config.getDouble("boundary-warning-distance", 5.0)),
+            "warning_distance" to formatDecimal(plugin.config.getDouble("boundary-warning-distance", 12.0)),
         )
     }
 
@@ -567,6 +573,7 @@ internal class DuelAdminCommand(
     ): List<String> = values.filter { it.startsWith(prefix, ignoreCase = true) }.sorted()
 
     private companion object {
+        const val DEFAULT_ARENA_HALF_SIZE = 100.0
         const val ADMIN_PERMISSION = "arcduels.admin"
     }
 }

@@ -152,13 +152,13 @@ class PaperArenaQueueTest : StringSpec({
         plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
     }
 
-    "enabled arenas cannot own overlapping physical space" {
+    "wide safety bounds may overlap when physical arenas keep players separated" {
         plugin.config.set("arenas.queue.hill.radius", 3.5)
         configureArena(plugin, "overlap", "queue-world")
 
-        val failure = shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        val catalog = PaperArenaCatalog.load(plugin)
 
-        failure.message shouldBe "Arena queue bounds overlap arena overlap"
+        catalog.size() shouldBe 2
     }
 })
 

@@ -16,7 +16,7 @@ countdown-seconds: 3
 teleport-stabilization-ticks: 3
 rematch-window-seconds: 180
 # Show a title before a player crosses a configured arena boundary.
-boundary-warning-distance: 5.0
+boundary-warning-distance: 12.0
 
 player-data-sync:
   # AUTO detects HuskSync. Use HUSKSYNC or NONE to declare the node contract
@@ -232,13 +232,13 @@ arenas:
     post-match-action: LOCAL_LOBBY
     bounds:
       min:
-        x: -15.0
-        y: 70.0
-        z: -15.0
+        x: -100.0
+        y: -64.0
+        z: -100.0
       max:
-        x: 15.0
-        y: 100.0
-        z: 15.0
+        x: 100.0
+        y: 320.0
+        z: 100.0
     # Required only for king-of-the-hill matches. Configure in game with
     # /duels admin arena sethill <id> [radius] [height].
     hill:

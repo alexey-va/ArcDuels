@@ -1,5 +1,8 @@
 package ru.ruscrafting.duels.paper
 
+import org.bukkit.Color
+import org.bukkit.Particle
+import org.bukkit.Sound
 import org.bukkit.entity.Player
 import org.bukkit.entity.Projectile
 import org.bukkit.entity.ThrownPotion
@@ -45,10 +48,11 @@ internal class DuelGameplayListener(
     private val locales: LocaleService,
     private val commandPolicy: DuelCommandPolicy = DuelCommandPolicy(),
     private val controller: DuelController? = null,
-    private val boundaryWarningDistance: Double = 5.0,
+    private val boundaryWarningDistance: Double = 12.0,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) : Listener {
     private val boundaryWarnings = ConcurrentHashMap<UUID, Long>()
+    private val boundaryParticles = ConcurrentHashMap<UUID, Long>()
 
     init {
         require(boundaryWarningDistance in 1.0..16.0) { "Boundary warning distance must be between 1 and 16 blocks" }
@@ -169,6 +173,7 @@ internal class DuelGameplayListener(
         val destination = event.to
         if (match == null) {
             boundaryWarnings.remove(event.player.uniqueId)
+            boundaryParticles.remove(event.player.uniqueId)
             if (sessions.isStateLocked(event.player) &&
                 (event.from.x != destination.x || event.from.y != destination.y || event.from.z != destination.z)
             ) {
@@ -191,20 +196,20 @@ internal class DuelGameplayListener(
             MatchState.ACTIVE -> {
                 if (!sessions.isInsideArena(event.player, destination)) {
                     event.to = event.from
-                    showBoundaryTitle(event.player, leftArena = true)
-                    sessions.handleBoundaryExit(event.player, destination)
+                    warnBoundary(event.player, event.from, reachedBoundary = true, movingCloser = true)
                 } else {
                     val distance = sessions.boundaryDistance(event.player, destination) ?: return
                     val previousDistance = sessions.boundaryDistance(event.player, event.from)
-                    if (distance <= boundaryWarningDistance && (previousDistance == null || distance < previousDistance)) {
-                        val now = nowMillis()
-                        val previous = boundaryWarnings[event.player.uniqueId]
-                        if (previous == null || now - previous >= BOUNDARY_WARNING_COOLDOWN_MILLIS) {
-                            boundaryWarnings[event.player.uniqueId] = now
-                            showBoundaryTitle(event.player, leftArena = false)
-                        }
-                    } else if (distance > boundaryWarningDistance + 1.0) {
+                    if (distance <= boundaryWarningDistance) {
+                        warnBoundary(
+                            event.player,
+                            destination,
+                            reachedBoundary = false,
+                            movingCloser = previousDistance == null || distance < previousDistance,
+                        )
+                    } else if (distance > boundaryWarningDistance + 2.0) {
                         boundaryWarnings.remove(event.player.uniqueId)
+                        boundaryParticles.remove(event.player.uniqueId)
                     }
                 }
             }
@@ -215,6 +220,7 @@ internal class DuelGameplayListener(
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onQuit(event: PlayerQuitEvent) {
         boundaryWarnings.remove(event.player.uniqueId)
+        boundaryParticles.remove(event.player.uniqueId)
         controller?.handleQuit(event.player)
         sessions.handleQuit(event.player)
     }
@@ -393,12 +399,35 @@ internal class DuelGameplayListener(
             !event.player.hasPermission(COMMAND_BYPASS_PERMISSION) &&
             !commandPolicy.isAllowed(event.message)
 
-    private fun showBoundaryTitle(player: Player, leftArena: Boolean) {
+    private fun warnBoundary(
+        player: Player,
+        location: org.bukkit.Location,
+        reachedBoundary: Boolean,
+        movingCloser: Boolean,
+    ) {
+        val now = nowMillis()
+        val previousParticles = boundaryParticles[player.uniqueId]
+        if (previousParticles == null || now - previousParticles >= BOUNDARY_PARTICLE_COOLDOWN_MILLIS) {
+            boundaryParticles[player.uniqueId] = now
+            sessions.boundaryWarningPoints(player, location).forEach { point ->
+                player.spawnParticle(Particle.DUST, point, 1, 0.0, 0.0, 0.0, 0.0, BOUNDARY_DUST)
+            }
+        }
+        if (!movingCloser) return
+        val previousWarning = boundaryWarnings[player.uniqueId]
+        if (previousWarning == null || now - previousWarning >= BOUNDARY_WARNING_COOLDOWN_MILLIS) {
+            boundaryWarnings[player.uniqueId] = now
+            showBoundaryTitle(player, reachedBoundary)
+            player.playSound(player.location, Sound.BLOCK_NOTE_BLOCK_BASS, 0.65f, if (reachedBoundary) 0.55f else 0.8f)
+        }
+    }
+
+    private fun showBoundaryTitle(player: Player, reachedBoundary: Boolean) {
         val sumo = sessions.isSumo(player)
-        val titleKey = if (leftArena) "session.boundary-left-title" else "session.boundary-warning-title"
+        val titleKey = if (reachedBoundary) "session.boundary-left-title" else "session.boundary-warning-title"
         val subtitleKey =
             when {
-                leftArena -> "session.boundary-left-subtitle"
+                reachedBoundary -> "session.boundary-left-subtitle"
                 sumo -> "session.boundary-warning-sumo-subtitle"
                 else -> "session.boundary-warning-subtitle"
             }
@@ -406,13 +435,15 @@ internal class DuelGameplayListener(
             Title.title(
                 locales.component(player, titleKey),
                 locales.component(player, subtitleKey),
-                Title.Times.times(Duration.ZERO, Duration.ofMillis(1_200), Duration.ofMillis(250)),
+                Title.Times.times(Duration.ZERO, Duration.ofMillis(1_800), Duration.ofMillis(250)),
             ),
         )
     }
 
     private companion object {
         const val COMMAND_BYPASS_PERMISSION = "arcduels.bypass"
-        const val BOUNDARY_WARNING_COOLDOWN_MILLIS = 3_000L
+        const val BOUNDARY_WARNING_COOLDOWN_MILLIS = 2_000L
+        const val BOUNDARY_PARTICLE_COOLDOWN_MILLIS = 250L
+        val BOUNDARY_DUST = Particle.DustOptions(Color.fromRGB(255, 48, 48), 1.25f)
     }
 }

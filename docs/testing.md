@@ -30,12 +30,13 @@ The suite covers:
   single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
   modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization,
   server-authoritative countdown anchoring and pre-countdown teleport stabilization,
-  WorldGuard participant-only PvP and tracked-fluid overrides, immutable return routing, command
+  WorldGuard participant-only PvP, precursor-interaction and tracked-fluid overrides, immutable return routing, command
   bypass behavior, damage-free celebration entities, default-kit presence,
   player-facing network server names, BO1 boss bars without a meaningless
   `0:0`, bounded graceful-shutdown retention draining that preserves timed-out
   active snapshots, direct arena-lobby rematch chains, per-arena post-match
-  overrides, boundary warnings, kit-only 20 HP isolation, combined result/rematch cards, contextual rule hover help,
+  overrides, non-lethal particle-wall boundary warnings, 200x200 arena defaults, kit-only 20 HP isolation,
+  combined result/rematch cards, contextual rule hover help,
   interactive player-name hover/click events, and strict
   Russian / English locale-key and MiniMessage parity.
 

@@ -54,10 +54,10 @@ class DuelGameplayListenerTest : StringSpec({
         DuelGameplayListener(sessions, mockk(relaxed = true), nowMillis = { 1_000L }).onMove(event)
 
         verify(exactly = 1) { player.showTitle(any<net.kyori.adventure.title.Title>()) }
-        verify(exactly = 0) { sessions.handleBoundaryExit(any(), any()) }
+        verify(exactly = 0) { sessions.handleElimination(any()) }
     }
 
-    "crossing the arena boundary names the loss and records the boundary exit" {
+    "crossing the arena boundary is blocked without awarding a win" {
         val player = mockk<Player>(relaxed = true)
         val playerId = PlayerId(UUID.randomUUID())
         every { player.uniqueId } returns playerId.value
@@ -85,7 +85,7 @@ class DuelGameplayListenerTest : StringSpec({
 
         verify(exactly = 1) { event.to = from }
         verify(exactly = 1) { player.showTitle(any<net.kyori.adventure.title.Title>()) }
-        verify(exactly = 1) { sessions.handleBoundaryExit(player, destination) }
+        verify(exactly = 0) { sessions.handleElimination(any()) }
     }
 
     "countdown movement is anchored to the arena spawn instead of a stale client position" {

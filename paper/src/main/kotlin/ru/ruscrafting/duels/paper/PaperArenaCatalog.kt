@@ -69,11 +69,68 @@ data class ArenaBounds(
         )
     }
 
+    fun horizontalBoundaryPoints(
+        location: Location,
+        halfSpan: Double = 6.0,
+    ): List<Location> {
+        val world = location.world ?: return emptyList()
+        if (world.uid != worldId || !contains(location)) return emptyList()
+        require(halfSpan in 1.0..16.0) { "Boundary particle half-span must be between 1 and 16 blocks" }
+
+        val edge =
+            listOf(
+                HorizontalEdge.MIN_X to location.x - minX,
+                HorizontalEdge.MAX_X to maxX - location.x,
+                HorizontalEdge.MIN_Z to location.z - minZ,
+                HorizontalEdge.MAX_Z to maxZ - location.z,
+            ).minBy { it.second }.first
+        val points = ArrayList<Location>()
+        val minY = maxOf(this.minY, location.y - 1.0)
+        val maxY = minOf(this.maxY, location.y + 3.0)
+        val yValues = sampledRange(minY, maxY, 1.0)
+        when (edge) {
+            HorizontalEdge.MIN_X, HorizontalEdge.MAX_X -> {
+                val x = if (edge == HorizontalEdge.MIN_X) this.minX else this.maxX
+                val zValues = sampledRange(maxOf(minZ, location.z - halfSpan), minOf(maxZ, location.z + halfSpan), 1.5)
+                zValues.forEach { z -> yValues.forEach { y -> points += Location(world, x, y, z) } }
+            }
+            HorizontalEdge.MIN_Z, HorizontalEdge.MAX_Z -> {
+                val z = if (edge == HorizontalEdge.MIN_Z) this.minZ else this.maxZ
+                val xValues = sampledRange(maxOf(minX, location.x - halfSpan), minOf(maxX, location.x + halfSpan), 1.5)
+                xValues.forEach { x -> yValues.forEach { y -> points += Location(world, x, y, z) } }
+            }
+        }
+        return points
+    }
+
     fun overlaps(other: ArenaBounds): Boolean =
         worldId == other.worldId &&
             minX <= other.maxX && maxX >= other.minX &&
             minY <= other.maxY && maxY >= other.minY &&
             minZ <= other.maxZ && maxZ >= other.minZ
+}
+
+private enum class HorizontalEdge {
+    MIN_X,
+    MAX_X,
+    MIN_Z,
+    MAX_Z,
+}
+
+private fun sampledRange(
+    minimum: Double,
+    maximum: Double,
+    step: Double,
+): List<Double> {
+    if (minimum > maximum) return emptyList()
+    val values = ArrayList<Double>()
+    var value = minimum
+    while (value <= maximum + 1.0e-6) {
+        values += value
+        value += step
+    }
+    if (values.last() < maximum - 1.0e-6) values += maximum
+    return values
 }
 
 data class PaperArena(
@@ -338,13 +395,6 @@ class PaperArenaCatalog private constructor(
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
                 "Arena ids must be unique after lowercase normalization"
-            }
-            entries.forEachIndexed { index, (id, arena) ->
-                entries.drop(index + 1).forEach { (otherId, otherArena) ->
-                    require(!arena.bounds.overlaps(otherArena.bounds)) {
-                        "Arena $id bounds overlap arena $otherId"
-                    }
-                }
             }
             entries.forEach { (_, arena) -> inspector.inspect(arena) }
             return entries.toMap()

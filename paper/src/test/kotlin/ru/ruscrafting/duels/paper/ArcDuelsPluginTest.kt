@@ -279,7 +279,7 @@ class ArcDuelsPluginTest : StringSpec({
         val singleRoundPlain = PlainTextComponentSerializer.plainText().serialize(singleRoundCard)
         singleRoundPlain.contains("Победа над SummaryLoser") shouldBe true
         singleRoundPlain.contains("счёт") shouldBe false
-        singleRoundPlain.contains("\n  \n  ▶ Предложить реванш") shouldBe true
+        singleRoundPlain.contains("\n  \n  ● Предложить реванш") shouldBe true
         controller.close()
     }
 

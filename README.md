@@ -49,7 +49,7 @@ This repository is under active development. The first vertical slice targets:
   backend, with compare-before-apply inventory recovery and direct lobby rematches;
 - arena-scoped WorldGuard PvP and temporary fluid compatibility with startup
   warnings instead of broad changes to a world's region policy;
-- visible boundary warnings before an out-of-bounds round loss, and a temporary
+- visible particle-wall boundary warnings with a non-lethal movement clamp, and a temporary
   20 HP cap for controlled kit matches without changing own-inventory health;
 - real KOTH capture zones with contested progress, particles, action bars, and
   objective-compatible arena allocation;

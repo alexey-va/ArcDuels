@@ -890,24 +890,12 @@ class DuelSessionManager internal constructor(
         return arenas.get(match.arenaId).bounds.distanceToEdge(location)
     }
 
-    fun handleBoundaryExit(
+    fun boundaryWarningPoints(
         player: Player,
-        attemptedLocation: org.bukkit.Location = player.location,
-    ) {
-        val match = matchFor(player) ?: return
-        DuelLog.info(
-            "arena-boundary-exit",
-            match.id,
-            player,
-            "player={} arena={} objective={} x={} y={} z={}",
-            player.name,
-            match.arenaId.value,
-            match.rules.objective,
-            attemptedLocation.x,
-            attemptedLocation.y,
-            attemptedLocation.z,
-        )
-        handleElimination(player)
+        location: org.bukkit.Location,
+    ): List<org.bukkit.Location> {
+        val match = matchFor(player) ?: return emptyList()
+        return arenas.get(match.arenaId).bounds.horizontalBoundaryPoints(location)
     }
 
     fun isTeleportAllowed(

@@ -9,10 +9,14 @@ import io.mockk.verify
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.block.Block
+import org.bukkit.block.BlockFace
 import org.bukkit.entity.Player
 import org.bukkit.event.Event
+import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockFromToEvent
 import org.bukkit.event.player.PlayerBucketEmptyEvent
+import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.inventory.ItemStack
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
@@ -24,6 +28,46 @@ import java.util.UUID
 import java.util.logging.Logger
 
 class WorldGuardDuelListenerTest : StringSpec({
+    "WorldGuard precursor denial permits an active in-bounds lava bucket" {
+        val player = mockk<Player>()
+        val clicked = mockk<Block>()
+        val target = mockk<Block>()
+        every { clicked.blockData } returns mockk()
+        every { clicked.getRelative(BlockFace.UP) } returns target
+        val sessions = mockk<DuelSessionManager>()
+        every { sessions.allowsFluidPlacement(player, target, Material.LAVA_BUCKET) } returns true
+        val event = mockk<PlayerInteractEvent>(relaxed = true)
+        every { event.player } returns player
+        every { event.action } returns Action.RIGHT_CLICK_BLOCK
+        every { event.item } returns ItemStack(Material.LAVA_BUCKET)
+        every { event.clickedBlock } returns clicked
+        every { event.blockFace } returns BlockFace.UP
+
+        DuelFluidListener(sessions, overrideWorldGuard = true).onFluidInteract(event)
+
+        verify(exactly = 1) { event.setUseItemInHand(Event.Result.ALLOW) }
+    }
+
+    "WorldGuard precursor denial stays in force outside the active arena" {
+        val player = mockk<Player>()
+        val clicked = mockk<Block>()
+        val target = mockk<Block>()
+        every { clicked.blockData } returns mockk()
+        every { clicked.getRelative(BlockFace.UP) } returns target
+        val sessions = mockk<DuelSessionManager>()
+        every { sessions.allowsFluidPlacement(player, target, Material.WATER_BUCKET) } returns false
+        val event = mockk<PlayerInteractEvent>(relaxed = true)
+        every { event.player } returns player
+        every { event.action } returns Action.RIGHT_CLICK_BLOCK
+        every { event.item } returns ItemStack(Material.WATER_BUCKET)
+        every { event.clickedBlock } returns clicked
+        every { event.blockFace } returns BlockFace.UP
+
+        DuelFluidListener(sessions, overrideWorldGuard = true).onFluidInteract(event)
+
+        verify(exactly = 0) { event.setUseItemInHand(any()) }
+    }
+
     "WorldGuard bucket denial is overridden only for a tracked active-arena fluid source" {
         val player = mockk<Player>()
         val block = mockk<Block>()

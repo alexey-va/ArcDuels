@@ -217,7 +217,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command
         server.pluginManager.registerEvents(gui, this)
-        val boundaryWarningDistance = config.getDouble("boundary-warning-distance", 5.0)
+        val boundaryWarningDistance = config.getDouble("boundary-warning-distance", 12.0)
         require(boundaryWarningDistance in 1.0..16.0) { "boundary-warning-distance must be between 1 and 16" }
         server.pluginManager.registerEvents(
             DuelGameplayListener(

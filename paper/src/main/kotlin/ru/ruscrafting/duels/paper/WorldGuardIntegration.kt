@@ -6,12 +6,18 @@ import com.sk89q.worldguard.bukkit.protection.events.DisallowedPVPEvent
 import com.sk89q.worldguard.protection.flags.Flags
 import com.sk89q.worldguard.protection.flags.StateFlag
 import org.bukkit.Location
+import org.bukkit.Material
+import org.bukkit.block.Block
+import org.bukkit.block.data.Waterlogged
+import org.bukkit.event.Event
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
+import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockFromToEvent
 import org.bukkit.event.player.PlayerBucketEmptyEvent
 import org.bukkit.event.player.PlayerBucketFillEvent
+import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.MatchState
@@ -83,6 +89,25 @@ internal class DuelFluidListener(
     private val overrideWorldGuard: Boolean,
 ) : Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
+    fun onFluidInteract(event: PlayerInteractEvent) {
+        if (!overrideWorldGuard || event.action != Action.RIGHT_CLICK_BLOCK) return
+        val material = event.item?.type ?: return
+        val target = event.fluidTarget(material) ?: return
+        val allowed =
+            if (material == Material.BUCKET) {
+                sessions.allowsFluidPickup(event.player, target)
+            } else {
+                sessions.allowsFluidPlacement(event.player, target, material)
+            }
+        if (!allowed) return
+
+        // WorldGuard denies the precursor interaction before Bukkit can emit the
+        // bucket event. Permit only the held bucket here; the clicked block keeps
+        // its original use result, so protected containers and buttons stay closed.
+        event.setUseItemInHand(Event.Result.ALLOW)
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
     fun onBucketEmpty(event: PlayerBucketEmptyEvent) {
         if (!sessions.allowsFluidPlacement(event.player, event.block, event.bucket)) return
         if (event.isCancelled && !overrideWorldGuard) return
@@ -105,6 +130,13 @@ internal class DuelFluidListener(
             event.isCancelled = false
         }
     }
+}
+
+private fun PlayerInteractEvent.fluidTarget(material: Material): Block? {
+    val clicked = clickedBlock ?: return null
+    if (material == Material.BUCKET) return clicked
+    if (material == Material.WATER_BUCKET && clicked.blockData is Waterlogged) return clicked
+    return clicked.getRelative(blockFace)
 }
 
 private fun PaperArena.inspectionPoints(): List<Pair<String, Location>> {

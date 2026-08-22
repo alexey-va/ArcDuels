@@ -154,8 +154,8 @@ arenas:
     lobby: { world: duels, x: 0.5, y: 65, z: 20.5, yaw: 180, pitch: 0 }
     post-match-action: LOCAL_LOBBY # or RETURN_TO_ORIGIN
     bounds:
-      min: { x: -12, y: 60, z: -12 }
-      max: { x: 12, y: 85, z: 12 }
+      min: { x: -100, y: -64, z: -100 }
+      max: { x: 100, y: 320, z: 100 }
     hill:
       center: { world: duels, x: 0.5, y: 65, z: 0.5, yaw: 0, pitch: 0 }
       radius: 3.5
@@ -186,8 +186,12 @@ Arena reservations are exclusive. If all arenas are occupied, accepted pairs
 wait in FIFO order without touching either player's inventory. Queue ownership
 prevents either participant from entering another duel. Both spawns must be
 inside the bounds and use the same loaded world. A title appears within
-`boundary-warning-distance` blocks while the player approaches an edge;
-leaving the bounds shows the explicit reason and loses the round. Only scoped
+`boundary-warning-distance` blocks while the player approaches an edge, and a
+player-only red particle strip makes the nearest horizontal edge visible.
+Crossing the safety envelope is clamped without awarding either player a win.
+New arenas start with a 200x200 full-height safety envelope centered on the
+administrator; physical walls remain the intended gameplay boundary. Safety
+envelopes may overlap when the physical arena builds are separated. Only scoped
 ArcDuels teleports and in-bounds combat teleports are accepted while a player
 owns an arena.
 
@@ -375,7 +379,8 @@ teleport, inventory, and state plugins from breaking match isolation.
 When WorldGuard is installed, enabled arenas are sampled at load time and a
 warning names points covered by a PvP denial. ArcDuels cancels WorldGuard's
 denial event only when both players belong to the same active duel and remain
-inside that arena. Bucket placement and pickup are likewise overridden only for
-an active participant, inside the assigned arena, when consumables are enabled.
+inside that arena. Bucket interaction, placement, and pickup are likewise
+overridden only for an active participant, inside the assigned arena, when
+consumables are enabled; this includes WorldGuard's earlier interact denial.
 Fluid propagation is bounded and every affected block is restored after the
 round. Spawn protection and unrelated combat or building remain unchanged.

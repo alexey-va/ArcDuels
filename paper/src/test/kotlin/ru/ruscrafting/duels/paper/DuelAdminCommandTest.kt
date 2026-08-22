@@ -47,6 +47,10 @@ class DuelAdminCommandTest : StringSpec({
         plugin.config.getStringList("arenas.alpha.allowed-loadouts").toSet() shouldBe setOf("KIT", "OWN_INVENTORY")
         plugin.config.getStringList("arenas.alpha.allowed-objectives").toSet() shouldBe
             ru.ruscrafting.duels.domain.DuelObjectiveType.entries.map { it.name }.toSet()
+        plugin.config.getDouble("arenas.alpha.bounds.min.x") shouldBe -100.0
+        plugin.config.getDouble("arenas.alpha.bounds.max.x") shouldBe 100.0
+        plugin.config.getDouble("arenas.alpha.bounds.min.z") shouldBe -100.0
+        plugin.config.getDouble("arenas.alpha.bounds.max.z") shouldBe 100.0
         admin.execute(player, listOf("arena", "setloadouts", "alpha", "own"))
         plugin.config.getStringList("arenas.alpha.allowed-loadouts") shouldBe listOf("OWN_INVENTORY")
         admin.execute(player, listOf("arena", "setobjectives", "alpha", "boxing", "combo"))
@@ -103,7 +107,7 @@ class DuelAdminCommandTest : StringSpec({
 
         admin.execute(player, listOf("debug", "server"))
         plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe
-            "ARCDUELS_DEBUG kind=server version=0.8.1 server=duels-1 arenas=1 active=0 queue=0 recoveries=0"
+            "ARCDUELS_DEBUG kind=server version=0.8.2 server=duels-1 arenas=1 active=0 queue=0 recoveries=0"
 
         admin.execute(player, listOf("debug", "player"))
         plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe
