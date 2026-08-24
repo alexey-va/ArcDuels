@@ -77,7 +77,15 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val network = createNetwork(serverId, statistics, locales)
         val transfer = network.challenges?.let { ProxyPlayerTransfer(this) }
         if (transfer != null) closeables += transfer
-        val coordinator = MatchCoordinator(serverId, arenas, statistics, network.publisher, Clock.systemUTC())
+        val battlePass = BattlePassIntegration(this)
+        val coordinator =
+            MatchCoordinator(
+                serverId,
+                arenas,
+                statistics,
+                battlePass.observing(network.publisher),
+                Clock.systemUTC(),
+            )
         val retentionDays = config.getLong("mysql.inventory-snapshots.retention-days", 7L)
         require(retentionDays in 1L..3_650L) { "mysql.inventory-snapshots.retention-days must be between 1 and 3650" }
         val cleanupMinutes = config.getLong("mysql.inventory-snapshots.cleanup-interval-minutes", 60L)

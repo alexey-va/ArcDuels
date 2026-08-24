@@ -59,6 +59,10 @@ This repository is under active development. The first vertical slice targets:
   to open that player's challenge setup.
 - complete match history with head-to-head records, exact-arena rematches, and
   five optional saved rule setups without adding a step to the normal challenge flow.
+- optional BattlePass progress emitted after durable match completion:
+  `arcduels-match` for both participants, `arcduels-win` for the winner, and
+  `arcduels-ranked-win` for a ranked winner. The action variable is the
+  lower-case objective id (`elimination`, `sumo`, `boxing`, and so on).
 
 ## Build
 
