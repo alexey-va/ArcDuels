@@ -1,5 +1,7 @@
 package ru.ruscrafting.duels.domain
 
+import ru.arc.network.BackendServerId
+import ru.arc.network.BackendServerIdPolicy
 import java.util.UUID
 
 @JvmInline
@@ -46,8 +48,15 @@ value class KitId(val value: String) {
 @JvmInline
 value class ServerId(val value: String) {
     init {
-        require(value.matches(Regex("[A-Za-z0-9_.-]{1,48}"))) { "Unsafe server id" }
+        BackendServerId.of(value, POLICY)
     }
 
     override fun toString(): String = value
+
+    fun toBackendServerId(): BackendServerId = BackendServerId.of(value, POLICY)
+
+    companion object {
+        @JvmField
+        val POLICY = BackendServerIdPolicy(maxLength = 48, allowUppercase = true, allowDot = true)
+    }
 }

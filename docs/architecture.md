@@ -39,6 +39,9 @@ exact rematches, and per-player rule presets are read models over those durable
 rows; none participates in authoritative match transitions.
 
 Redis is a non-durable network coordination layer, never the source of truth.
+All four Redis inputs use arc-core's bounded wire codecs and origin-bound bus;
+unknown fields, malformed/trailing JSON, oversized structures, spoofed embedded
+origins, and replay-cache exhaustion fail closed without logging raw payloads.
 Startup failure closes both bus and client and falls back to local operation. A
 challenge message is delivered locally only after Redis accepted its publish;
 a synchronous publication failure therefore cannot advance one node by itself.
@@ -88,6 +91,13 @@ available for explicit administrator replay only; it is purged after its
 configured deadline. An unknown archival outcome is
 idempotent: retry observes either the still-active snapshot or the exact retained
 copy.
+
+New escrow rows use format 2, whose payload is arc-core's complete bounded Paper
+state codec. Format-1 rows remain decode-only compatibility data and retain
+their historical partial-state semantics; ArcDuels never writes that legacy
+format again. The shared service owns full and explicit inventory-preserving
+restore/verification paths, including an explicit arena fallback world when an
+origin world is not loaded.
 
 ## Match objectives and loadouts
 

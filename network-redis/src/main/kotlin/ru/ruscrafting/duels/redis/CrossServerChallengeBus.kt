@@ -2,14 +2,16 @@ package ru.ruscrafting.duels.redis
 
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import ru.arc.redis.ChannelListener
 import ru.arc.redis.RedisOperations
+import ru.arc.redis.safety.MessageClaimResult
+import ru.arc.redis.safety.OriginBoundRedisBus
+import ru.arc.redis.safety.RecentMessageDeduplicator
+import ru.arc.redis.safety.RedisMessageRejection
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
-import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 
 enum class ChallengeMessageType {
@@ -69,18 +71,29 @@ class CrossServerChallengeBus(
 ) : AutoCloseable {
     private val codec = ChallengeMessageCodec()
     private val listeners = CopyOnWriteArrayList<(CrossServerChallengeMessage) -> Unit>()
-    private val seenMessages = HashMap<String, Long>()
-    private val seenMessagesLock = Any()
-    private val redisListener = ChannelListener(::consume)
+    private val deduplicator = RecentMessageDeduplicator(SEEN_TTL_MILLIS, MAX_SEEN_MESSAGES)
+    private val bus =
+        OriginBoundRedisBus(
+            redis = redis,
+            channel = CHANNEL,
+            codec = codec,
+            originAllowed = { origin -> origin != localServer.value },
+            embeddedOrigin = { message -> message.sourceServer.value },
+            messageId = { message -> replayKey(message.sourceServer, message.messageId) },
+            deduplicator = deduplicator,
+            clockMillis = clock::millis,
+            onMessage = { message, _ -> deliver(message) },
+            onRejected = { reason -> logRejection(reason) },
+        )
 
     init {
-        redis.registerChannelUnique(CHANNEL, redisListener)
+        bus.register()
     }
 
     fun publish(message: CrossServerChallengeMessage) {
         require(message.sourceServer == localServer) { "Cannot publish a challenge message owned by another server" }
-        redis.publish(CHANNEL, codec.encode(message))
-        if (markFirstDelivery(message.sourceServer, message.messageId)) deliver(message)
+        bus.publish(message)
+        if (claimFirstDelivery(message.sourceServer, message.messageId)) deliver(message)
     }
 
     fun subscribe(listener: (CrossServerChallengeMessage) -> Unit): AutoCloseable {
@@ -89,18 +102,8 @@ class CrossServerChallengeBus(
     }
 
     override fun close() {
-        redis.unregisterChannel(CHANNEL, redisListener)
+        bus.close()
         listeners.clear()
-        synchronized(seenMessagesLock) { seenMessages.clear() }
-    }
-
-    private fun consume(channel: String, message: String, originServer: String) {
-        if (channel != CHANNEL || originServer == localServer.value) return
-        runCatching {
-            val decoded = codec.decode(message)
-            require(decoded.sourceServer.value == originServer) { "Redis origin does not match challenge source" }
-            if (markFirstDelivery(decoded.sourceServer, decoded.messageId)) deliver(decoded)
-        }.onFailure { failure -> logger.warn("Rejected ArcDuels challenge message from {}", originServer, failure) }
     }
 
     private fun deliver(message: CrossServerChallengeMessage) {
@@ -110,23 +113,25 @@ class CrossServerChallengeBus(
         }
     }
 
-    private fun markFirstDelivery(sourceServer: ServerId, messageId: String): Boolean = synchronized(seenMessagesLock) {
-        val now = clock.millis()
-        val key = "${sourceServer.value}:$messageId"
-        val previous = seenMessages[key]
-        if (previous != null && now - previous < SEEN_TTL.toMillis()) return@synchronized false
-        if (seenMessages.size >= MAX_SEEN_MESSAGES) {
-            val cutoff = now - SEEN_TTL.toMillis()
-            seenMessages.entries.removeIf { it.value < cutoff }
-            if (seenMessages.size >= MAX_SEEN_MESSAGES) seenMessages.entries.minByOrNull { it.value }?.key?.let(seenMessages::remove)
+    private fun claimFirstDelivery(sourceServer: ServerId, messageId: String): Boolean =
+        when (deduplicator.claim(replayKey(sourceServer, messageId), clock.millis())) {
+            MessageClaimResult.ACCEPTED -> true
+            MessageClaimResult.DUPLICATE -> false
+            MessageClaimResult.CAPACITY_EXCEEDED -> {
+                logRejection(RedisMessageRejection.REPLAY_GUARD_FULL)
+                false
+            }
         }
-        seenMessages[key] = now
-        true
+
+    private fun logRejection(reason: RedisMessageRejection) {
+        logger.warn("Rejected ArcDuels challenge message: {}", reason)
     }
 
     companion object {
         const val CHANNEL = "arcduels:v1:challenges"
         private const val MAX_SEEN_MESSAGES = 10_000
-        private val SEEN_TTL = Duration.ofHours(1)
+        private const val SEEN_TTL_MILLIS = 60L * 60L * 1_000L
+
+        private fun replayKey(sourceServer: ServerId, messageId: String): String = "${sourceServer.value}:$messageId"
     }
 }

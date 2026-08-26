@@ -14,10 +14,11 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 
-internal class PlayerSnapshotCodec(
+/** Decode-only production reader for format-1 escrow; encoding exists only for regression fixtures. */
+internal class LegacyPlayerSnapshotCodec(
     private val server: Server,
 ) {
-    fun encode(snapshot: PlayerSnapshot): ByteArray {
+    fun encodeFixture(snapshot: PlayerSnapshot): ByteArray {
         validateForEncode(snapshot)
         val output = ByteArrayOutputStream()
         DataOutputStream(output).use { data ->
@@ -67,7 +68,7 @@ internal class PlayerSnapshotCodec(
     fun decode(
         payload: ByteArray,
         fallbackWorld: World? = null,
-    ): PlayerSnapshot {
+    ): LegacyPlayerSnapshot {
         require(payload.isNotEmpty() && payload.size <= MAX_PAYLOAD_BYTES) { "Invalid player snapshot size" }
         return DataInputStream(ByteArrayInputStream(payload)).use { data ->
             require(data.readInt() == MAGIC) { "Invalid player snapshot magic" }
@@ -105,7 +106,7 @@ internal class PlayerSnapshotCodec(
             val effectCount = data.readInt().also { require(it in 0..MAX_POTION_EFFECTS) { "Invalid potion effect count" } }
             val effects = List(effectCount) { data.readPotionEffect(0) }
             require(data.read() == -1) { "Trailing bytes in player snapshot" }
-            PlayerSnapshot(
+            LegacyPlayerSnapshot(
                 location,
                 storage,
                 armor,

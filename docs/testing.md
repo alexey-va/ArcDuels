@@ -2,6 +2,12 @@
 
 ArcDuels separates fast deterministic checks from disposable-service tests.
 
+Paper tests receive the Paper API and pinned MockBukkit version through
+`ru.arc:arc-core-paper-testing`. New lifecycle tests should use
+`MockBukkitTestRuntime` so server/plugin teardown is owned by one closeable
+fixture and cannot leak into the next spec. Do not pin MockBukkit separately in
+this repository; update the shared testkit when the network Paper version moves.
+
 ## Fast suite
 
 ```bash

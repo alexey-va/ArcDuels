@@ -432,9 +432,9 @@ class ArcDuelsPluginTest : StringSpec({
         player.inventory.helmet = ItemStack(Material.NETHERITE_HELMET)
         player.setItemOnCursor(ItemStack(Material.EMERALD, 11))
         val snapshot = PlayerSnapshot.capture(player)
-        val codec = PlayerSnapshotCodec(server)
+        val codec = LegacyPlayerSnapshotCodec(server)
 
-        val payload = codec.encode(snapshot)
+        val payload = codec.encodeFixture(snapshot)
         val decoded = codec.decode(payload)
         player.inventory.clear()
         player.inventory.armorContents = arrayOfNulls(4)
@@ -453,11 +453,11 @@ class ArcDuelsPluginTest : StringSpec({
 
     "snapshot encoding rejects non-finite view angles before durable storage" {
         val player = server.addPlayer()
-        val codec = PlayerSnapshotCodec(server)
+        val codec = LegacyPlayerSnapshotCodec(server)
         val snapshot = PlayerSnapshot.capture(player)
         val invalidLocation = snapshot.location.clone().apply { yaw = Float.NaN }
 
-        shouldThrow<IllegalArgumentException> { codec.encode(snapshot.copy(location = invalidLocation)) }
+        shouldThrow<IllegalArgumentException> { codec.encodeFixture(snapshot.copy(location = invalidLocation)) }
     }
 
     "enabled arena requires valid bounds containing both spawns" {

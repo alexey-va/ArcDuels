@@ -2,35 +2,21 @@ package ru.ruscrafting.duels.paper
 
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
+import ru.arc.paper.network.BungeeBackendTransfer
 import ru.ruscrafting.duels.domain.ServerId
-import java.io.ByteArrayOutputStream
-import java.io.DataOutputStream
 
 fun interface PlayerTransfer {
     fun connect(player: Player, server: ServerId)
 }
 
 class ProxyPlayerTransfer(
-    private val plugin: JavaPlugin,
+    plugin: JavaPlugin,
 ) : PlayerTransfer, AutoCloseable {
-    init {
-        plugin.server.messenger.registerOutgoingPluginChannel(plugin, CHANNEL)
-    }
+    private val delegate = BungeeBackendTransfer(plugin)
 
     override fun connect(player: Player, server: ServerId) {
-        val payload = ByteArrayOutputStream()
-        DataOutputStream(payload).use { output ->
-            output.writeUTF("Connect")
-            output.writeUTF(server.value)
-        }
-        player.sendPluginMessage(plugin, CHANNEL, payload.toByteArray())
+        delegate.connect(player, server.toBackendServerId())
     }
 
-    override fun close() {
-        plugin.server.messenger.unregisterOutgoingPluginChannel(plugin, CHANNEL)
-    }
-
-    private companion object {
-        const val CHANNEL = "BungeeCord"
-    }
+    override fun close() = delegate.close()
 }

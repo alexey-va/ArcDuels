@@ -20,6 +20,8 @@ import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import org.bukkit.scheduler.BukkitRunnable
 import org.bukkit.scheduler.BukkitTask
+import ru.arc.paper.teleport.ScopedTeleportAuthorizer
+import ru.arc.paper.teleport.TeleportMatchTolerance
 import org.bukkit.util.Vector
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.ChallengeStatus
@@ -77,7 +79,8 @@ class DuelSessionManager internal constructor(
     private val restoringPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val expectedNetworkPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val networkLobbyPlayers = ConcurrentHashMap<UUID, MatchId>()
-    private val internalTeleports = InternalTeleportAuthorizer()
+    private val internalTeleports =
+        ScopedTeleportAuthorizer(TeleportMatchTolerance(coordinate = 1.0e-7, angle = 1.0e-4f))
     private val celebrationEffects = CelebrationEffects(plugin)
     private val kitHealthIsolation = KitHealthIsolation(NamespacedKey(plugin, "kit_health_cap"))
     private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()

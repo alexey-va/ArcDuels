@@ -2,6 +2,9 @@ package ru.ruscrafting.duels.paper
 
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
+import ru.arc.paper.playerstate.PaperPlayerStateCodec
+import ru.arc.paper.playerstate.PaperPlayerStateEnvelope
+import ru.arc.paper.playerstate.PaperPlayerStateSnapshot
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
@@ -11,6 +14,8 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
 import java.util.UUID
+import java.util.Base64
+import java.util.HexFormat
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
@@ -20,7 +25,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class StoredPlayerSnapshot(
-    val state: PlayerSnapshot,
+    val state: RestorablePlayerSnapshot,
     val escrow: PlayerStateEscrow,
 )
 
@@ -39,7 +44,8 @@ internal class DurablePlayerStateService(
     private val retention: Duration = Duration.ofDays(7),
     private val reconciliationDelay: Duration = Duration.ofSeconds(5),
 ) {
-    private val codec = PlayerSnapshotCodec(plugin.server)
+    private val legacyCodec = LegacyPlayerSnapshotCodec(plugin.server)
+    private val coreCodec = PaperPlayerStateCodec(maxPayloadBytes = MAX_ESCROW_PAYLOAD_BYTES)
     private val pending = ConcurrentHashMap<UUID, PlayerStateEscrow>()
     private val retentions = ConcurrentHashMap<UUID, CompletableFuture<Unit>>()
     private val purgeInFlight = AtomicBoolean()
@@ -156,8 +162,13 @@ internal class DurablePlayerStateService(
     fun decode(escrow: PlayerStateEscrow): StoredPlayerSnapshot {
         verifyChecksum(escrow)
         require(escrow.serverId == serverId) { "Player escrow belongs to ${escrow.serverId}, not $serverId" }
-        require(escrow.formatVersion == PlayerSnapshotCodec.FORMAT_VERSION) { "Unsupported player escrow format" }
-        return StoredPlayerSnapshot(codec.decode(escrow.payload), escrow)
+        val state =
+            when (escrow.formatVersion) {
+                LEGACY_ESCROW_FORMAT_VERSION -> legacyCodec.decode(escrow.payload)
+                CORE_ESCROW_FORMAT_VERSION -> PlayerSnapshot.fromCore(coreCodec.decode(escrow.coreEnvelope()))
+                else -> throw IllegalArgumentException("Unsupported player escrow format")
+            }
+        return StoredPlayerSnapshot(state, escrow)
     }
 
     fun decodeForArena(
@@ -165,8 +176,13 @@ internal class DurablePlayerStateService(
         player: Player,
     ): StoredPlayerSnapshot {
         verifyChecksum(escrow)
-        require(escrow.formatVersion == PlayerSnapshotCodec.FORMAT_VERSION) { "Unsupported player escrow format" }
-        return StoredPlayerSnapshot(codec.decode(escrow.payload, player.world), escrow)
+        val state =
+            when (escrow.formatVersion) {
+                LEGACY_ESCROW_FORMAT_VERSION -> legacyCodec.decode(escrow.payload, player.world)
+                CORE_ESCROW_FORMAT_VERSION -> PlayerSnapshot.fromCore(coreCodec.decode(escrow.coreEnvelope()), player.world)
+                else -> throw IllegalArgumentException("Unsupported player escrow format")
+            }
+        return StoredPlayerSnapshot(state, escrow)
     }
 
     /** Must be called after the exact snapshot was applied, verified, and saved on the primary thread. */
@@ -334,14 +350,15 @@ internal class DurablePlayerStateService(
         inventoryReplaced: Boolean,
     ): StoredPlayerSnapshot {
         check(!isPending(player.uniqueId)) { "Player ${player.uniqueId} already has pending recovery state" }
-        val snapshot = PlayerSnapshot.capture(player)
-        val payload = codec.encode(snapshot)
+        val snapshot = PlayerSnapshot.capture(player, clock.millis().coerceAtLeast(1L))
+        val envelope = coreCodec.encode(snapshot.core)
+        val payload = Base64.getDecoder().decode(envelope.payloadBase64)
         val escrow =
             PlayerStateEscrow(
                 playerId = PlayerId(player.uniqueId),
                 matchId = matchId,
                 serverId = serverId,
-                formatVersion = PlayerSnapshotCodec.FORMAT_VERSION,
+                formatVersion = CORE_ESCROW_FORMAT_VERSION,
                 inventoryReplaced = inventoryReplaced,
                 payload = payload,
                 checksum = sha256(payload),
@@ -356,6 +373,13 @@ internal class DurablePlayerStateService(
         }
     }
 
+    private fun PlayerStateEscrow.coreEnvelope(): PaperPlayerStateEnvelope =
+        PaperPlayerStateEnvelope(
+            formatVersion = PaperPlayerStateSnapshot.CURRENT_FORMAT_VERSION,
+            payloadBase64 = Base64.getEncoder().encodeToString(payload),
+            sha256 = HexFormat.of().formatHex(checksum),
+        )
+
     private fun sha256(payload: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(payload)
 
     private fun Throwable.unwrapCompletion(): Throwable {
@@ -367,9 +391,12 @@ internal class DurablePlayerStateService(
     }
 
     private companion object {
+        const val MAX_ESCROW_PAYLOAD_BYTES = 8 * 1024 * 1024
         // A lost COMMIT response can race a fresh connection. Require an
         // immediate read plus six delayed confirmations (30 seconds total)
         // before declaring the atomic pair absent and releasing the players.
         const val EMPTY_CONFIRMATIONS_REQUIRED = 7
+        const val LEGACY_ESCROW_FORMAT_VERSION = 1
+        const val CORE_ESCROW_FORMAT_VERSION = 2
     }
 }

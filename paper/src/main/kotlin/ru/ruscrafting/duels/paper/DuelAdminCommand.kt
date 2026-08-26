@@ -2,7 +2,6 @@ package ru.ruscrafting.duels.paper
 
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.minimessage.MiniMessage
-import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver
 import org.bukkit.Location
 import org.bukkit.attribute.Attribute
 import org.bukkit.command.CommandSender
@@ -564,7 +563,7 @@ internal class DuelAdminCommand(
         else locales.lines(sender, "admin.help").forEach(sender::sendMessage)
     }
 
-    private fun message(sender: CommandSender, key: String, vararg resolvers: TagResolver) =
+    private fun message(sender: CommandSender, key: String, vararg resolvers: LocaleValue) =
         locales?.component(sender, key, *resolvers) ?: miniMessage.deserialize("<gray>[$key]</gray>")
 
     private fun filter(

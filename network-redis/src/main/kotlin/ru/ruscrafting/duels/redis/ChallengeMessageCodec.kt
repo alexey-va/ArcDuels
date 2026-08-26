@@ -1,7 +1,10 @@
 package ru.ruscrafting.duels.redis
 
 import com.google.gson.Gson
-import com.google.gson.JsonParseException
+import ru.arc.redis.safety.BoundedJsonCodec
+import ru.arc.redis.safety.JsonObjectContract
+import ru.arc.redis.safety.JsonResourceBounds
+import ru.arc.redis.safety.RedisWireCodec
 import ru.ruscrafting.duels.domain.ChallengeId
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.CombatModifiers
@@ -20,54 +23,64 @@ import java.util.UUID
 
 internal class ChallengeMessageCodec(
     private val gson: Gson = Gson(),
-) {
-    fun encode(message: CrossServerChallengeMessage): String =
-        gson.toJson(
+) : RedisWireCodec<CrossServerChallengeMessage> {
+    private val wireCodec =
+        BoundedJsonCodec(
+            gson = gson,
+            type = WireMessage::class.java,
+            rootContract = JsonObjectContract(
+                allowedFields = WIRE_FIELDS,
+                requiredFields = REQUIRED_WIRE_FIELDS,
+            ),
+            bounds = JsonResourceBounds(MAX_MESSAGE_CHARACTERS, maxStringCharacters = 160),
+            validate = { wire ->
+                require(wire.version == WIRE_VERSION) { "Unsupported challenge wire version ${wire.version}" }
+                require(wire.messageId.matches(MESSAGE_ID_PATTERN)) { "Unsafe challenge message id" }
+                ServerId(wire.sourceServer)
+                require(wire.type.length in 1..32) { "Unsafe challenge message type" }
+            },
+        )
+
+    override fun encode(value: CrossServerChallengeMessage): String =
+        wireCodec.encode(
             WireMessage(
-                type = message.type.name,
-                messageId = message.messageId,
-                sourceServer = message.sourceServer.value,
-                challengeId = message.challenge.id.toString(),
-                challenger = message.challenge.challenger.toString(),
-                target = message.challenge.target.toString(),
-                challengerName = message.challengerName,
-                targetName = message.targetName,
-                challengerServer = message.challengerServer.value,
-                targetServer = message.targetServer.value,
-                challengerCurrentServer = message.challengerCurrentServer.value,
-                targetCurrentServer = message.targetCurrentServer.value,
-                recoveryMatchId = message.recoveryMatchId?.toString(),
-                matchServer = message.matchServer?.value,
-                selectedArenaServer = message.challenge.arenaSelection?.serverId?.value,
-                selectedArenaId = message.challenge.arenaSelection?.arenaId?.value,
-                createdAt = message.challenge.createdAt.toString(),
-                expiresAt = message.challenge.expiresAt.toString(),
-                status = message.challenge.status.name,
-                mode = message.challenge.rules.mode.name,
-                kitId = message.challenge.rules.kitId?.value,
-                ranked = message.challenge.rules.ranked,
-                bestOf = message.challenge.rules.bestOf,
-                objective = message.challenge.rules.objective.name,
-                projectiles = message.challenge.rules.modifiers.projectiles,
-                consumables = message.challenge.rules.modifiers.consumables,
-                enderPearls = message.challenge.rules.modifiers.enderPearls,
-                naturalRegeneration = message.challenge.rules.modifiers.naturalRegeneration,
-                suddenDeathAfterSeconds = message.challenge.rules.modifiers.suddenDeathAfterSeconds,
-                kingOfTheHillCaptureSeconds = message.challenge.rules.modifiers.kingOfTheHillCaptureSeconds,
-                boxingHitsToWin = message.challenge.rules.modifiers.boxingHitsToWin,
-                comboHitsToWin = message.challenge.rules.modifiers.comboHitsToWin,
+                type = value.type.name,
+                messageId = value.messageId,
+                sourceServer = value.sourceServer.value,
+                challengeId = value.challenge.id.toString(),
+                challenger = value.challenge.challenger.toString(),
+                target = value.challenge.target.toString(),
+                challengerName = value.challengerName,
+                targetName = value.targetName,
+                challengerServer = value.challengerServer.value,
+                targetServer = value.targetServer.value,
+                challengerCurrentServer = value.challengerCurrentServer.value,
+                targetCurrentServer = value.targetCurrentServer.value,
+                recoveryMatchId = value.recoveryMatchId?.toString(),
+                matchServer = value.matchServer?.value,
+                selectedArenaServer = value.challenge.arenaSelection?.serverId?.value,
+                selectedArenaId = value.challenge.arenaSelection?.arenaId?.value,
+                createdAt = value.challenge.createdAt.toString(),
+                expiresAt = value.challenge.expiresAt.toString(),
+                status = value.challenge.status.name,
+                mode = value.challenge.rules.mode.name,
+                kitId = value.challenge.rules.kitId?.value,
+                ranked = value.challenge.rules.ranked,
+                bestOf = value.challenge.rules.bestOf,
+                objective = value.challenge.rules.objective.name,
+                projectiles = value.challenge.rules.modifiers.projectiles,
+                consumables = value.challenge.rules.modifiers.consumables,
+                enderPearls = value.challenge.rules.modifiers.enderPearls,
+                naturalRegeneration = value.challenge.rules.modifiers.naturalRegeneration,
+                suddenDeathAfterSeconds = value.challenge.rules.modifiers.suddenDeathAfterSeconds,
+                kingOfTheHillCaptureSeconds = value.challenge.rules.modifiers.kingOfTheHillCaptureSeconds,
+                boxingHitsToWin = value.challenge.rules.modifiers.boxingHitsToWin,
+                comboHitsToWin = value.challenge.rules.modifiers.comboHitsToWin,
             ),
         )
 
-    fun decode(json: String): CrossServerChallengeMessage {
-        require(json.length <= MAX_MESSAGE_CHARACTERS) { "ArcDuels challenge message is too large" }
-        val wire =
-            try {
-                gson.fromJson(json, WireMessage::class.java)
-            } catch (failure: RuntimeException) {
-                throw JsonParseException("Invalid ArcDuels challenge JSON", failure)
-            } ?: throw JsonParseException("ArcDuels challenge message cannot be null")
-        require(wire.version == WIRE_VERSION) { "Unsupported challenge wire version ${wire.version}" }
+    override fun decode(raw: String): CrossServerChallengeMessage {
+        val wire = wireCodec.decode(raw)
         val rules =
             DuelRules(
                 mode = DuelMode.valueOf(wire.mode),
@@ -154,6 +167,54 @@ internal class ChallengeMessageCodec(
     private companion object {
         const val WIRE_VERSION = 4
         const val MAX_MESSAGE_CHARACTERS = 16_384
+        val MESSAGE_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
+        val WIRE_FIELDS =
+            setOf(
+                "version",
+                "type",
+                "messageId",
+                "sourceServer",
+                "challengeId",
+                "challenger",
+                "target",
+                "challengerName",
+                "targetName",
+                "challengerServer",
+                "targetServer",
+                "challengerCurrentServer",
+                "targetCurrentServer",
+                "recoveryMatchId",
+                "matchServer",
+                "selectedArenaServer",
+                "selectedArenaId",
+                "createdAt",
+                "expiresAt",
+                "status",
+                "mode",
+                "kitId",
+                "ranked",
+                "bestOf",
+                "objective",
+                "projectiles",
+                "consumables",
+                "enderPearls",
+                "naturalRegeneration",
+                "suddenDeathAfterSeconds",
+                "kingOfTheHillCaptureSeconds",
+                "boxingHitsToWin",
+                "comboHitsToWin",
+            )
+        val REQUIRED_WIRE_FIELDS =
+            WIRE_FIELDS -
+                setOf(
+                    "challengerCurrentServer",
+                    "targetCurrentServer",
+                    "recoveryMatchId",
+                    "matchServer",
+                    "selectedArenaServer",
+                    "selectedArenaId",
+                    "kitId",
+                )
     }
 }
 

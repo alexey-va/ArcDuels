@@ -1,11 +1,17 @@
 package ru.ruscrafting.duels.redis
 
 import com.google.gson.Gson
-import com.google.gson.JsonParseException
+import com.google.gson.JsonElement
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import ru.arc.redis.ChannelListener
 import ru.arc.redis.RedisOperations
+import ru.arc.redis.safety.BoundedJsonCodec
+import ru.arc.redis.safety.JsonArrayContract
+import ru.arc.redis.safety.JsonObjectContract
+import ru.arc.redis.safety.JsonResourceBounds
+import ru.arc.redis.safety.OriginBoundRedisBus
+import ru.arc.redis.safety.RedisMessageRejection
+import ru.arc.redis.safety.RedisWireCodec
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
@@ -79,21 +85,30 @@ class NetworkArenaDirectory(
     private val staleAfter: Duration = Duration.ofSeconds(6),
     private val logger: Logger = LoggerFactory.getLogger(NetworkArenaDirectory::class.java),
 ) : AutoCloseable {
-    private val gson = Gson()
     private val nodes = ConcurrentHashMap<ServerId, ObservedStatus>()
-    private val listener = ChannelListener(::consume)
+    private val codec = ArenaStatusCodec()
+    private val bus =
+        OriginBoundRedisBus(
+            redis = redis,
+            channel = CHANNEL,
+            codec = codec,
+            originAllowed = { origin -> runCatching { ServerId(origin) }.isSuccess },
+            embeddedOrigin = { message -> message.server.value },
+            onMessage = { message, origin -> receive(message, origin) },
+            onRejected = { reason -> logRejection(reason) },
+        )
 
     init {
         require(!staleAfter.isNegative && !staleAfter.isZero) { "Arena status TTL must be positive" }
-        redis.registerChannelUnique(CHANNEL, listener)
+        bus.register()
     }
 
     fun publish(status: ArenaNodeStatus) {
         require(status.server == localServer) { "Cannot publish arena status owned by another server" }
-        val message = gson.toJson(WireStatus.from(status))
-        require(message.length <= MAX_MESSAGE_CHARACTERS) { "Arena status message is too large" }
+        val message = ArenaWireMessage.current(status)
+        codec.encode(message)
         nodes[localServer] = ObservedStatus(status, clock.millis())
-        redis.publish(CHANNEL, message)
+        bus.publish(message)
     }
 
     fun select(
@@ -149,28 +164,21 @@ class NetworkArenaDirectory(
     }
 
     override fun close() {
-        redis.unregisterChannel(CHANNEL, listener)
+        bus.close()
         nodes.clear()
     }
 
-    private fun consume(channel: String, message: String, originServer: String) {
-        if (channel != CHANNEL) return
-        runCatching {
-            require(message.length <= MAX_MESSAGE_CHARACTERS) { "Arena status message is too large" }
-            val wire =
-                try {
-                    gson.fromJson(message, WireStatus::class.java)
-                } catch (failure: RuntimeException) {
-                    throw JsonParseException("Invalid arena status JSON", failure)
-                } ?: throw JsonParseException("Arena status cannot be null")
-            if (wire.version != WIRE_VERSION) {
-                logger.debug("Ignored ArcDuels arena status version {} from {}", wire.version, originServer)
-                return@runCatching
-            }
-            val status = wire.toStatus()
-            require(status.server.value == originServer) { "Redis origin does not match arena status server" }
-            nodes[status.server] = ObservedStatus(status, clock.millis())
-        }.onFailure { failure -> logger.warn("Rejected ArcDuels arena status from {}", originServer, failure) }
+    private fun receive(message: ArenaWireMessage, originServer: String) {
+        val status = message.status
+        if (status == null) {
+            logger.debug("Ignored ArcDuels arena status version {} from {}", message.version, originServer)
+            return
+        }
+        nodes[status.server] = ObservedStatus(status, clock.millis())
+    }
+
+    private fun logRejection(reason: RedisMessageRejection) {
+        logger.warn("Rejected ArcDuels arena status: {}", reason)
     }
 
     private data class ObservedStatus(
@@ -178,16 +186,93 @@ class NetworkArenaDirectory(
         val receivedAtMillis: Long,
     )
 
+    companion object {
+        const val CHANNEL = "arcduels:v1:arenas"
+    }
+}
+
+private data class ArenaWireMessage(
+    val version: Int,
+    val server: ServerId,
+    val status: ArenaNodeStatus?,
+) {
+    init {
+        require(status == null || status.server == server) { "Arena wire server does not match its status" }
+    }
+
+    companion object {
+        fun current(status: ArenaNodeStatus): ArenaWireMessage =
+            ArenaWireMessage(ARENA_WIRE_VERSION, status.server, status)
+    }
+}
+
+private class ArenaStatusCodec(
+    gson: Gson = Gson(),
+) : RedisWireCodec<ArenaWireMessage> {
+    private val wireCodec =
+        BoundedJsonCodec(
+            gson = gson,
+            type = WireStatus::class.java,
+            rootContract =
+                JsonObjectContract(
+                    allowedFields = setOf("version", "server", "arenas", "queuedPairs", "ownInventory", "kit"),
+                    requiredFields = setOf("version", "server", "queuedPairs"),
+                    fieldContracts =
+                        mapOf(
+                            "arenas" to
+                                JsonArrayContract(
+                                    maxEntries = MAX_ARENAS_PER_NODE,
+                                    elementContract =
+                                        JsonObjectContract(
+                                            allowedFields = setOf("id", "displayName", "loadouts", "objectives", "available"),
+                                        ),
+                                ),
+                        ),
+                ),
+            bounds =
+                JsonResourceBounds(
+                    maxCharacters = MAX_ARENA_MESSAGE_CHARACTERS,
+                    maxDepth = 6,
+                    maxContainerEntries = MAX_ARENAS_PER_NODE,
+                    maxTotalNodes = 50_000,
+                    maxStringCharacters = 64,
+                ),
+            validate = { wire ->
+                require(wire.version >= 0) { "Arena wire version cannot be negative" }
+                ServerId(wire.server)
+                if (wire.version == ARENA_WIRE_VERSION) {
+                    requireNotNull(wire.arenas) { "Current arena status is missing arenas" }
+                    require(wire.arenas.size <= MAX_ARENAS_PER_NODE) { "Too many wire arenas" }
+                }
+            },
+        )
+
+    override fun encode(value: ArenaWireMessage): String {
+        require(value.version == ARENA_WIRE_VERSION && value.status != null) {
+            "Only the current arena wire version can be published"
+        }
+        return wireCodec.encode(WireStatus.from(value.status))
+    }
+
+    override fun decode(raw: String): ArenaWireMessage {
+        val wire = wireCodec.decode(raw)
+        val server = ServerId(wire.server)
+        if (wire.version != ARENA_WIRE_VERSION) return ArenaWireMessage(wire.version, server, null)
+        return ArenaWireMessage(wire.version, server, wire.toStatus())
+    }
+
     private data class WireStatus(
-        val version: Int = WIRE_VERSION,
+        val version: Int = ARENA_WIRE_VERSION,
         val server: String,
-        val arenas: List<WireArena>,
+        val arenas: List<WireArena>? = null,
         val queuedPairs: Int,
+        @Suppress("unused") val ownInventory: JsonElement? = null,
+        @Suppress("unused") val kit: JsonElement? = null,
     ) {
         fun toStatus(): ArenaNodeStatus =
             ArenaNodeStatus(
                 server = ServerId(server),
-                arenas = arenas.map(WireArena::toAdvertisement),
+                arenas = requireNotNull(arenas).map(WireArena::toAdvertisement),
                 queuedPairs = queuedPairs,
             )
 
@@ -228,10 +313,8 @@ class NetworkArenaDirectory(
                 )
         }
     }
-
-    companion object {
-        const val CHANNEL = "arcduels:v1:arenas"
-        private const val WIRE_VERSION = 4
-        private const val MAX_MESSAGE_CHARACTERS = 65_536
-    }
 }
+
+private const val ARENA_WIRE_VERSION = 4
+private const val MAX_ARENAS_PER_NODE = 1_000
+private const val MAX_ARENA_MESSAGE_CHARACTERS = 65_536

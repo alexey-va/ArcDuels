@@ -1,7 +1,9 @@
 package ru.ruscrafting.duels.redis
 
+import ru.arc.network.NetworkPlayerName
+
 /** Java usernames plus RusCrafting's configured Floodgate `.` prefix. */
-internal fun isSafeNetworkPlayerName(value: String): Boolean = value.matches(NETWORK_PLAYER_NAME_PATTERN)
+internal fun isSafeNetworkPlayerName(value: String): Boolean = NetworkPlayerName.parseOrNull(value) != null
 
 /** Wall-clock rollback and subtraction overflow both fail closed. */
 internal fun isFreshObservation(
@@ -13,5 +15,3 @@ internal fun isFreshObservation(
     val age = nowMillis - observedAtMillis
     return age >= 0L && age < ttlMillis
 }
-
-private val NETWORK_PLAYER_NAME_PATTERN = Regex("(?:[A-Za-z0-9_]{1,16}|\\.[A-Za-z0-9_]{1,16})")

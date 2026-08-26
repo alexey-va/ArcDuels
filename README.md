@@ -17,6 +17,12 @@ build. Redis is optional at runtime. MySQL is mandatory for starting matches
 because ArcDuels will not mutate a player's inventory or location without a
 committed, checksum-verified recovery snapshot.
 
+Reusable infrastructure is owned by arc-core: typed network identifiers,
+bounded Redis codecs and origin/replay handling, Bungee transfer, scoped
+teleports, complete Paper player state, and the shared MockBukkit test runtime.
+ArcDuels keeps duel state machines and its MySQL schema; it does not fork those
+cross-plugin mechanisms.
+
 ## Status
 
 This repository is under active development. The first vertical slice targets:

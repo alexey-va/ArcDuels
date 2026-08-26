@@ -13,8 +13,7 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("net.william278.husksync:husksync-bukkit:3.8.7+1.21.8")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
-    testImplementation("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
-    testImplementation("org.mockbukkit.mockbukkit:mockbukkit-v1.21:4.110.0")
+    testImplementation("ru.arc:arc-core-paper-testing:1.0-SNAPSHOT")
     testImplementation("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
 }
 

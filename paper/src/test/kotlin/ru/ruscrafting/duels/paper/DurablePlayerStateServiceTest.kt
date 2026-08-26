@@ -9,8 +9,8 @@ import io.mockk.mockk
 import org.bukkit.Material
 import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.inventory.ItemStack
-import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
@@ -25,20 +25,23 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import java.security.MessageDigest
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 
 class DurablePlayerStateServiceTest : StringSpec({
     lateinit var server: ServerMock
     lateinit var plugin: ArcDuelsPlugin
+    lateinit var paper: MockBukkitTestRuntime
 
     beforeSpec {
-        server = MockBukkit.mock()
-        plugin = MockBukkit.load(ArcDuelsPlugin::class.java)
+        paper = MockBukkitTestRuntime.open()
+        server = paper.server
+        plugin = paper.loadPlugin(ArcDuelsPlugin::class.java)
         server.addSimpleWorld("world")
     }
 
-    afterSpec { MockBukkit.unmock() }
+    afterSpec { paper.close() }
 
     "pair becomes usable only after one durable commit and exact archival clears active recovery" {
         val repository = GatedEscrowRepository()
@@ -66,6 +69,7 @@ class DurablePlayerStateServiceTest : StringSpec({
         val stored = storedFuture.get()
 
         service.isPending(first.uniqueId) shouldBe true
+        stored.getValue(first.uniqueId).escrow.formatVersion shouldBe 2
         service.decode(stored.getValue(first.uniqueId).escrow).state.storage[0]?.type shouldBe Material.NETHERITE_SWORD
         service.decode(stored.getValue(second.uniqueId).escrow).state.storage[4]?.type shouldBe Material.TOTEM_OF_UNDYING
 
@@ -77,6 +81,26 @@ class DurablePlayerStateServiceTest : StringSpec({
         repository.retentionCalls shouldBe 1
         repository.restoredAt shouldBe restoredAt
         repository.purgeAfter shouldBe restoredAt.plus(Duration.ofDays(7))
+    }
+
+    "format-one escrow remains readable after new writes move to the shared core codec" {
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), GatedEscrowRepository())
+        val player = server.addPlayer()
+        player.inventory.setItem(0, ItemStack(Material.DIAMOND_AXE))
+        val payload = LegacyPlayerSnapshotCodec(server).encodeFixture(PlayerSnapshot.capture(player))
+        val escrow =
+            PlayerStateEscrow(
+                playerId = PlayerId(player.uniqueId),
+                matchId = MatchId.random(),
+                serverId = ServerId("test-node"),
+                formatVersion = 1,
+                inventoryReplaced = true,
+                payload = payload,
+                checksum = MessageDigest.getInstance("SHA-256").digest(payload),
+                createdAt = Instant.parse("2026-08-14T10:00:00Z"),
+            )
+
+        service.decode(escrow).state.storage[0]?.type shouldBe Material.DIAMOND_AXE
     }
 
     "one origin snapshot is captured before transfer and becomes visible only after commit" {

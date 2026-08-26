@@ -1,7 +1,10 @@
 package ru.ruscrafting.duels.redis
 
 import com.google.gson.Gson
-import com.google.gson.JsonParseException
+import ru.arc.redis.safety.BoundedJsonCodec
+import ru.arc.redis.safety.JsonObjectContract
+import ru.arc.redis.safety.JsonResourceBounds
+import ru.arc.redis.safety.RedisWireCodec
 import ru.ruscrafting.duels.domain.DuelEvent
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
@@ -17,46 +20,56 @@ import java.util.UUID
 
 internal class DuelEventCodec(
     private val gson: Gson = Gson(),
-) {
-    fun encode(event: DuelEvent): String =
-        gson.toJson(
-            when (event) {
+) : RedisWireCodec<DuelEvent> {
+    private val wireCodec =
+        BoundedJsonCodec(
+            gson = gson,
+            type = WireEvent::class.java,
+            rootContract = JsonObjectContract(
+                allowedFields = WIRE_FIELDS,
+                requiredFields = setOf("version", "type", "eventId", "occurredAt", "sourceServer"),
+            ),
+            bounds = JsonResourceBounds(MAX_EVENT_CHARACTERS, maxStringCharacters = 160),
+            validate = { wire ->
+                require(wire.version == WIRE_VERSION) { "Unsupported ArcDuels event version ${wire.version}" }
+                require(wire.eventId.matches(EVENT_ID_PATTERN)) { "Unsafe event id" }
+                require(wire.type.length in 1..32) { "Unsafe event type" }
+                require(wire.occurredAt.length in 1..64) { "Unsafe event timestamp" }
+                ServerId(wire.sourceServer)
+            },
+        )
+
+    override fun encode(value: DuelEvent): String =
+        wireCodec.encode(
+            when (value) {
                 is MatchCompletedEvent ->
                     WireEvent(
                         type = MATCH_COMPLETED,
-                        eventId = event.eventId,
-                        occurredAt = event.occurredAt.toString(),
-                        sourceServer = event.sourceServer.value,
-                        matchId = event.matchId.toString(),
-                        winner = event.winner.toString(),
-                        loser = event.loser.toString(),
-                        mode = event.mode.name,
-                        objective = event.objective.name,
-                        kitId = event.kitId?.value,
-                        ranked = event.ranked,
-                        winnerRating = event.winnerRating,
+                        eventId = value.eventId,
+                        occurredAt = value.occurredAt.toString(),
+                        sourceServer = value.sourceServer.value,
+                        matchId = value.matchId.toString(),
+                        winner = value.winner.toString(),
+                        loser = value.loser.toString(),
+                        mode = value.mode.name,
+                        objective = value.objective.name,
+                        kitId = value.kitId?.value,
+                        ranked = value.ranked,
+                        winnerRating = value.winnerRating,
                     )
                 is LeaderboardInvalidatedEvent ->
                     WireEvent(
                         type = LEADERBOARD_INVALIDATED,
-                        eventId = event.eventId,
-                        occurredAt = event.occurredAt.toString(),
-                        sourceServer = event.sourceServer.value,
-                        revision = event.revision,
+                        eventId = value.eventId,
+                        occurredAt = value.occurredAt.toString(),
+                        sourceServer = value.sourceServer.value,
+                        revision = value.revision,
                     )
             },
         )
 
-    fun decode(json: String): DuelEvent {
-        require(json.length <= MAX_EVENT_CHARACTERS) { "ArcDuels event exceeds $MAX_EVENT_CHARACTERS characters" }
-        val wire =
-            try {
-                gson.fromJson(json, WireEvent::class.java)
-            } catch (failure: RuntimeException) {
-                throw JsonParseException("Invalid ArcDuels event JSON", failure)
-            } ?: throw JsonParseException("ArcDuels event cannot be null")
-        require(wire.version == WIRE_VERSION) { "Unsupported ArcDuels event version ${wire.version}" }
-        require(wire.eventId.matches(Regex("[A-Za-z0-9:._-]{1,160}"))) { "Unsafe event id" }
+    override fun decode(raw: String): DuelEvent {
+        val wire = wireCodec.decode(raw)
         val occurredAt = Instant.parse(wire.occurredAt)
         val sourceServer = ServerId(wire.sourceServer)
         return when (wire.type) {
@@ -121,5 +134,23 @@ internal class DuelEventCodec(
         const val MAX_EVENT_CHARACTERS = 8_192
         const val MATCH_COMPLETED = "match_completed"
         const val LEADERBOARD_INVALIDATED = "leaderboard_invalidated"
+        val EVENT_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
+        val WIRE_FIELDS =
+            setOf(
+                "version",
+                "type",
+                "eventId",
+                "occurredAt",
+                "sourceServer",
+                "matchId",
+                "winner",
+                "loser",
+                "mode",
+                "objective",
+                "kitId",
+                "ranked",
+                "winnerRating",
+                "revision",
+            )
     }
 }

@@ -1136,10 +1136,10 @@ class DuelGuiService internal constructor(
         if (page.hasNext) inventory.setItem(NEXT_SLOT, roleItem(player, "next", Material.SPECTRAL_ARROW, "menu.common.next"))
     }
 
-    private fun item(player: Player, material: Material, nameKey: String, loreKey: String? = null, vararg resolvers: net.kyori.adventure.text.minimessage.tag.resolver.TagResolver): ItemStack =
+    private fun item(player: Player, material: Material, nameKey: String, loreKey: String? = null, vararg resolvers: LocaleValue): ItemStack =
         item(material, locales.component(player, nameKey, *resolvers), loreKey?.let { locales.lines(player, it, *resolvers) }.orEmpty())
 
-    private fun item(player: Player, material: Material, nameKey: String, resolvers: Array<net.kyori.adventure.text.minimessage.tag.resolver.TagResolver>): ItemStack =
+    private fun item(player: Player, material: Material, nameKey: String, resolvers: Array<LocaleValue>): ItemStack =
         item(material, locales.component(player, nameKey, *resolvers))
 
     private fun roleItem(
@@ -1148,7 +1148,7 @@ class DuelGuiService internal constructor(
         fallback: Material,
         nameKey: String,
         loreKey: String? = null,
-        vararg resolvers: net.kyori.adventure.text.minimessage.tag.resolver.TagResolver,
+        vararg resolvers: LocaleValue,
     ): ItemStack =
         roleItem(
             role,
@@ -1162,7 +1162,7 @@ class DuelGuiService internal constructor(
         role: String,
         fallback: Material,
         nameKey: String,
-        resolvers: Array<net.kyori.adventure.text.minimessage.tag.resolver.TagResolver>,
+        resolvers: Array<LocaleValue>,
     ): ItemStack = roleItem(role, fallback, locales.component(player, nameKey, *resolvers))
 
     private fun roleItem(
