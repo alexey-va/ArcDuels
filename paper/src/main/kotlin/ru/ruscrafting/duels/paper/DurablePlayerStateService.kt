@@ -5,6 +5,9 @@ import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.paper.playerstate.PaperPlayerStateCodec
 import ru.arc.paper.playerstate.PaperPlayerStateEnvelope
 import ru.arc.paper.playerstate.PaperPlayerStateSnapshot
+import ru.arc.persistence.DurableAcknowledgementOutcome
+import ru.arc.persistence.DurableRecoveryCompletion
+import ru.arc.persistence.DurableRecoveryWorkflow
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
@@ -44,11 +47,15 @@ internal class DurablePlayerStateService(
     private val retention: Duration = Duration.ofDays(7),
     private val reconciliationDelay: Duration = Duration.ofSeconds(5),
 ) {
-    private val legacyCodec = LegacyPlayerSnapshotCodec(plugin.server)
     private val coreCodec = PaperPlayerStateCodec(maxPayloadBytes = MAX_ESCROW_PAYLOAD_BYTES)
     private val pending = ConcurrentHashMap<UUID, PlayerStateEscrow>()
     private val retentions = ConcurrentHashMap<UUID, CompletableFuture<Unit>>()
     private val purgeInFlight = AtomicBoolean()
+    private val recoveryWorkflow = DurableRecoveryWorkflow<PlayerStateEscrow, StoredPlayerSnapshot>(
+        commit = ::commitExact,
+        sameContent = PlayerStateEscrow::sameContent,
+        acknowledge = { committed, _ -> acknowledgeExact(committed) },
+    )
 
     init {
         require(!retention.isZero && !retention.isNegative) { "Player snapshot retention must be positive" }
@@ -97,20 +104,34 @@ internal class DurablePlayerStateService(
     ): CompletableFuture<StoredPlayerSnapshot> {
         check(plugin.server.isPrimaryThread) { "Player state must be captured on the Paper primary thread" }
         val stored = capture(matchId, player, inventoryReplaced)
-        return repository.save(stored.escrow)
-            .handle { _, failure ->
-                if (failure == null) {
-                    CompletableFuture.completedFuture(Unit)
-                } else {
-                    reconcileUnknownSave(stored.escrow, failure.unwrapCompletion())
-                }
-            }.thenCompose { it }
-            .thenApply {
-                pending[player.uniqueId] = stored.escrow
-                stored
-            }
+        return recoveryWorkflow.commitThenMutate(stored.escrow) { committed ->
+            CompletableFuture.completedFuture(
+                stored.copy(escrow = committed).also { pending[player.uniqueId] = committed },
+            )
+        }.thenApply { it.mutation }
     }
 
+    private fun commitExact(expected: PlayerStateEscrow): CompletableFuture<PlayerStateEscrow> =
+        repository.save(expected)
+            .handle { _, failure ->
+                if (failure == null) CompletableFuture.completedFuture(Unit)
+                else reconcileUnknownSave(expected, failure.unwrapCompletion())
+            }.thenCompose { it }
+            .thenApply { expected }
+
+    private fun acknowledgeExact(expected: PlayerStateEscrow): CompletableFuture<DurableAcknowledgementOutcome> {
+        val restoredAt = clock.instant()
+        return repository.retainRestored(expected, restoredAt, restoredAt.plus(retention)).thenCompose { retained ->
+            if (retained) return@thenCompose CompletableFuture.completedFuture(DurableAcknowledgementOutcome.ACKNOWLEDGED)
+            repository.findPending(expected.playerId).thenApply { current ->
+                when {
+                    current == null -> DurableAcknowledgementOutcome.ALREADY_ACKNOWLEDGED
+                    !current.sameContent(expected) -> DurableAcknowledgementOutcome.CONTENT_MISMATCH
+                    else -> error("Escrow archival did not match the restored snapshot")
+                }
+            }
+        }
+    }
     fun findMatchSnapshots(
         matchId: MatchId,
         origins: Map<PlayerId, ServerId>,
@@ -162,12 +183,8 @@ internal class DurablePlayerStateService(
     fun decode(escrow: PlayerStateEscrow): StoredPlayerSnapshot {
         verifyChecksum(escrow)
         require(escrow.serverId == serverId) { "Player escrow belongs to ${escrow.serverId}, not $serverId" }
-        val state =
-            when (escrow.formatVersion) {
-                LEGACY_ESCROW_FORMAT_VERSION -> legacyCodec.decode(escrow.payload)
-                CORE_ESCROW_FORMAT_VERSION -> PlayerSnapshot.fromCore(coreCodec.decode(escrow.coreEnvelope()))
-                else -> throw IllegalArgumentException("Unsupported player escrow format")
-            }
+        require(escrow.formatVersion == CORE_ESCROW_FORMAT_VERSION) { "Unsupported player escrow format" }
+        val state = PlayerSnapshot.fromCore(coreCodec.decode(escrow.coreEnvelope()))
         return StoredPlayerSnapshot(state, escrow)
     }
 
@@ -176,12 +193,8 @@ internal class DurablePlayerStateService(
         player: Player,
     ): StoredPlayerSnapshot {
         verifyChecksum(escrow)
-        val state =
-            when (escrow.formatVersion) {
-                LEGACY_ESCROW_FORMAT_VERSION -> legacyCodec.decode(escrow.payload, player.world)
-                CORE_ESCROW_FORMAT_VERSION -> PlayerSnapshot.fromCore(coreCodec.decode(escrow.coreEnvelope()), player.world)
-                else -> throw IllegalArgumentException("Unsupported player escrow format")
-            }
+        require(escrow.formatVersion == CORE_ESCROW_FORMAT_VERSION) { "Unsupported player escrow format" }
+        val state = PlayerSnapshot.fromCore(coreCodec.decode(escrow.coreEnvelope()), player.world)
         return StoredPlayerSnapshot(state, escrow)
     }
 
@@ -198,9 +211,12 @@ internal class DurablePlayerStateService(
         val archival =
             retentions.computeIfAbsent(playerId) {
                 runCatching {
-                    val restoredAt = clock.instant()
-                    repository.retainRestored(stored.escrow, restoredAt, restoredAt.plus(retention)).thenApply { retained ->
-                        check(retained) { "Escrow archival did not match the restored snapshot" }
+                    recoveryWorkflow.restoreThenAcknowledge(stored.escrow) { committed ->
+                        CompletableFuture.completedFuture(stored.copy(escrow = committed))
+                    }.thenApply { completion ->
+                        check(completion !is DurableRecoveryCompletion.ContentMismatch) {
+                            "A different player escrow replaced the restored snapshot"
+                        }
                         check(pending.remove(playerId, stored.escrow)) {
                             "Pending escrow changed before archival completed"
                         }
@@ -396,7 +412,6 @@ internal class DurablePlayerStateService(
         // immediate read plus six delayed confirmations (30 seconds total)
         // before declaring the atomic pair absent and releasing the players.
         const val EMPTY_CONFIRMATIONS_REQUIRED = 7
-        const val LEGACY_ESCROW_FORMAT_VERSION = 1
         const val CORE_ESCROW_FORMAT_VERSION = 2
     }
 }

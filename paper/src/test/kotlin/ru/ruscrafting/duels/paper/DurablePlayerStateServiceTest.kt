@@ -83,11 +83,10 @@ class DurablePlayerStateServiceTest : StringSpec({
         repository.purgeAfter shouldBe restoredAt.plus(Duration.ofDays(7))
     }
 
-    "format-one escrow remains readable after new writes move to the shared core codec" {
+    "removed format-one escrow fails closed" {
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), GatedEscrowRepository())
         val player = server.addPlayer()
-        player.inventory.setItem(0, ItemStack(Material.DIAMOND_AXE))
-        val payload = LegacyPlayerSnapshotCodec(server).encodeFixture(PlayerSnapshot.capture(player))
+        val payload = byteArrayOf(1, 2, 3)
         val escrow =
             PlayerStateEscrow(
                 playerId = PlayerId(player.uniqueId),
@@ -100,7 +99,7 @@ class DurablePlayerStateServiceTest : StringSpec({
                 createdAt = Instant.parse("2026-08-14T10:00:00Z"),
             )
 
-        service.decode(escrow).state.storage[0]?.type shouldBe Material.DIAMOND_AXE
+        shouldThrow<IllegalArgumentException> { service.decode(escrow) }
     }
 
     "one origin snapshot is captured before transfer and becomes visible only after commit" {

@@ -5,23 +5,16 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
+import ru.arc.testing.DeterministicClock
 import ru.ruscrafting.duels.domain.ServerId
-import java.time.Clock
+import java.time.Duration
 import java.time.Instant
-import java.time.ZoneId
-import java.time.ZoneOffset
 import java.util.UUID
 
 class NetworkPlayerDirectoryTest : StringSpec({
-    var now = Instant.parse("2026-08-14T09:00:00Z")
-    val clock =
-        object : Clock() {
-            override fun getZone(): ZoneId = ZoneOffset.UTC
-            override fun withZone(zone: ZoneId): Clock = this
-            override fun instant(): Instant = now
-        }
+    lateinit var clock: DeterministicClock
 
-    beforeTest { now = Instant.parse("2026-08-14T09:00:00Z") }
+    beforeTest { clock = DeterministicClock.at(Instant.parse("2026-08-14T09:00:00Z")) }
 
     "accepts the authenticated ProxyARC snapshot and expires stale players" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
@@ -36,7 +29,7 @@ class NetworkPlayerDirectoryTest : StringSpec({
 
         directory.players().map(NetworkPlayer::username) shouldContainExactly listOf("Alice", "Bob")
         directory.find("bOb")?.server shouldBe ServerId("survival")
-        now = now.plusSeconds(5)
+        clock.advance(Duration.ofSeconds(5))
         directory.players() shouldBe emptyList()
         directory.close()
     }
@@ -96,7 +89,7 @@ class NetworkPlayerDirectoryTest : StringSpec({
             "proxy",
         )
 
-        now = now.minusSeconds(1)
+        clock.advance(Duration.ofSeconds(-1))
 
         directory.players() shouldBe emptyList()
         directory.close()

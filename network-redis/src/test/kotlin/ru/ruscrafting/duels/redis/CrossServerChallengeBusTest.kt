@@ -96,13 +96,13 @@ class CrossServerChallengeBusTest : StringSpec({
         ChallengeMessageCodec().decode(ChallengeMessageCodec().encode(resolution)) shouldBe resolution
     }
 
-    "codec accepts version three messages produced before current server routes were added" {
+    "codec rejects messages produced before current server routes were required" {
         val codec = ChallengeMessageCodec()
         val legacyPayload = JsonParser.parseString(codec.encode(offer)).asJsonObject
         legacyPayload.remove("challengerCurrentServer")
         legacyPayload.remove("targetCurrentServer")
 
-        codec.decode(legacyPayload.toString()) shouldBe offer
+        shouldThrow<IllegalArgumentException> { codec.decode(legacyPayload.toString()) }
     }
 
     "codec carries objective-specific hit targets and rejects the previous schema" {

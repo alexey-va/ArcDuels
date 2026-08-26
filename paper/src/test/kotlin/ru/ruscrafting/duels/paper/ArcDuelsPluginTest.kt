@@ -423,43 +423,6 @@ class ArcDuelsPluginTest : StringSpec({
         player.itemOnCursor.isEmpty shouldBe true
     }
 
-    "versioned snapshot codec round trips Paper item bytes and rejects corrupt framing" {
-        val player = server.addPlayer()
-        val world = server.addSimpleWorld("codec-world")
-        player.teleport(Location(world, 2.5, 72.0, -3.5, 30f, -5f))
-        player.inventory.setItem(0, ItemStack(Material.DIAMOND_SWORD))
-        player.inventory.setItem(8, ItemStack(Material.GOLDEN_APPLE, 7))
-        player.inventory.helmet = ItemStack(Material.NETHERITE_HELMET)
-        player.setItemOnCursor(ItemStack(Material.EMERALD, 11))
-        val snapshot = PlayerSnapshot.capture(player)
-        val codec = LegacyPlayerSnapshotCodec(server)
-
-        val payload = codec.encodeFixture(snapshot)
-        val decoded = codec.decode(payload)
-        player.inventory.clear()
-        player.inventory.armorContents = arrayOfNulls(4)
-        player.setItemOnCursor(ItemStack.empty())
-        player.teleport(Location(world, 0.0, 64.0, 0.0))
-
-        decoded.restore(player) { restored, destination -> restored.teleport(destination) }
-
-        player.inventory.getItem(0)?.type shouldBe Material.DIAMOND_SWORD
-        player.inventory.getItem(8)?.amount shouldBe 7
-        player.inventory.helmet?.type shouldBe Material.NETHERITE_HELMET
-        player.itemOnCursor.amount shouldBe 11
-        val corrupt = payload.copyOf().also { it[0] = (it[0].toInt() xor 0x7f).toByte() }
-        shouldThrow<IllegalArgumentException> { codec.decode(corrupt) }
-    }
-
-    "snapshot encoding rejects non-finite view angles before durable storage" {
-        val player = server.addPlayer()
-        val codec = LegacyPlayerSnapshotCodec(server)
-        val snapshot = PlayerSnapshot.capture(player)
-        val invalidLocation = snapshot.location.clone().apply { yaw = Float.NaN }
-
-        shouldThrow<IllegalArgumentException> { codec.encodeFixture(snapshot.copy(location = invalidLocation)) }
-    }
-
     "enabled arena requires valid bounds containing both spawns" {
         server.addSimpleWorld("world")
         plugin.config.set("arenas.example.enabled", true)

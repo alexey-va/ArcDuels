@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import ru.arc.network.LeasedNetworkDirectory
 import ru.arc.redis.RedisOperations
 import ru.arc.redis.safety.BoundedJsonCodec
 import ru.arc.redis.safety.JsonArrayContract
@@ -35,29 +36,27 @@ class NetworkPlayerDirectory(
     private val staleAfter: Duration = Duration.ofSeconds(5),
     private val logger: Logger = LoggerFactory.getLogger(NetworkPlayerDirectory::class.java),
 ) : AutoCloseable {
+    private val snapshots = LeasedNetworkDirectory<ServerId, List<NetworkPlayer>>(
+        leaseMillis = staleAfter.toMillis(),
+        maxEntries = 1,
+        clock = clock::millis,
+    )
     private val bus =
         OriginBoundRedisBus(
             redis = redis,
             channel = CHANNEL,
             codec = NetworkPlayerSnapshotCodec(),
             originAllowed = { origin -> origin == expectedOrigin.value },
-            onMessage = { players, _ -> snapshot = Snapshot(players, clock.millis()) },
+            onMessage = { players, origin -> snapshots.observe(expectedOrigin, origin, players) },
             onRejected = { reason -> logRejection(reason) },
         )
-
-    @Volatile
-    private var snapshot = Snapshot(emptyList(), Long.MIN_VALUE)
 
     init {
         require(!staleAfter.isNegative && !staleAfter.isZero) { "Player snapshot TTL must be positive" }
         bus.register()
     }
 
-    fun players(): List<NetworkPlayer> {
-        val current = snapshot
-        if (!isFreshObservation(clock.millis(), current.receivedAtMillis, staleAfter.toMillis())) return emptyList()
-        return current.players
-    }
+    fun players(): List<NetworkPlayer> = snapshots.get(expectedOrigin)?.value.orEmpty()
 
     fun find(uuid: UUID): NetworkPlayer? = players().firstOrNull { it.uuid == uuid }
 
@@ -65,17 +64,12 @@ class NetworkPlayerDirectory(
 
     override fun close() {
         bus.close()
-        snapshot = Snapshot(emptyList(), Long.MIN_VALUE)
+        snapshots.clear()
     }
 
     private fun logRejection(reason: RedisMessageRejection) {
         logger.warn("Rejected ProxyARC player snapshot: {}", reason)
     }
-
-    private data class Snapshot(
-        val players: List<NetworkPlayer>,
-        val receivedAtMillis: Long,
-    )
 
     companion object {
         const val CHANNEL = "arc.proxy_player_list"

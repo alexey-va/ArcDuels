@@ -20,3 +20,8 @@ Paper tests depend on `ru.arc:arc-core-paper-testing` and open
 `MockBukkitTestRuntime`. Keep pure domain tests free of Bukkit. The normal gate
 is `./gradlew testAll :paper:shadowJar`; the MySQL integration gate is
 `./gradlew :storage-mysql:integrationTest` when Docker is available.
+
+The checked-in `arc-core` submodule is the default composite. To verify an
+uncommitted core API without copying sources, pass
+`-ParcCoreDir=/absolute/path/to/arc-core`; the path must contain its own
+`settings.gradle.kts`.

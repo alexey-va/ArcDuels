@@ -121,8 +121,8 @@ internal class ChallengeMessageCodec(
             challengerServer = ServerId(wire.challengerServer),
             targetServer = ServerId(wire.targetServer),
             matchServer = wire.matchServer?.let(::ServerId),
-            challengerCurrentServer = ServerId(wire.challengerCurrentServer ?: wire.challengerServer),
-            targetCurrentServer = ServerId(wire.targetCurrentServer ?: wire.targetServer),
+            challengerCurrentServer = ServerId(wire.challengerCurrentServer),
+            targetCurrentServer = ServerId(wire.targetCurrentServer),
             recoveryMatchId = wire.recoveryMatchId?.let { MatchId(UUID.fromString(it)) },
         )
     }
@@ -140,8 +140,8 @@ internal class ChallengeMessageCodec(
         val targetName: String,
         val challengerServer: String,
         val targetServer: String,
-        val challengerCurrentServer: String? = null,
-        val targetCurrentServer: String? = null,
+        val challengerCurrentServer: String,
+        val targetCurrentServer: String,
         val recoveryMatchId: String? = null,
         val matchServer: String?,
         val selectedArenaServer: String?,
@@ -207,8 +207,6 @@ internal class ChallengeMessageCodec(
         val REQUIRED_WIRE_FIELDS =
             WIRE_FIELDS -
                 setOf(
-                    "challengerCurrentServer",
-                    "targetCurrentServer",
                     "recoveryMatchId",
                     "matchServer",
                     "selectedArenaServer",

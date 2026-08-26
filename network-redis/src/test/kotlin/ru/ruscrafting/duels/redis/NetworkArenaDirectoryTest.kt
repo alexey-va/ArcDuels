@@ -10,6 +10,8 @@ import io.mockk.verify
 import org.slf4j.Logger
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
+import ru.arc.redis.safety.RedisMessageRejection
+import ru.arc.testing.DeterministicClock
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.CombatModifiers
@@ -18,21 +20,13 @@ import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.ServerId
-import java.time.Clock
+import java.time.Duration
 import java.time.Instant
-import java.time.ZoneId
-import java.time.ZoneOffset
 
 class NetworkArenaDirectoryTest : StringSpec({
-    var now = Instant.parse("2026-08-14T09:00:00Z")
-    val clock =
-        object : Clock() {
-            override fun getZone(): ZoneId = ZoneOffset.UTC
-            override fun withZone(zone: ZoneId): Clock = this
-            override fun instant(): Instant = now
-        }
+    lateinit var clock: DeterministicClock
 
-    beforeTest { now = Instant.parse("2026-08-14T09:00:00Z") }
+    beforeTest { clock = DeterministicClock.at(Instant.parse("2026-08-14T09:00:00Z")) }
 
     fun arena(
         id: String,
@@ -148,13 +142,13 @@ class NetworkArenaDirectoryTest : StringSpec({
         redis.simulateExternalMessage(NetworkArenaDirectory.CHANNEL, status, "spoofed")
         directory.select(rules) shouldBe null
         redis.simulateExternalMessage(NetworkArenaDirectory.CHANNEL, status, "parkour")
-        now = now.plusSeconds(6)
+        clock.advance(Duration.ofSeconds(6))
 
         directory.select(rules) shouldBe null
         directory.close()
     }
 
-    "ignores rolling-deployment heartbeats from the previous schema" {
+    "rejects heartbeats from the removed previous schema" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
         val logger = mockk<Logger>(relaxed = true)
         val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock, logger = logger)
@@ -165,8 +159,7 @@ class NetworkArenaDirectoryTest : StringSpec({
 
         directory.select(DuelRules(DuelMode.OWN_INVENTORY)) shouldBe null
         directory.activeNodes() shouldBe emptyList()
-        verify(exactly = 1) { logger.debug("Ignored ArcDuels arena status version {} from {}", 3, "legacy") }
-        verify(exactly = 0) { logger.warn(any<String>(), any<Any>(), any<Throwable>()) }
+        verify(exactly = 1) { logger.warn("Rejected ArcDuels arena status: {}", RedisMessageRejection.MALFORMED_PAYLOAD) }
         directory.close()
     }
 
@@ -203,7 +196,7 @@ class NetworkArenaDirectoryTest : StringSpec({
             ),
         )
 
-        now = now.minusSeconds(1)
+        clock.advance(Duration.ofSeconds(-1))
 
         directory.select(rules) shouldBe null
         directory.close()

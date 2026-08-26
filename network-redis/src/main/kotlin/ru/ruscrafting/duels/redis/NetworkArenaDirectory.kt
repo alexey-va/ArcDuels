@@ -1,9 +1,9 @@
 package ru.ruscrafting.duels.redis
 
 import com.google.gson.Gson
-import com.google.gson.JsonElement
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import ru.arc.network.LeasedNetworkDirectory
 import ru.arc.redis.RedisOperations
 import ru.arc.redis.safety.BoundedJsonCodec
 import ru.arc.redis.safety.JsonArrayContract
@@ -20,7 +20,6 @@ import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 
 data class ArenaAdvertisement(
     val id: ArenaId,
@@ -85,7 +84,11 @@ class NetworkArenaDirectory(
     private val staleAfter: Duration = Duration.ofSeconds(6),
     private val logger: Logger = LoggerFactory.getLogger(NetworkArenaDirectory::class.java),
 ) : AutoCloseable {
-    private val nodes = ConcurrentHashMap<ServerId, ObservedStatus>()
+    private val nodes = LeasedNetworkDirectory<ServerId, ArenaNodeStatus>(
+        leaseMillis = staleAfter.toMillis(),
+        maxEntries = MAX_NETWORK_NODES,
+        clock = clock::millis,
+    )
     private val codec = ArenaStatusCodec()
     private val bus =
         OriginBoundRedisBus(
@@ -107,7 +110,7 @@ class NetworkArenaDirectory(
         require(status.server == localServer) { "Cannot publish arena status owned by another server" }
         val message = ArenaWireMessage.current(status)
         codec.encode(message)
-        nodes[localServer] = ObservedStatus(status, clock.millis())
+        nodes.observe(localServer, localServer.value, status)
         bus.publish(message)
     }
 
@@ -156,10 +159,8 @@ class NetworkArenaDirectory(
             )
 
     fun activeNodes(): List<ArenaNodeStatus> {
-        val now = clock.millis()
-        return nodes.values
-            .filter { isFreshObservation(now, it.receivedAtMillis, staleAfter.toMillis()) }
-            .map(ObservedStatus::status)
+        return nodes.snapshot()
+            .map { it.value }
             .sortedBy { it.server.value }
     }
 
@@ -169,35 +170,26 @@ class NetworkArenaDirectory(
     }
 
     private fun receive(message: ArenaWireMessage, originServer: String) {
-        val status = message.status
-        if (status == null) {
-            logger.debug("Ignored ArcDuels arena status version {} from {}", message.version, originServer)
-            return
-        }
-        nodes[status.server] = ObservedStatus(status, clock.millis())
+        nodes.observe(message.status.server, originServer, message.status)
     }
 
     private fun logRejection(reason: RedisMessageRejection) {
         logger.warn("Rejected ArcDuels arena status: {}", reason)
     }
 
-    private data class ObservedStatus(
-        val status: ArenaNodeStatus,
-        val receivedAtMillis: Long,
-    )
-
     companion object {
         const val CHANNEL = "arcduels:v1:arenas"
+        private const val MAX_NETWORK_NODES = 10_000
     }
 }
 
 private data class ArenaWireMessage(
     val version: Int,
     val server: ServerId,
-    val status: ArenaNodeStatus?,
+    val status: ArenaNodeStatus,
 ) {
     init {
-        require(status == null || status.server == server) { "Arena wire server does not match its status" }
+        require(status.server == server) { "Arena wire server does not match its status" }
     }
 
     companion object {
@@ -215,8 +207,8 @@ private class ArenaStatusCodec(
             type = WireStatus::class.java,
             rootContract =
                 JsonObjectContract(
-                    allowedFields = setOf("version", "server", "arenas", "queuedPairs", "ownInventory", "kit"),
-                    requiredFields = setOf("version", "server", "queuedPairs"),
+                    allowedFields = setOf("version", "server", "arenas", "queuedPairs"),
+                    requiredFields = setOf("version", "server", "arenas", "queuedPairs"),
                     fieldContracts =
                         mapOf(
                             "arenas" to
@@ -238,17 +230,15 @@ private class ArenaStatusCodec(
                     maxStringCharacters = 64,
                 ),
             validate = { wire ->
-                require(wire.version >= 0) { "Arena wire version cannot be negative" }
+                require(wire.version == ARENA_WIRE_VERSION) { "Unsupported arena wire version ${wire.version}" }
                 ServerId(wire.server)
-                if (wire.version == ARENA_WIRE_VERSION) {
-                    requireNotNull(wire.arenas) { "Current arena status is missing arenas" }
-                    require(wire.arenas.size <= MAX_ARENAS_PER_NODE) { "Too many wire arenas" }
-                }
+                requireNotNull(wire.arenas) { "Current arena status is missing arenas" }
+                require(wire.arenas.size <= MAX_ARENAS_PER_NODE) { "Too many wire arenas" }
             },
         )
 
     override fun encode(value: ArenaWireMessage): String {
-        require(value.version == ARENA_WIRE_VERSION && value.status != null) {
+        require(value.version == ARENA_WIRE_VERSION) {
             "Only the current arena wire version can be published"
         }
         return wireCodec.encode(WireStatus.from(value.status))
@@ -256,9 +246,7 @@ private class ArenaStatusCodec(
 
     override fun decode(raw: String): ArenaWireMessage {
         val wire = wireCodec.decode(raw)
-        val server = ServerId(wire.server)
-        if (wire.version != ARENA_WIRE_VERSION) return ArenaWireMessage(wire.version, server, null)
-        return ArenaWireMessage(wire.version, server, wire.toStatus())
+        return ArenaWireMessage(wire.version, ServerId(wire.server), wire.toStatus())
     }
 
     private data class WireStatus(
@@ -266,8 +254,6 @@ private class ArenaStatusCodec(
         val server: String,
         val arenas: List<WireArena>? = null,
         val queuedPairs: Int,
-        @Suppress("unused") val ownInventory: JsonElement? = null,
-        @Suppress("unused") val kit: JsonElement? = null,
     ) {
         fun toStatus(): ArenaNodeStatus =
             ArenaNodeStatus(
