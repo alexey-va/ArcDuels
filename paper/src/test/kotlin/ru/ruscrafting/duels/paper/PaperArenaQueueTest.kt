@@ -3,8 +3,9 @@ package ru.ruscrafting.duels.paper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
+import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.DuelMode
@@ -15,10 +16,12 @@ import ru.ruscrafting.duels.domain.CombatModifiers
 class PaperArenaQueueTest : StringSpec({
     lateinit var server: ServerMock
     lateinit var plugin: ArcDuelsPlugin
+    lateinit var paper: MockBukkitTestRuntime
 
     beforeSpec {
-        server = MockBukkit.mock()
-        plugin = MockBukkit.load(ArcDuelsPlugin::class.java)
+        paper = MockBukkitTestRuntime.open()
+        server = paper.server
+        plugin = paper.loadPlugin<ArcDuelsPlugin>()
         server.addSimpleWorld("queue-world")
         configureArena(plugin, "queue", "queue-world")
     }
@@ -31,7 +34,7 @@ class PaperArenaQueueTest : StringSpec({
         catalog.capacity(DuelMode.OWN_INVENTORY, DuelObjectiveType.KING_OF_THE_HILL) shouldBe ArenaCapacity(0, 0)
     }
 
-    afterSpec { MockBukkit.unmock() }
+    afterSpec { paper.close() }
 
     "arena waiters are FIFO cancelled entries are skipped and reservation stays exclusive" {
         val catalog = PaperArenaCatalog.load(plugin)

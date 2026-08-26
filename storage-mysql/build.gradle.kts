@@ -16,7 +16,7 @@ configurations[integrationTest.implementationConfigurationName].extendsFrom(conf
 configurations[integrationTest.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
 
 dependencies {
-    add(integrationTest.implementationConfigurationName, "org.testcontainers:testcontainers-mysql:2.0.5")
+    add(integrationTest.implementationConfigurationName, "ru.arc:arc-core-integration-testing:1.0-SNAPSHOT")
 }
 
 tasks.register<Test>("integrationTest") {

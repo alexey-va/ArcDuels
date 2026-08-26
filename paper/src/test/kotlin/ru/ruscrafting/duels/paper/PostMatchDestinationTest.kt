@@ -3,7 +3,8 @@ package ru.ruscrafting.duels.paper
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Location
-import org.mockbukkit.mockbukkit.MockBukkit
+import org.mockbukkit.mockbukkit.ServerMock
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
@@ -14,9 +15,15 @@ import java.time.Instant
 import java.util.UUID
 
 class PostMatchDestinationTest : StringSpec({
-    val server = MockBukkit.mock()
+    lateinit var paper: MockBukkitTestRuntime
+    lateinit var server: ServerMock
 
-    afterSpec { MockBukkit.unmock() }
+    beforeSpec {
+        paper = MockBukkitTestRuntime.open()
+        server = paper.server
+    }
+
+    afterSpec { paper.close() }
 
     "an arena without a lobby returns each participant to their assigned arena spawn" {
         val world = server.addSimpleWorld("pvp")

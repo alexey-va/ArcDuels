@@ -164,6 +164,8 @@ class NetworkArenaDirectory(
             .sortedBy { it.server.value }
     }
 
+    fun activeLeaseCount(): Int = nodes.size()
+
     override fun close() {
         bus.close()
         nodes.clear()

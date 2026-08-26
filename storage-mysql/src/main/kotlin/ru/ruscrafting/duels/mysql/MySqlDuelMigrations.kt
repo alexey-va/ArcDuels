@@ -3,6 +3,8 @@ package ru.ruscrafting.duels.mysql
 import ru.arc.sql.SqlMigration
 
 object MySqlDuelMigrations {
+    const val CURRENT_VERSION = 8
+
     val all: List<SqlMigration> =
         listOf(
             SqlMigration(

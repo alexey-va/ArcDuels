@@ -12,7 +12,6 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
 import org.bukkit.event.inventory.ClickType
-import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
@@ -49,22 +48,26 @@ import java.util.UUID
 import java.util.logging.Handler
 import java.util.logging.LogRecord
 import ru.arc.logging.ArcLogging
+import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.testing.loadPlugin
 
 @Suppress("DEPRECATION")
 class ArcDuelsPluginTest : StringSpec({
     lateinit var server: ServerMock
     lateinit var plugin: ArcDuelsPlugin
+    lateinit var paper: MockBukkitTestRuntime
 
     beforeSpec {
-        server = MockBukkit.mock()
+        paper = MockBukkitTestRuntime.open()
+        server = paper.server
     }
 
     afterSpec {
-        MockBukkit.unmock()
+        paper.close()
     }
 
     "default plugin configuration enables without MySQL or Redis" {
-        plugin = MockBukkit.load(ArcDuelsPlugin::class.java)
+        plugin = paper.loadPlugin<ArcDuelsPlugin>()
 
         plugin.isEnabled shouldBe true
         ArcLogging.disableStructuredEmit shouldBe true

@@ -2,6 +2,10 @@ package ru.ruscrafting.duels.paper
 
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.configuration.file.YamlConfiguration
+import ru.arc.core.BukkitTaskScheduler
+import ru.arc.observability.RuntimeHealthContribution
+import ru.arc.observability.RuntimeHealthState
+import ru.arc.paper.runtime.PaperPluginRuntime
 import ru.arc.redis.RedisConnection
 import ru.arc.redis.RedisManager
 import ru.arc.redis.ServerIdentity
@@ -23,6 +27,7 @@ import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
+import ru.ruscrafting.duels.mysql.MySqlDuelMigrations
 import ru.ruscrafting.duels.redis.ArenaNodeStatus
 import ru.ruscrafting.duels.redis.CrossServerChallengeBus
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
@@ -36,35 +41,36 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 open class ArcDuelsPlugin : JavaPlugin() {
-    private val closeables = mutableListOf<AutoCloseable>()
+    private var pluginRuntime: PaperPluginRuntime? = null
     private var sessions: DuelSessionManager? = null
 
     override fun onEnable() {
-        saveDefaultConfig()
-        runCatching { DuelLog.install(this) }
-            .onFailure { logger.warning("Could not initialize arc-core diagnostics: ${it.message}") }
-        runCatching { bootstrap() }
+        val lifecycle = PaperPluginRuntime(this, "arc-duels", BukkitTaskScheduler(this)).also {
+            pluginRuntime = it
+            it.start("version" to pluginMeta.version)
+        }
+        runCatching {
+            saveDefaultConfig()
+            runCatching { DuelLog.install(this) }
+                .onFailure { logger.warning("Could not initialize arc-core diagnostics: ${it.message}") }
+            bootstrap(lifecycle)
+        }
             .onFailure { failure ->
                 logger.severe("ArcDuels could not start: ${failure.javaClass.simpleName}: ${failure.message}")
-                closeResources()
+                runCatching { lifecycle.health.markDown(); lifecycle.emitHealth() }
                 server.pluginManager.disablePlugin(this)
             }
     }
 
     override fun onDisable() {
-        DuelLog.info("plugin-disable", "shutting down sessions and resources")
-        runCatching { sessions?.shutdown() }
-            .onFailure { failure ->
-                logger.severe(
-                    "ArcDuels session shutdown failed; durable snapshots remain the recovery authority: " +
-                        "${failure.javaClass.simpleName}: ${failure.message}",
-                )
-            }
+        DuelLog.info("plugin-disable", "shutting down runtime-owned sessions and resources")
+        runCatching { pluginRuntime?.close() }
+            .onFailure { failure -> logger.severe("ArcDuels runtime shutdown failed: ${failure.javaClass.simpleName}: ${failure.message}") }
+        pluginRuntime = null
         sessions = null
-        closeResources()
     }
 
-    private fun bootstrap() {
+    private fun bootstrap(lifecycle: PaperPluginRuntime) {
         val serverId = ServerId(config.getString("server-id", server.name)!!)
         DuelLog.info("plugin-bootstrap", "server={} version={}", serverId.value, pluginMeta.version)
         val locales = LocaleService.load(this)
@@ -72,11 +78,11 @@ open class ArcDuelsPlugin : JavaPlugin() {
         serverNames.display(serverId)
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
-        val persistence = createPersistence()
+        val persistence = createPersistence(lifecycle)
         val statistics = persistence.statistics
-        val network = createNetwork(serverId, statistics, locales)
+        val network = createNetwork(serverId, statistics, locales, lifecycle)
         val transfer = network.challenges?.let { ProxyPlayerTransfer(this) }
-        if (transfer != null) closeables += transfer
+        if (transfer != null) lifecycle.own(transfer)
         val battlePass = BattlePassIntegration(this)
         val coordinator =
             MatchCoordinator(
@@ -129,7 +135,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 }
             }
             purge.run()
-            server.scheduler.runTaskTimer(this, purge, cleanupMinutes * 1_200L, cleanupMinutes * 1_200L)
+            lifecycle.tasks.runTimer(cleanupMinutes * 1_200L, cleanupMinutes * 1_200L, purge::run)
         } else {
             logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
         }
@@ -144,7 +150,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             "shutdown.recovery-timeout-ms must be between 100 and 30000"
         }
         val cmiCombatTags = CmiCombatTagIntegration(this)
-        closeables += cmiCombatTags
+        lifecycle.own(cmiCombatTags)
         val recoveryApplyDelayTicks =
             if (config.contains("player-data-sync.settle-delay-ticks")) {
                 config.getLong("player-data-sync.settle-delay-ticks")
@@ -175,6 +181,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 defaultPostMatchReturnPolicy = defaultPostMatchReturnPolicy,
             )
         sessions = sessionManager
+        lifecycle.own(AutoCloseable { sessionManager.shutdown() })
         val challenges =
             ChallengeRegistry(
                 Clock.systemUTC(),
@@ -201,7 +208,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 rematchWindow = Duration.ofSeconds(config.getLong("rematch-window-seconds", 180L).coerceIn(30L, 900L)),
                 arenaChoices = { rules -> network.arenas?.choices(rules) ?: arenas.choices(serverId, rules) },
             )
-        closeables += controller
+        lifecycle.own(controller)
         val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames, controller::hasReturnOffer)
         val gui =
             DuelGuiService(
@@ -257,8 +264,29 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 )
             }
             publishArenaStatus.run()
-            server.scheduler.runTaskTimer(this, publishArenaStatus, ARENA_HEARTBEAT_TICKS, ARENA_HEARTBEAT_TICKS)
+            lifecycle.tasks.runTimer(ARENA_HEARTBEAT_TICKS, ARENA_HEARTBEAT_TICKS, publishArenaStatus::run)
         }
+        lifecycle.registerHealth("runtime") {
+            val mysqlReady = persistence.durable
+            val redisReady = network.redisReady
+            RuntimeHealthContribution(
+                state = if (mysqlReady && redisReady) RuntimeHealthState.UP else RuntimeHealthState.DEGRADED,
+                recoveryBacklog = playerStates.pendingCount(),
+                activeLeases = network.activeLeaseCount(),
+                schemas = buildMap {
+                    put("player_escrow", DurablePlayerStateService.CORE_ESCROW_FORMAT_VERSION)
+                    if (mysqlReady) put("mysql", MySqlDuelMigrations.CURRENT_VERSION)
+                },
+                dependencies = mapOf("mysql" to mysqlReady, "redis" to redisReady),
+            )
+        }
+        lifecycle.ready(
+            "server" to serverId.value,
+            "arenas" to arenas.size(),
+            "mysql" to persistence.durable,
+            "redis" to network.redisReady,
+        )
+        lifecycle.reportHealthEvery(HEALTH_REPORT_TICKS)
         logger.info("ArcDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
         DuelLog.info(
             "plugin-ready",
@@ -280,7 +308,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         if (kits.all().isEmpty()) logger.warning("No kits are configured; only own-inventory mode is available")
     }
 
-    private fun createPersistence(): Persistence {
+    private fun createPersistence(lifecycle: PaperPluginRuntime): Persistence {
         if (!config.getBoolean("mysql.enabled", false)) {
             val repository = InMemoryStatisticsRepository()
             return Persistence(repository, repository, UnavailablePlayerStateEscrowRepository, durable = false)
@@ -312,7 +340,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             repository.close()
             throw IllegalStateException("MySQL is enabled but its schema could not be prepared", failure)
         }
-        closeables += repository
+        lifecycle.own(repository)
         return Persistence(repository, repository, repository, durable = true)
     }
 
@@ -320,8 +348,9 @@ open class ArcDuelsPlugin : JavaPlugin() {
         serverId: ServerId,
         statistics: StatisticsRepository,
         locales: LocaleService,
+        lifecycle: PaperPluginRuntime,
     ): NetworkRuntime {
-        if (!config.getBoolean("redis.enabled", false)) return NetworkRuntime(NoOpDuelEventPublisher)
+        if (!config.getBoolean("redis.enabled", false)) return NetworkRuntime(NoOpDuelEventPublisher, redisReady = true)
         val redis = redisSettings()
         val manager =
             RedisManager(
@@ -398,9 +427,9 @@ open class ArcDuelsPlugin : JavaPlugin() {
             runCatching(bus::close)
             runCatching(manager::close)
             logger.warning("Redis is unavailable; ArcDuels will continue without cross-server events: ${failure.javaClass.simpleName}")
-            return NetworkRuntime(NoOpDuelEventPublisher)
+            return NetworkRuntime(NoOpDuelEventPublisher, redisReady = false)
         }
-        closeables += AutoCloseable {
+        lifecycle.own(AutoCloseable {
             var firstFailure: Throwable? = null
             listOf(players::close, arenas::close, challengeBus::close, bus::close, manager::close).forEach { close ->
                 runCatching(close).onFailure { failure ->
@@ -409,8 +438,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 }
             }
             firstFailure?.let { throw it }
-        }
-        return NetworkRuntime(bus, players, arenas, challengeBus)
+        })
+        return NetworkRuntime(bus, players, arenas, challengeBus, redisReady = true)
     }
 
     private fun redisSettings(): RedisSettings {
@@ -440,13 +469,6 @@ open class ArcDuelsPlugin : JavaPlugin() {
         )
     }
 
-    private fun closeResources() {
-        closeables.asReversed().forEach { resource ->
-            runCatching(resource::close).onFailure { logger.warning("Could not close ArcDuels resource: ${it.message}") }
-        }
-        closeables.clear()
-    }
-
     private data class Persistence(
         val statistics: StatisticsRepository,
         val presets: DuelPresetRepository,
@@ -459,7 +481,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val players: NetworkPlayerDirectory? = null,
         val arenas: NetworkArenaDirectory? = null,
         val challenges: CrossServerChallengeBus? = null,
-    )
+        val redisReady: Boolean,
+    ) {
+        fun activeLeaseCount(): Int = (players?.activeLeaseCount() ?: 0) + (arenas?.activeLeaseCount() ?: 0)
+    }
 
     private data class RedisSettings(
         val host: String,
@@ -499,6 +524,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     private companion object {
         const val ARENA_HEARTBEAT_TICKS = 40L
+        const val HEALTH_REPORT_TICKS = 1_200L
     }
 }
 

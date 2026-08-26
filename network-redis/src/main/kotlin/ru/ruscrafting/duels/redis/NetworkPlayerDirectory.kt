@@ -62,6 +62,8 @@ class NetworkPlayerDirectory(
 
     fun find(username: String): NetworkPlayer? = players().firstOrNull { it.username.equals(username, ignoreCase = true) }
 
+    fun activeLeaseCount(): Int = snapshots.size()
+
     override fun close() {
         bus.close()
         snapshots.clear()

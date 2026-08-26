@@ -5,11 +5,11 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
-import org.testcontainers.mysql.MySQLContainer
-import org.testcontainers.utility.DockerImageName
 import ru.arc.sql.SqlConnectionConfig
 import ru.arc.sql.SqlRuntime
 import ru.arc.sql.SqlSslMode
+import ru.arc.testing.containers.MySqlTestService
+import ru.arc.testing.containers.MySqlTestSettings
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelPreset
@@ -30,15 +30,19 @@ import java.util.UUID
 import java.util.concurrent.ExecutionException
 
 class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
-    private val mysql = MySQLContainer(DockerImageName.parse("mysql:8.4.10"))
-        .withDatabaseName("arcduels")
-        .withUsername("arcduels")
-        .withPassword("integration-test-only")
+    private lateinit var mysql: MySqlTestService
     private lateinit var repository: MySqlStatisticsRepository
 
     init {
         beforeSpec {
-            mysql.start()
+            mysql = MySqlTestService.start(
+                MySqlTestSettings(
+                    image = "mysql:8.4.10",
+                    database = "arcduels",
+                    username = "arcduels",
+                    password = "integration-test-only",
+                ),
+            )
             repository = openRepository("arcduels-it")
             repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
             repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
@@ -46,7 +50,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
 
         afterSpec {
             if (::repository.isInitialized) repository.close()
-            mysql.stop()
+            if (::mysql.isInitialized) mysql.close()
         }
 
         "ranked result is atomic, idempotent and visible in the leaderboard" {
@@ -343,7 +347,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
         }
 
         "migration rerun converges after ddl committed before history record" {
-            mysql.createConnection("").use { connection ->
+            mysql.endpoint.connect().use { connection ->
                 connection.createStatement().use { statement ->
                     statement.executeUpdate("DELETE FROM `arcduels_schema_history` WHERE `version` = 4")
                 }
@@ -354,7 +358,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
         }
 
         "history and preset migrations converge after ddl committed before journal" {
-            mysql.createConnection("").use { connection ->
+            mysql.endpoint.connect().use { connection ->
                 connection.createStatement().use { statement ->
                     statement.executeUpdate(
                         """
@@ -401,7 +405,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
     }
 
     private fun retainedCount(snapshot: PlayerStateEscrow): Int =
-        mysql.createConnection("").use { connection ->
+        mysql.endpoint.connect().use { connection ->
             connection.prepareStatement(
                 "SELECT COUNT(*) FROM `arcduels_player_state_archive` WHERE `player_id` = ? AND `match_id` = ?",
             ).use { statement ->
@@ -418,11 +422,11 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
         MySqlStatisticsRepository(
             SqlRuntime.create(
                 SqlConnectionConfig(
-                    host = mysql.host,
-                    port = mysql.firstMappedPort,
-                    database = mysql.databaseName,
-                    username = mysql.username,
-                    password = mysql.password,
+                    host = mysql.endpoint.host,
+                    port = mysql.endpoint.port,
+                    database = mysql.endpoint.database,
+                    username = mysql.endpoint.username,
+                    password = mysql.endpoint.password,
                     sslMode = SqlSslMode.DISABLED,
                     minimumIdle = 0,
                     maximumPoolSize = 4,

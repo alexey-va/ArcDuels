@@ -406,7 +406,7 @@ internal class DurablePlayerStateService(
         return current
     }
 
-    private companion object {
+    companion object {
         const val MAX_ESCROW_PAYLOAD_BYTES = 8 * 1024 * 1024
         // A lost COMMIT response can race a fresh connection. Require an
         // immediate read plus six delayed confirmations (30 seconds total)

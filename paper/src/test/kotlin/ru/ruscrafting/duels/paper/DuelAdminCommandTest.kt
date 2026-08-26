@@ -7,8 +7,9 @@ import io.mockk.mockk
 import io.mockk.verify
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Location
-import org.mockbukkit.mockbukkit.MockBukkit
 import org.mockbukkit.mockbukkit.ServerMock
+import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
@@ -22,13 +23,15 @@ import java.util.UUID
 class DuelAdminCommandTest : StringSpec({
     lateinit var server: ServerMock
     lateinit var plugin: ArcDuelsPlugin
+    lateinit var paper: MockBukkitTestRuntime
 
     beforeSpec {
-        server = MockBukkit.mock()
-        plugin = MockBukkit.load(ArcDuelsPlugin::class.java)
+        paper = MockBukkitTestRuntime.open()
+        server = paper.server
+        plugin = paper.loadPlugin<ArcDuelsPlugin>()
     }
 
-    afterSpec { MockBukkit.unmock() }
+    afterSpec { paper.close() }
 
     "admin arena editor persists both spawns normalizes corners and validates before enable" {
         val world = server.addSimpleWorld("admin-world")
