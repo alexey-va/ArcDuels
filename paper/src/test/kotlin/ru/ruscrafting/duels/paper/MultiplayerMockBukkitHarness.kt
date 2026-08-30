@@ -1,14 +1,20 @@
 package ru.ruscrafting.duels.paper
 
 import io.papermc.paper.entity.TeleportFlag
+import io.mockk.mockk
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.event.ClickEvent
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.entity.Entity
 import org.bukkit.entity.Player
 import org.bukkit.event.HandlerList
+import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.entity.PlayerMock
+import org.mockbukkit.mockbukkit.simulate.entity.PlayerSimulation
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.paper.chunk.PaperChunkKey
 import ru.arc.paper.chunk.PaperChunkTicketAddResult
@@ -31,7 +37,9 @@ import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
 import ru.ruscrafting.duels.domain.ServerId
+import ru.ruscrafting.duels.redis.CrossServerGroupBus
 import java.time.Instant
+import java.time.Clock
 import java.util.concurrent.CompletableFuture
 
 internal data class MultiplayerHarness(
@@ -109,6 +117,63 @@ internal fun teamRoster(players: List<Player>): MultiplayerRoster =
             MultiplayerParticipant(PlayerId(player.uniqueId), team = index % 2 + 1, kitId = KitId("classic"))
         },
     )
+
+internal fun MultiplayerHarness.registerGui(
+    targets: DuelTargetDirectory = DuelTargetDirectory(plugin, ServerId("group-test"), null),
+    groupBus: CrossServerGroupBus? = null,
+    transfer: PlayerTransfer? = null,
+    duelSessions: DuelSessionManager = mockk(relaxed = true),
+    playerDataReady: (Player) -> Boolean = { true },
+    clock: Clock = Clock.systemUTC(),
+    backAction: (Player) -> Unit = { },
+): MultiplayerGuiService =
+    MultiplayerGuiService(
+        plugin = plugin,
+        kits = kits,
+        sessions = manager,
+        duelSessions = duelSessions,
+        locales = locales,
+        tasks = tasks,
+        targets = targets,
+        localServer = ServerId("group-test"),
+        serverNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
+        groupBus = groupBus,
+        transfer = transfer,
+        playerDataReady = playerDataReady,
+        clock = clock,
+        backAction = backAction,
+    ).also { plugin.server.pluginManager.registerEvents(it, plugin) }
+
+internal fun PlayerMock.click(slot: Int, clickType: ClickType = ClickType.LEFT) =
+    PlayerSimulation(this).simulateInventoryClick(openInventory, clickType, slot)
+
+internal fun ItemStack?.plainLore(): String =
+    this?.itemMeta?.lore().orEmpty().joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+
+internal fun ItemStack?.plainName(): String =
+    this?.itemMeta?.displayName()?.let(PlainTextComponentSerializer.plainText()::serialize).orEmpty()
+
+internal fun Component.runCommands(): List<String> =
+    buildList {
+        clickEvent()
+            ?.takeIf { it.action() == ClickEvent.Action.RUN_COMMAND }
+            ?.payload()
+            ?.let { it as? ClickEvent.Payload.Text }
+            ?.value()
+            ?.let(::add)
+        children().forEach { addAll(it.runCommands()) }
+    }
+
+internal fun MultiplayerHarness.registerGameplayListener() {
+    plugin.server.pluginManager.registerEvents(MultiplayerGameplayListener(manager, locales), plugin)
+}
+
+internal fun MultiplayerHarness.startAndArrive(roster: MultiplayerRoster) {
+    manager.start(roster, roster.playerIds.associateWith { playerId -> requireNotNull(plugin.server.getPlayer(playerId.value)) })
+    paper.performTicks(4)
+    teleports.completeAll()
+    paper.performTicks(4)
+}
 
 private object AlwaysAvailableChunkTickets : PaperChunkTicketBackend {
     override fun add(key: PaperChunkKey): PaperChunkTicketAddResult = PaperChunkTicketAddResult.ADDED

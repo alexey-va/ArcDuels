@@ -265,11 +265,24 @@ multiplayer:
   network-unavailable: '<red>Network group matches are currently unavailable.</red>'
   invalid-size: '<red>Select 3 to 12 participants and keep every team non-empty.</red>'
   player-left: '<red>A participant left or became busy.</red>'
-  invited: '<#fff4d6><player> invited you to a group match.</#fff4d6>'
+  invited: |-
+    <#fff4d6><player> invited you to a group match.</#fff4d6>
+    <#8c8c8c>Players:</#8c8c8c> <white><players></white> <dark_gray>·</dark_gray> <layout>
+  invite-open: '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Choose a kit and accept</#2bba43>'
+  invite-open-hover: |-
+    <#fff4d6>Open participation settings</#fff4d6>
+    <#8c8c8c>Review the format and choose your kit.</#8c8c8c>
+  invite-decline: '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Decline</#c42323>'
+  invite-decline-hover: '<#8c8c8c>Decline this group match.</#8c8c8c>'
+  invite-unavailable: '<#8c8c8c>This group invitation is no longer available.</#8c8c8c>'
+  declined-self: '<#8c8c8c>You declined the group match invitation.</#8c8c8c>'
+  preparing: |-
+    <#2bba43>Everyone is ready.</#2bba43>
+    <#8c8c8c>Protecting inventories and gathering players at the arena…</#8c8c8c>
   expired: '<gray>The group lobby expired.</gray>'
   cancelled: '<gray>The host cancelled the group match.</gray>'
   declined: '<gray>A player declined the invitation.</gray>'
-  start-failed: '<red>Could not start the group match:</red> <gray><reason></gray>'
+  start-failed: '<red>Could not start the group match.</red> <gray>Player state is protected; try assembling the match again.</gray>'
   result-pending: '<yellow>The result is still being saved; every player state remains protected.</yellow>'
   countdown:
     title: '<#fff4d6><seconds></#fff4d6>'
@@ -347,6 +360,7 @@ error:
   leaderboard: '<red>Could not load the leaderboard.</red>'
   invalid-challenge-id: '<red>Invalid challenge identifier.</red>'
   invalid-match-id: '<red>Invalid match identifier.</red>'
+  invalid-lobby-id: '<red>Invalid group lobby identifier.</red>'
   history: '<red>Could not load match history.</red>'
   presets: '<red>Could not load saved setups.</red>'
 

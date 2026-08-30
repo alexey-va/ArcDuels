@@ -3,6 +3,8 @@ package ru.ruscrafting.duels.paper
 import io.papermc.paper.datacomponent.DataComponentTypes
 import io.papermc.paper.datacomponent.item.ResolvableProfile
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.event.ClickEvent
+import net.kyori.adventure.text.event.HoverEvent
 import net.kyori.adventure.text.format.TextDecoration
 import org.bukkit.Bukkit
 import org.bukkit.Material
@@ -38,7 +40,12 @@ import ru.ruscrafting.duels.redis.NetworkGroupParticipant
 import java.time.Clock
 import java.util.UUID
 
-/** Inventory-only multiplayer setup, invitation, kit selection, and readiness flow. */
+internal interface MultiplayerInvitationActions {
+    fun openInvitation(player: Player, lobbyId: UUID)
+    fun declineInvitation(player: Player, lobbyId: UUID)
+}
+
+/** Multiplayer setup, chat invitation, kit selection, and readiness flow. */
 internal class MultiplayerGuiService(
     private val plugin: JavaPlugin,
     private val kits: KitRegistry,
@@ -54,7 +61,7 @@ internal class MultiplayerGuiService(
     private val playerDataReady: (Player) -> Boolean = { true },
     private val clock: Clock = Clock.systemUTC(),
     private val backAction: (Player) -> Unit,
-) : Listener, AutoCloseable {
+) : Listener, AutoCloseable, MultiplayerInvitationActions {
     private data class Draft(
         val hostId: UUID,
         val selected: LinkedHashSet<UUID> = linkedSetOf(),
@@ -99,6 +106,7 @@ internal class MultiplayerGuiService(
     private val provisionalKits = mutableMapOf<UUID, KitId>()
     private val remoteInvites = mutableMapOf<UUID, RemoteInvite>()
     private val preparationInFlight = mutableSetOf<Pair<UUID, UUID>>()
+    private val preparationRetryScheduled = mutableSetOf<Pair<UUID, UUID>>()
     private val guiItems = GuiItemCatalog.load(plugin)
     private val networkSubscription = groupBus?.subscribe { message -> tasks.runSync { onNetworkMessage(message) } }
 
@@ -115,6 +123,37 @@ internal class MultiplayerGuiService(
         }
         val draft = drafts.getOrPut(player.uniqueId) { Draft(player.uniqueId, hostKit = firstKit, sharedKit = firstKit) }
         openSetup(player, draft)
+    }
+
+    override fun openInvitation(player: Player, lobbyId: UUID) {
+        val localLobby = lobbyByPlayer[player.uniqueId]?.let(lobbies::get)
+        if (localLobby?.id == lobbyId && localLobby.phase == LobbyPhase.INVITING && player.uniqueId != localLobby.hostId) {
+            openLobby(player, localLobby)
+            return
+        }
+        val remote = remoteInvites[player.uniqueId]
+        if (remote?.message?.lobbyId == lobbyId && !remote.preparing) {
+            openRemoteLobby(player, remote)
+            return
+        }
+        player.sendMessage(locales.notice(player, "multiplayer.invite-unavailable"))
+    }
+
+    override fun declineInvitation(player: Player, lobbyId: UUID) {
+        val localLobby = lobbyByPlayer[player.uniqueId]?.let(lobbies::get)
+        if (localLobby?.id == lobbyId && localLobby.phase == LobbyPhase.INVITING && player.uniqueId != localLobby.hostId) {
+            cancelLobby(localLobby, "multiplayer.declined")
+            return
+        }
+        val remote = remoteInvites[player.uniqueId]
+        if (remote?.message?.lobbyId == lobbyId && !remote.preparing) {
+            publishResponse(remote.message, player.uniqueId, GroupLobbyResponse.DECLINED, null)
+            remoteInvites.remove(player.uniqueId, remote)
+            closeLobbyInventory(player, lobbyId)
+            player.sendMessage(locales.notice(player, "multiplayer.declined-self"))
+            return
+        }
+        player.sendMessage(locales.notice(player, "multiplayer.invite-unavailable"))
     }
 
     @EventHandler
@@ -137,7 +176,7 @@ internal class MultiplayerGuiService(
             if (!invite.preparing) publishResponse(invite.message, event.player.uniqueId, GroupLobbyResponse.DECLINED, null)
             remoteInvites.remove(event.player.uniqueId, invite)
         }
-        lobbyByPlayer[event.player.uniqueId]?.let(lobbies::get)?.takeIf { it.phase == LobbyPhase.INVITING }
+        lobbyByPlayer[event.player.uniqueId]?.let(lobbies::get)?.takeIf { it.phase != LobbyPhase.STARTING }
             ?.let { cancelLobby(it, "multiplayer.player-left") }
     }
 
@@ -256,17 +295,26 @@ internal class MultiplayerGuiService(
             return openSetup(host, draft)
         }
         val selected = draft.selected.mapNotNull(targets::find)
-        val localMembers = selected.mapNotNull { target -> plugin.server.getPlayer(target.uniqueId) }
+        val memberProfiles = selected.map { target ->
+            val localPlayer = plugin.server.getPlayer(target.uniqueId)?.takeIf(Player::isOnline)
+            NetworkGroupParticipant(
+                PlayerId(target.uniqueId),
+                localPlayer?.name ?: target.name,
+                if (localPlayer != null) localServer else target.server,
+            )
+        }
+        val localMembers = memberProfiles
+            .filter { it.originServer == localServer }
+            .mapNotNull { participant -> plugin.server.getPlayer(participant.playerId.value) }
         if (selected.size != draft.selected.size || localMembers.any(::busy) || selected.any { it.uniqueId in lobbyByPlayer }) {
             host.sendMessage(locales.notice(host, "multiplayer.player-left"))
             return openSetup(host, draft)
         }
-        if (selected.any { !it.local } && (groupBus == null || transfer == null)) {
+        if (memberProfiles.any { it.originServer != localServer } && (groupBus == null || transfer == null)) {
             host.sendMessage(locales.notice(host, "multiplayer.network-unavailable"))
             return openSetup(host, draft)
         }
         val hostProfile = NetworkGroupParticipant(PlayerId(host.uniqueId), host.name, localServer)
-        val memberProfiles = selected.map { NetworkGroupParticipant(PlayerId(it.uniqueId), it.name, it.server) }
         val lobby = Lobby(
             id = UUID.randomUUID(),
             host = hostProfile,
@@ -281,9 +329,17 @@ internal class MultiplayerGuiService(
         lobby.participantIds.forEach { lobbyByPlayer[it] = lobby.id }
         drafts.remove(host.uniqueId)
         localMembers.forEach { member ->
-            member.sendMessage(locales.notice(member, "multiplayer.invited", LocaleService.text("player", host.name)))
-            openLobby(member, lobby)
+            sendInvitation(member, lobby.id, host.name, lobby.participantIds.size, lobby.layout)
         }
+        DuelLog.info(
+            "multiplayer-lobby-created",
+            MatchId(lobby.id),
+            "participants={} network={} layout={} kit_policy={}",
+            lobby.participantIds.size,
+            lobby.networked,
+            lobby.layout,
+            lobby.kitPolicy,
+        )
         val offersPublished = lobby.members.filter { it.originServer != localServer }.all { member ->
             publish(groupMessage(lobby, GroupLobbyMessageType.OFFER, targetId = member.playerId))
         }
@@ -295,6 +351,37 @@ internal class MultiplayerGuiService(
         tasks.runLater(INVITE_TIMEOUT_TICKS) {
             if (lobbies[lobby.id] === lobby) cancelLobby(lobby, "multiplayer.expired")
         }
+    }
+
+    private fun sendInvitation(
+        player: Player,
+        lobbyId: UUID,
+        hostName: String,
+        participantCount: Int,
+        layout: MultiplayerLayout,
+    ) {
+        val summary =
+            locales.component(
+                player,
+                "multiplayer.invited",
+                LocaleService.text("player", hostName),
+                LocaleService.text("players", participantCount),
+                LocaleService.component("layout", locales.component(player, layoutKey(layout))),
+            )
+        val open =
+            locales.component(player, "multiplayer.invite-open")
+                .clickEvent(ClickEvent.runCommand("/duel group open $lobbyId"))
+                .hoverEvent(HoverEvent.showText(locales.component(player, "multiplayer.invite-open-hover")))
+        val decline =
+            locales.component(player, "multiplayer.invite-decline")
+                .clickEvent(ClickEvent.runCommand("/duel group decline $lobbyId"))
+                .hoverEvent(HoverEvent.showText(locales.component(player, "multiplayer.invite-decline-hover")))
+        player.sendMessage(
+            locales.frameNotice(
+                player,
+                summary.append(Component.newline()).append(open).append(Component.newline()).append(decline),
+            ),
+        )
     }
 
     private fun openLobby(player: Player, lobby: Lobby) {
@@ -335,6 +422,14 @@ internal class MultiplayerGuiService(
             }
             34 -> if (player.uniqueId != lobby.hostId && !lobby.accepted(player.uniqueId)) {
                 lobby.acceptedKits[player.uniqueId] = lobby.sharedKit ?: provisionalKits.remove(player.uniqueId) ?: kits.all().first().id
+                DuelLog.info(
+                    "multiplayer-participant-accepted",
+                    MatchId(lobby.id),
+                    player,
+                    "ready={}/{}",
+                    lobby.acceptedKits.size,
+                    lobby.participantIds.size,
+                )
                 if (lobby.acceptedKits.size == lobby.participantIds.size) prepareOrStartLobby(lobby) else {
                     openLobby(player, lobby)
                     plugin.server.getPlayer(lobby.hostId)?.let { openLobby(it, lobby) }
@@ -363,10 +458,22 @@ internal class MultiplayerGuiService(
             },
         )
         removeLobby(lobby)
-        online.forEach(Player::closeInventory)
+        online.forEach { closeLobbyInventory(it, lobby.id) }
+        DuelLog.info("multiplayer-start-attempt", MatchId(lobby.id), "network=false participants={}", online.size)
         sessions.start(roster, online.associateBy { PlayerId(it.uniqueId) }).whenCompleteSync(tasks) { _, failure ->
-            if (failure != null) online.filter(Player::isOnline).forEach { player ->
-                player.sendMessage(locales.notice(player, "multiplayer.start-failed", LocaleService.text("reason", failure.message ?: "unknown")))
+            if (failure != null) {
+                DuelLog.warn(
+                    "multiplayer-start-failed",
+                    MatchId(lobby.id),
+                    "network=false error_type={} error={}",
+                    failure.javaClass.simpleName,
+                    failure.message,
+                )
+                online.filter(Player::isOnline).forEach { player ->
+                    player.sendMessage(locales.notice(player, "multiplayer.start-failed"))
+                }
+            } else {
+                DuelLog.info("multiplayer-started", MatchId(lobby.id), "network=false participants={}", online.size)
             }
         }
     }
@@ -376,7 +483,7 @@ internal class MultiplayerGuiService(
             publish(groupMessage(lobby, GroupLobbyMessageType.CANCEL))
         }
         lobby.participantIds.mapNotNull(plugin.server::getPlayer).forEach { player ->
-            player.closeInventory()
+            closeLobbyInventory(player, lobby.id)
             player.sendMessage(locales.notice(player, key))
         }
         removeLobby(lobby)
@@ -386,7 +493,11 @@ internal class MultiplayerGuiService(
     private fun beginNetworkPreparation(lobby: Lobby) {
         if (lobby.phase != LobbyPhase.INVITING) return
         lobby.phase = LobbyPhase.PREPARING
-        lobby.participantIds.mapNotNull(plugin.server::getPlayer).forEach(Player::closeInventory)
+        lobby.participantIds.mapNotNull(plugin.server::getPlayer).forEach { player ->
+            closeLobbyInventory(player, lobby.id)
+            player.sendMessage(locales.notice(player, "multiplayer.preparing"))
+        }
+        DuelLog.info("multiplayer-preparing", MatchId(lobby.id), "participants={}", lobby.participantIds.size)
         duelSessions.expectNetworkPlayers(lobby.participants.filter { it.originServer != localServer }.map(NetworkGroupParticipant::playerId))
         publish(groupMessage(lobby, GroupLobbyMessageType.PREPARE))
         scheduleNetworkStartCheck(lobby)
@@ -416,15 +527,25 @@ internal class MultiplayerGuiService(
         val roster = roster(lobby)
         val origins = lobby.participants.associate { it.playerId to it.originServer }
         removeLobby(lobby)
+        DuelLog.info("multiplayer-start-attempt", MatchId(lobby.id), "network=true participants={}", online.size)
         sessions.startNetwork(MatchId(lobby.id), roster, online.associateBy { PlayerId(it.uniqueId) }, origins)
             .whenCompleteSync(tasks) { _, failure ->
                 duelSessions.stopExpectingNetworkPlayers(origins.keys)
                 if (failure != null) {
+                    DuelLog.warn(
+                        "multiplayer-start-failed",
+                        MatchId(lobby.id),
+                        "network=true error_type={} error={}",
+                        failure.javaClass.simpleName,
+                        failure.message,
+                    )
                     publish(groupMessage(lobby, GroupLobbyMessageType.CANCEL))
                     online.filter(Player::isOnline).forEach { player ->
-                        player.sendMessage(locales.notice(player, "multiplayer.start-failed", LocaleService.text("reason", failure.message ?: "unknown")))
+                        player.sendMessage(locales.notice(player, "multiplayer.start-failed"))
                     }
                     recoverNetworkParticipants(lobby)
+                } else {
+                    DuelLog.info("multiplayer-started", MatchId(lobby.id), "network=true participants={}", online.size)
                 }
             }
     }
@@ -474,14 +595,15 @@ internal class MultiplayerGuiService(
         val initialKit = message.sharedKitId ?: kits.all().first().id
         val invite = RemoteInvite(message, initialKit)
         remoteInvites[player.uniqueId] = invite
-        player.sendMessage(locales.notice(player, "multiplayer.invited", LocaleService.text("player", message.participants.first().name)))
-        openRemoteLobby(player, invite)
+        sendInvitation(player, message.lobbyId, message.participants.first().name, message.participants.size, message.layout)
         val remainingTicks = ((message.expiresAtEpochMillis - clock.millis() + 49L) / 50L).coerceIn(1L, INVITE_TIMEOUT_TICKS)
         tasks.runLater(remainingTicks) {
             if (remoteInvites.remove(player.uniqueId, invite)) {
+                publishResponse(message, player.uniqueId, GroupLobbyResponse.FAILED, null)
                 player.takeIf(Player::isOnline)?.let { online ->
-                    online.closeInventory()
+                    closeLobbyInventory(online, message.lobbyId)
                     online.sendMessage(locales.notice(online, "multiplayer.expired"))
+                    if (invite.preparing && !duelSessions.requestRecovery(online)) duelSessions.handleJoin(online)
                 }
             }
         }
@@ -490,20 +612,28 @@ internal class MultiplayerGuiService(
     private fun receiveResponse(message: CrossServerGroupMessage) {
         if (message.hostServer != localServer) return
         val lobby = lobbies[message.lobbyId] ?: return
-        if (lobby.phase != LobbyPhase.INVITING || lobby.participants.map(NetworkGroupParticipant::playerId) != message.participants.map(NetworkGroupParticipant::playerId)) return
+        if (lobby.phase == LobbyPhase.STARTING || lobby.participants.map(NetworkGroupParticipant::playerId) != message.participants.map(NetworkGroupParticipant::playerId)) return
         val targetId = requireNotNull(message.targetId).value
         when (message.response) {
             GroupLobbyResponse.ACCEPTED -> {
+                if (lobby.phase != LobbyPhase.INVITING) return
                 val kitId = requireNotNull(message.kitId)
                 if (kits.all().none { it.id == kitId } || (lobby.sharedKit != null && lobby.sharedKit != kitId)) {
                     cancelLobby(lobby, "multiplayer.player-left")
                     return
                 }
                 lobby.acceptedKits[targetId] = kitId
+                DuelLog.info(
+                    "multiplayer-participant-accepted",
+                    MatchId(lobby.id),
+                    "ready={}/{} remote=true",
+                    lobby.acceptedKits.size,
+                    lobby.participantIds.size,
+                )
                 plugin.server.getPlayer(lobby.hostId)?.let { openLobby(it, lobby) }
                 if (lobby.acceptedKits.size == lobby.participantIds.size) prepareOrStartLobby(lobby)
             }
-            GroupLobbyResponse.DECLINED -> cancelLobby(lobby, "multiplayer.declined")
+            GroupLobbyResponse.DECLINED -> if (lobby.phase == LobbyPhase.INVITING) cancelLobby(lobby, "multiplayer.declined")
             GroupLobbyResponse.FAILED -> cancelLobby(lobby, "multiplayer.player-left")
             null -> Unit
         }
@@ -534,24 +664,44 @@ internal class MultiplayerGuiService(
         }
         localParticipants.forEach { participant ->
             val player = plugin.server.getPlayer(participant.playerId.value)
-            if (player == null || !playerDataReady(player)) {
+            if (player == null) {
                 publishResponse(message, participant.playerId.value, GroupLobbyResponse.FAILED, null)
                 return@forEach
             }
+            val key = message.lobbyId to player.uniqueId
             remoteInvites[player.uniqueId]?.let { invite ->
                 if (!invite.accepted) {
                     publishResponse(message, participant.playerId.value, GroupLobbyResponse.FAILED, null)
                     return@forEach
                 }
-                invite.preparing = true
-                player.closeInventory()
+                if (!invite.preparing) {
+                    invite.preparing = true
+                    closeLobbyInventory(player, message.lobbyId)
+                    if (localServer != message.hostServer) player.sendMessage(locales.notice(player, "multiplayer.preparing"))
+                }
             }
-            val key = message.lobbyId to player.uniqueId
+            if (!playerDataReady(player)) {
+                if (preparationRetryScheduled.add(key)) {
+                    tasks.runLater(NETWORK_START_POLL_TICKS) {
+                        preparationRetryScheduled.remove(key)
+                        if (clock.millis() < message.expiresAtEpochMillis) receivePreparation(message)
+                    }
+                }
+                return@forEach
+            }
             if (!preparationInFlight.add(key)) return@forEach
             duelSessions.storeOriginSnapshot(MatchId(message.lobbyId), player, inventoryReplaced = true)
                 .whenCompleteSync(tasks) { _, failure ->
                     preparationInFlight.remove(key)
                     if (failure != null) {
+                        DuelLog.warn(
+                            "multiplayer-origin-snapshot-failed",
+                            MatchId(message.lobbyId),
+                            player,
+                            "error_type={} error={}",
+                            failure.javaClass.simpleName,
+                            failure.message,
+                        )
                         publishResponse(message, player.uniqueId, GroupLobbyResponse.FAILED, null)
                         return@whenCompleteSync
                     }
@@ -573,6 +723,13 @@ internal class MultiplayerGuiService(
         val lobby = lobbies[message.lobbyId] ?: return
         if (lobby.phase != LobbyPhase.PREPARING) return
         lobby.ready += requireNotNull(message.targetId).value
+        DuelLog.debug(
+            "multiplayer-participant-ready",
+            MatchId(lobby.id),
+            "ready={}/{}",
+            lobby.ready.size,
+            lobby.participantIds.size,
+        )
     }
 
     private fun receiveCancellation(message: CrossServerGroupMessage) {
@@ -582,7 +739,7 @@ internal class MultiplayerGuiService(
         affected.forEach { (playerId, invite) ->
             remoteInvites.remove(playerId, invite)
             plugin.server.getPlayer(playerId)?.let { player ->
-                player.closeInventory()
+                closeLobbyInventory(player, message.lobbyId)
                 player.sendMessage(locales.notice(player, "multiplayer.cancelled"))
                 if (invite.preparing && !duelSessions.requestRecovery(player)) duelSessions.handleJoin(player)
             }
@@ -628,7 +785,8 @@ internal class MultiplayerGuiService(
             36 -> {
                 publishResponse(invite.message, player.uniqueId, GroupLobbyResponse.DECLINED, null)
                 remoteInvites.remove(player.uniqueId, invite)
-                player.closeInventory()
+                closeLobbyInventory(player, invite.message.lobbyId)
+                player.sendMessage(locales.notice(player, "multiplayer.declined-self"))
             }
         }
     }
@@ -702,10 +860,24 @@ internal class MultiplayerGuiService(
 
     private fun removeLobby(lobby: Lobby) {
         lobbies.remove(lobby.id, lobby)
+        preparationInFlight.removeIf { (lobbyId, _) -> lobbyId == lobby.id }
+        preparationRetryScheduled.removeIf { (lobbyId, _) -> lobbyId == lobby.id }
         lobby.participantIds.forEach { playerId ->
             lobbyByPlayer.remove(playerId, lobby.id)
             provisionalKits.remove(playerId)
         }
+    }
+
+    private fun closeLobbyInventory(player: Player, lobbyId: UUID) {
+        val topInventory = runCatching { player.openInventory.topInventory }.getOrNull() ?: return
+        val holder = topInventory.holder
+        val belongsToLobby =
+            when (holder) {
+                is LobbyHolder -> holder.lobbyId == lobbyId
+                is RemoteLobbyHolder -> holder.lobbyId == lobbyId
+                else -> false
+            }
+        if (belongsToLobby) player.closeInventory()
     }
 
     private fun busy(player: Player): Boolean =
@@ -786,6 +958,7 @@ internal class MultiplayerGuiService(
         networkSubscription?.close()
         remoteInvites.clear()
         preparationInFlight.clear()
+        preparationRetryScheduled.clear()
     }
 
     private fun item(player: Player, material: Material, nameKey: String, loreKey: String? = null, vararg values: LocaleValue): ItemStack =

@@ -181,6 +181,9 @@ class CrossServerGroupBus(
         }
 
     private fun logRejection(reason: RedisMessageRejection) {
+        // Redis may echo this node's own publish back to its subscription. The
+        // service already delivers local messages explicitly in publish().
+        if (reason == RedisMessageRejection.ORIGIN_REJECTED) return
         logger.warn("Rejected ArcDuels group message: {}", reason)
     }
 

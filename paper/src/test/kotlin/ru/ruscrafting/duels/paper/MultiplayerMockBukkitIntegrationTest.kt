@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
@@ -12,13 +13,11 @@ import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.inventory.Inventory
 import org.bukkit.Material
-import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.mockbukkit.mockbukkit.entity.PlayerMock
 import org.mockbukkit.mockbukkit.simulate.entity.LivingEntitySimulation
-import org.mockbukkit.mockbukkit.simulate.entity.PlayerSimulation
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -36,6 +35,7 @@ import ru.ruscrafting.duels.redis.CrossServerGroupMessage
 import ru.ruscrafting.duels.redis.NetworkGroupParticipant
 import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
 import java.util.Locale
+import java.util.concurrent.CompletableFuture
 
 class MultiplayerMockBukkitIntegrationTest : StringSpec({
     "six players configure three teams and personal kits through the GUI before starting" {
@@ -61,6 +61,19 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     host.click(34)
 
                     val members = harness.players.drop(1)
+                    val lobbyIds = members.map { member ->
+                        val topBeforeAccept: Inventory? = member.openInventory.topInventory
+                        topBeforeAccept shouldBe null
+                        val invitation = requireNotNull(member.nextComponentMessage())
+                        val commands = invitation.runCommands()
+                        commands.any { it.startsWith("/duel group open ") } shouldBe true
+                        commands.any { it.startsWith("/duel group decline ") } shouldBe true
+                        val lobbyId = java.util.UUID.fromString(commands.first { it.startsWith("/duel group open ") }.substringAfterLast(' '))
+                        gui.openInvitation(member, lobbyId)
+                        member.openInventory.topInventory.getItem(34)?.type shouldBe Material.LIME_CONCRETE
+                        lobbyId
+                    }
+                    lobbyIds.distinct().size shouldBe 1
                     members[0].click(32)
                     members[1].click(32)
                     members[1].click(32)
@@ -164,6 +177,143 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
         }
     }
 
+    "cross-server invitation stays in chat until the player opens kit selection" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
+                    val hostServer = ServerId("parkour")
+                    val localServer = ServerId("group-test")
+                    val attackerRedis = InMemoryRedis(ServerIdentity { hostServer.value })
+                    val attackerBus = CrossServerGroupBus(attackerRedis, hostServer)
+                    val victimRedis = InMemoryRedis(ServerIdentity { localServer.value })
+                    val victimBus = CrossServerGroupBus(victimRedis, localServer)
+                    val victim = harness.players.single()
+                    val host = NetworkGroupParticipant(PlayerId(java.util.UUID.randomUUID()), "RemoteHost", hostServer)
+                    val teammate = NetworkGroupParticipant(PlayerId(java.util.UUID.randomUUID()), "RemoteMate", hostServer)
+                    val target = NetworkGroupParticipant(PlayerId(victim.uniqueId), victim.name, localServer)
+                    val lobbyId = java.util.UUID.randomUUID()
+                    val offer = CrossServerGroupMessage(
+                        messageId = "$lobbyId:offer:${victim.uniqueId}",
+                        sourceServer = hostServer,
+                        type = GroupLobbyMessageType.OFFER,
+                        lobbyId = lobbyId,
+                        hostId = host.playerId,
+                        hostServer = hostServer,
+                        participants = listOf(host, teammate, target),
+                        layout = MultiplayerLayout.FREE_FOR_ALL,
+                        kitPolicy = MultiplayerKitPolicy.SHARED,
+                        sharedKitId = KitId("classic"),
+                        expiresAtEpochMillis = System.currentTimeMillis() + 30_000L,
+                        targetId = target.playerId,
+                    )
+                    val gui = harness.registerGui(groupBus = victimBus, transfer = PlayerTransfer { _, _ -> })
+
+                    attackerBus.publish(offer)
+                    val payload = attackerRedis.getPublishedMessages().single { it.channel == CrossServerGroupBus.CHANNEL }.message
+                    victimRedis.simulateExternalMessage(CrossServerGroupBus.CHANNEL, payload, hostServer.value)
+                    paper.performTicks(2)
+
+                    val topBeforeOpen: Inventory? = victim.openInventory.topInventory
+                    topBeforeOpen shouldBe null
+                    val invitation = requireNotNull(victim.nextComponentMessage())
+                    invitation.runCommands() shouldContainExactlyInAnyOrder listOf(
+                        "/duel group open $lobbyId",
+                        "/duel group decline $lobbyId",
+                    )
+
+                    gui.openInvitation(victim, lobbyId)
+                    victim.openInventory.topInventory.getItem(34)?.type shouldBe Material.LIME_CONCRETE
+
+                    gui.close()
+                    victimBus.close()
+                    attackerBus.close()
+                }
+            }
+        }
+    }
+
+    "network preparation waits for player data readiness instead of dropping the participant" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("GroupHost", "LocalMate")).use { harness ->
+                    val localServer = ServerId("group-test")
+                    val remoteServer = ServerId("parkour")
+                    val redis = InMemoryRedis(ServerIdentity { localServer.value })
+                    val networkPlayers = NetworkPlayerDirectory(redis)
+                    val remoteId = java.util.UUID.randomUUID()
+                    redis.simulateExternalMessage(
+                        NetworkPlayerDirectory.CHANNEL,
+                        """[{"username":"RemotePlayer","uuid":"$remoteId","server":"${remoteServer.value}","joinTime":1}]""",
+                        "proxy",
+                    )
+                    val bus = CrossServerGroupBus(redis, localServer)
+                    val sent = mutableListOf<CrossServerGroupMessage>()
+                    bus.subscribe(sent::add)
+                    val duelSessions = mockk<DuelSessionManager>(relaxed = true)
+                    every { duelSessions.storeOriginSnapshot(any(), any(), any()) } returns
+                        CompletableFuture.completedFuture(mockk())
+                    val host = harness.players[0]
+                    val local = harness.players[1]
+                    host.setLocale(Locale.ENGLISH)
+                    local.setLocale(Locale.ENGLISH)
+                    var hostDataReady = false
+                    val gui = harness.registerGui(
+                        targets = DuelTargetDirectory(harness.plugin, localServer, networkPlayers),
+                        groupBus = bus,
+                        transfer = PlayerTransfer { _, _ -> },
+                        duelSessions = duelSessions,
+                        playerDataReady = { player -> player.uniqueId != host.uniqueId || hostDataReady },
+                    )
+
+                    gui.open(host)
+                    host.click(10)
+                    host.click(11)
+                    host.click(34)
+                    val invitation = requireNotNull(local.nextComponentMessage())
+                    val lobbyId = java.util.UUID.fromString(
+                        invitation.runCommands().first { it.startsWith("/duel group open ") }.substringAfterLast(' '),
+                    )
+                    gui.openInvitation(local, lobbyId)
+                    local.click(34)
+
+                    val offer = sent.single { it.type == GroupLobbyMessageType.OFFER }
+                    val accepted = offer.copy(
+                        messageId = "${offer.lobbyId}:response:$remoteId:accepted",
+                        sourceServer = remoteServer,
+                        type = GroupLobbyMessageType.RESPONSE,
+                        response = ru.ruscrafting.duels.redis.GroupLobbyResponse.ACCEPTED,
+                        kitId = requireNotNull(offer.sharedKitId),
+                    )
+                    val remoteRedis = InMemoryRedis(ServerIdentity { remoteServer.value })
+                    val remoteBus = CrossServerGroupBus(remoteRedis, remoteServer)
+                    remoteBus.publish(accepted)
+                    val acceptedPayload =
+                        remoteRedis.getPublishedMessages().single { it.channel == CrossServerGroupBus.CHANNEL }.message
+                    redis.simulateExternalMessage(
+                        CrossServerGroupBus.CHANNEL,
+                        acceptedPayload,
+                        remoteServer.value,
+                    )
+                    paper.performTicks(3)
+
+                    verify(exactly = 0) { duelSessions.storeOriginSnapshot(any(), host, true) }
+                    verify(exactly = 1) { duelSessions.storeOriginSnapshot(any(), local, true) }
+                    val preparing = PlainTextComponentSerializer.plainText().serialize(requireNotNull(host.nextComponentMessage()))
+                    preparing.contains("Everyone is ready") shouldBe true
+
+                    hostDataReady = true
+                    paper.performTicks(6)
+
+                    verify(exactly = 1) { duelSessions.storeOriginSnapshot(any(), host, true) }
+                    gui.close()
+                    bus.close()
+                    remoteBus.close()
+                    networkPlayers.close()
+                }
+            }
+        }
+    }
+
     "unauthorized network preparation cannot freeze or transfer a MockBukkit player" {
         MockBukkitTestRuntime.open().use { paper ->
             failOnUnsupportedMockBukkitOperation {
@@ -224,12 +374,15 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     host.click(11)
                     host.click(34)
                     host.openInventory.topInventory.getItem(34)?.type shouldBe Material.CLOCK
+                    val unrelated = Bukkit.createInventory(null, 9)
+                    harness.players[1].openInventory(unrelated)
 
                     paper.performTicks(899)
                     host.openInventory.topInventory.getItem(34)?.type shouldBe Material.CLOCK
                     paper.performTicks(1)
                     val topAfterTimeout: Inventory? = host.openInventory.topInventory
                     topAfterTimeout shouldBe null
+                    harness.players[1].openInventory.topInventory shouldBe unrelated
 
                     gui.open(harness.players[1])
                     harness.players[1].openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
@@ -330,46 +483,5 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
     }
 })
 
-private fun MultiplayerHarness.registerGui(
-    targets: DuelTargetDirectory = DuelTargetDirectory(plugin, ServerId("group-test"), null),
-    groupBus: CrossServerGroupBus? = null,
-    transfer: PlayerTransfer? = null,
-    duelSessions: DuelSessionManager = mockk(relaxed = true),
-): MultiplayerGuiService =
-    MultiplayerGuiService(
-        plugin = plugin,
-        kits = kits,
-        sessions = manager,
-        duelSessions = duelSessions,
-        locales = locales,
-        tasks = tasks,
-        targets = targets,
-        localServer = ServerId("group-test"),
-        serverNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
-        groupBus = groupBus,
-        transfer = transfer,
-        backAction = { },
-    ).also { plugin.server.pluginManager.registerEvents(it, plugin) }
-
-private fun MultiplayerHarness.registerGameplayListener() {
-    plugin.server.pluginManager.registerEvents(MultiplayerGameplayListener(manager, locales), plugin)
-}
-
-private fun MultiplayerHarness.startAndArrive(roster: ru.ruscrafting.duels.domain.MultiplayerRoster) {
-    manager.start(roster, roster.playerIds.associateWith { playerId -> requireNotNull(plugin.server.getPlayer(playerId.value)) })
-    paper.performTicks(4)
-    teleports.completeAll()
-    paper.performTicks(4)
-}
-
-private fun PlayerMock.click(slot: Int, clickType: ClickType = ClickType.LEFT) =
-    PlayerSimulation(this).simulateInventoryClick(openInventory, clickType, slot)
-
 private fun damage(victim: PlayerMock, attacker: PlayerMock, amount: Double) =
     LivingEntitySimulation(victim).simulateDamage(amount, attacker)
-
-private fun org.bukkit.inventory.ItemStack?.plainLore(): String =
-    this?.itemMeta?.lore().orEmpty().joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
-
-private fun org.bukkit.inventory.ItemStack?.plainName(): String =
-    this?.itemMeta?.displayName()?.let(PlainTextComponentSerializer.plainText()::serialize).orEmpty()

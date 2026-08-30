@@ -481,6 +481,24 @@ class ArcDuelsPluginTest : StringSpec({
         verify(exactly = 0) { controller.rematch(player, any()) }
     }
 
+    "group invitation chat commands route only an exact lobby id" {
+        val controller = mockk<DuelController>(relaxed = true)
+        val gui = mockk<DuelGuiService>(relaxed = true)
+        val admin = mockk<DuelAdminCommand>(relaxed = true)
+        val invitations = mockk<MultiplayerInvitationActions>(relaxed = true)
+        val executor = DuelCommand(controller, gui, admin, multiplayerInvitations = invitations)
+        val player = server.addPlayer("GroupInvite")
+        val command = requireNotNull(plugin.getCommand("duel"))
+        val lobbyId = UUID.randomUUID()
+
+        executor.onCommand(player, command, "duel", arrayOf("group", "open", lobbyId.toString()))
+        executor.onCommand(player, command, "duel", arrayOf("group", "decline", lobbyId.toString()))
+        executor.onCommand(player, command, "duel", arrayOf("group", "open", "not-a-uuid"))
+
+        verify(exactly = 1) { invitations.openInvitation(player, lobbyId) }
+        verify(exactly = 1) { invitations.declineInvitation(player, lobbyId) }
+    }
+
     "rematch keeps the exact rules and arena without adding setup clicks" {
         val now = Instant.parse("2026-08-15T13:00:30Z")
         val clock = Clock.fixed(now, ZoneOffset.UTC)

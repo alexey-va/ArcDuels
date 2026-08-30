@@ -17,6 +17,7 @@ class DuelCommand internal constructor(
     private val admin: DuelAdminCommand,
     private val targets: DuelTargetDirectory? = null,
     private val locales: LocaleService? = null,
+    private val multiplayerInvitations: MultiplayerInvitationActions? = null,
 ) : CommandExecutor, TabCompleter {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -65,6 +66,7 @@ class DuelCommand internal constructor(
             }
             "top", "топ" -> gui.openLeaderboard(player)
             "history", "история" -> gui.openHistory(player)
+            "group", "группа" -> handleGroupInvitation(player, args)
             "rematch", "реванш" -> {
                 val matchId =
                     args.getOrNull(1)?.let { raw ->
@@ -115,6 +117,22 @@ class DuelCommand internal constructor(
             .onFailure { player.sendMessage(message(player, "error.invalid-challenge-id", "<red>Invalid challenge identifier.</red>")) }
             .getOrNull()
         }
+
+    private fun handleGroupInvitation(player: Player, args: Array<out String>) {
+        val lobbyId =
+            args.getOrNull(2)?.let { raw ->
+                runCatching { UUID.fromString(raw) }
+                    .onFailure { player.sendMessage(message(player, "error.invalid-lobby-id", "<red>Invalid group lobby identifier.</red>")) }
+                    .getOrNull()
+            } ?: return
+        when (args.getOrNull(1)?.lowercase()) {
+            "open", "открыть" -> multiplayerInvitations?.openInvitation(player, lobbyId)
+                ?: player.sendMessage(message(player, "multiplayer.invite-unavailable", "<gray>This group invitation is no longer available.</gray>"))
+            "decline", "отклонить" -> multiplayerInvitations?.declineInvitation(player, lobbyId)
+                ?: player.sendMessage(message(player, "multiplayer.invite-unavailable", "<gray>This group invitation is no longer available.</gray>"))
+            else -> player.sendMessage(message(player, "error.invalid-lobby-id", "<red>Invalid group lobby identifier.</red>"))
+        }
+    }
 
     private fun message(player: Player, key: String, fallback: String) =
         locales?.notice(player, key) ?: miniMessage.deserialize(fallback)

@@ -268,7 +268,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 },
                 multiplayerAction = multiplayerGui::open,
             )
-        val command = DuelCommand(controller, gui, admin, targets, locales)
+        val command = DuelCommand(controller, gui, admin, targets, locales, multiplayerGui)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command

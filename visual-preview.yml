@@ -48,6 +48,12 @@ sources:
       - multiplayer.layout.*
       - multiplayer.kit-policy.*
       - multiplayer.menu.*
+      - multiplayer.invited
+      - multiplayer.invite-open
+      - multiplayer.invite-open-hover
+      - multiplayer.invite-decline
+      - multiplayer.invite-decline-hover
+      - multiplayer.preparing
 
 placeholders:
   player: Alexey23
@@ -61,8 +67,19 @@ placeholders:
   state: '<green>готов</green>'
   server: '<white>Спавн</white>'
   value: '<white>три команды</white>'
+  layout: '<white>три команды</white>'
 
 surfaces:
+  chat:
+    - source: duels
+      include:
+        - multiplayer.invited
+        - multiplayer.invite-open
+        - multiplayer.invite-open-hover
+        - multiplayer.invite-decline
+        - multiplayer.invite-decline-hover
+        - multiplayer.preparing
+
   items:
     - {id: main-multiplayer, material: PLAYER_HEAD, name: duels:menu.main.multiplayer, lore: duels:menu.main.multiplayer-lore}
     - {id: main-recovery, material: RECOVERY_COMPASS, name: duels:menu.main.recovery, lore: duels:menu.main.recovery-lore}

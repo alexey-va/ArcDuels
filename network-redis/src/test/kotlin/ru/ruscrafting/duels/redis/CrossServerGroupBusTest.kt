@@ -5,6 +5,9 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.mockk.mockk
+import io.mockk.verify
+import org.slf4j.Logger
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.KitId
@@ -76,6 +79,20 @@ class CrossServerGroupBusTest : StringSpec({
         redis.simulateExternalMessage(CrossServerGroupBus.CHANNEL, payload, "spawn")
 
         received shouldContainExactly listOf(offer)
+        bus.close()
+    }
+
+    "local Redis echo is ignored without a false rejection warning" {
+        val redis = InMemoryRedis(ServerIdentity { "spawn" })
+        val logger = mockk<Logger>(relaxed = true)
+        val bus = CrossServerGroupBus(redis, ServerId("spawn"), logger)
+        val received = mutableListOf<CrossServerGroupMessage>()
+        bus.subscribe(received::add)
+
+        bus.publish(offer)
+
+        received shouldContainExactly listOf(offer)
+        verify(exactly = 0) { logger.warn("Rejected ArcDuels group message: {}", any<Any>()) }
         bus.close()
     }
 
