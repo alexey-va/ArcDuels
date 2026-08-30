@@ -65,11 +65,28 @@ private class WorldGuardArenaInspector(
 internal class WorldGuardDuelListener(
     private val sessions: DuelSessionManager,
     private val logger: Logger,
+    private val multiplayer: MultiplayerSessionManager? = null,
 ) : Listener {
     private val warnedArenas = ConcurrentHashMap.newKeySet<ArenaId>()
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onDisallowedPvp(event: DisallowedPVPEvent) {
+        val groupMatch = multiplayer?.matchFor(event.attacker)
+        if (groupMatch != null && multiplayer.matchFor(event.defender)?.id == groupMatch.id) {
+            if (groupMatch.state == ru.ruscrafting.duels.domain.MultiplayerMatchState.ACTIVE &&
+                multiplayer.isInsideArena(event.attacker, event.attacker.location) &&
+                multiplayer.isInsideArena(event.defender, event.defender.location)
+            ) {
+                event.isCancelled = true
+                if (warnedArenas.add(groupMatch.arenaId)) {
+                    logger.warning(
+                        "WorldGuard denied PvP in active multiplayer arena ${groupMatch.arenaId}; " +
+                            "ArcDuels applied its participant-only arena override",
+                    )
+                }
+            }
+            return
+        }
         val attackerMatch = sessions.matchFor(event.attacker) ?: return
         val defenderMatch = sessions.matchFor(event.defender) ?: return
         if (attackerMatch.id != defenderMatch.id || attackerMatch.state != MatchState.ACTIVE) return

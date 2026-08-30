@@ -8,6 +8,8 @@ import io.mockk.every
 import io.mockk.mockk
 import org.bukkit.Material
 import org.bukkit.event.player.PlayerItemHeldEvent
+import org.bukkit.event.player.PlayerMoveEvent
+import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -81,6 +83,26 @@ class DurablePlayerStateServiceTest : StringSpec({
         repository.retentionCalls shouldBe 1
         repository.restoredAt shouldBe restoredAt
         repository.purgeAfter shouldBe restoredAt.plus(Duration.ofDays(7))
+    }
+
+    "multiplayer escrow publishes no participant before one atomic group commit" {
+        val repository = GatedEscrowRepository()
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val players = List(6) { server.addPlayer() }
+        players.forEachIndexed { index, player -> player.inventory.setItem(index, ItemStack(Material.GOLDEN_APPLE, index + 1)) }
+
+        val storedFuture = service.storeAll(MatchId.random(), players, inventoryReplaced = true)
+
+        repository.saved?.size shouldBe 6
+        players.all { !service.isPending(it.uniqueId) } shouldBe true
+        repository.commit.complete(Unit)
+        val stored = storedFuture.get()
+
+        stored.size shouldBe 6
+        players.all { service.isPending(it.uniqueId) } shouldBe true
+        players.forEachIndexed { index, player ->
+            service.decode(stored.getValue(player.uniqueId).escrow).state.storage[index]?.amount shouldBe index + 1
+        }
     }
 
     "removed format-one escrow fails closed" {
@@ -212,6 +234,42 @@ class DurablePlayerStateServiceTest : StringSpec({
         stored.get()
         sessions.isPreparing(player) shouldBe false
         sessions.isStateLocked(player) shouldBe true
+        sessions.shutdown()
+    }
+
+    "external group ownership blocks 1v1 entry without activating the 1v1 recovery freeze" {
+        val repository = GatedEscrowRepository()
+        repository.commit.complete(Unit)
+        val service = DurablePlayerStateService(plugin, ServerId("group-node"), repository)
+        val player = server.addPlayer()
+        val peer = server.addPlayer()
+        service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
+        val coordinator = mockk<MatchCoordinator>(relaxed = true)
+        every { coordinator.findByPlayer(any()) } returns null
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                coordinator,
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataSaver = {},
+            )
+        var groupOwnsPlayer = false
+        sessions.attachExternalEngagement { it.uniqueId == player.uniqueId && groupOwnsPlayer }
+
+        sessions.isStateLocked(player) shouldBe true
+        groupOwnsPlayer = true
+        sessions.isEngaged(player) shouldBe true
+        sessions.isStateLocked(player) shouldBe false
+        sessions.isTeleportAllowed(player, player.location, PlayerTeleportEvent.TeleportCause.PLUGIN) shouldBe true
+
+        val destination = player.location.clone().add(1.0, 0.0, 0.0)
+        val move = PlayerMoveEvent(player, player.location.clone(), destination)
+        DuelGameplayListener(sessions, LocaleService.load(plugin)).onMove(move)
+        move.to shouldBe destination
         sessions.shutdown()
     }
 
@@ -573,6 +631,11 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
 
     override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> {
         saved = listOf(snapshot)
+        return commit
+    }
+
+    override fun saveAll(snapshots: List<PlayerStateEscrow>): CompletableFuture<Unit> {
+        saved = snapshots
         return commit
     }
 

@@ -38,11 +38,10 @@
 ## Next — competitive operations
 
 - ranked queues and ELO seasons;
-- spectators;
+- cross-server group-match coordination and reconnect-aware spectator UX;
 - PlaceholderAPI expansion and moderation/audit commands;
 - orphaned-match reconciliation and recovery audit history.
 
 ## Later
 
-- team formats;
 - web/API read model for leaderboards and match history.

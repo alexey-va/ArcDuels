@@ -578,12 +578,10 @@ internal class DuelAdminCommand(
 }
 
 internal object DuelDebugFormatter {
+    private val renderer = ru.arc.observability.StructuredDebugLine("ARCDUELS_DEBUG")
+
     fun line(
         kind: String,
         fields: List<Pair<String, Any?>>,
-    ): String =
-        buildString {
-            append("ARCDUELS_DEBUG kind=").append(kind)
-            fields.forEach { (key, value) -> append(' ').append(key).append('=').append(value ?: "null") }
-        }
+    ): String = renderer.line(listOf("kind" to kind) + fields)
 }

@@ -14,12 +14,16 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.event.inventory.ClickType
 import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
+import net.kyori.adventure.audience.Audience
+import net.kyori.adventure.chat.SignedMessage
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.event.HoverEvent
 import net.kyori.adventure.text.format.TextDecoration
+import io.papermc.paper.chat.ChatRenderer
 import io.papermc.paper.datacomponent.DataComponentTypes
+import io.papermc.paper.event.player.AsyncChatEvent
 import ru.ruscrafting.duels.domain.ChallengeId
 import ru.ruscrafting.duels.domain.ChallengeRegistry
 import ru.ruscrafting.duels.domain.ArenaId
@@ -45,10 +49,12 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import java.util.logging.Handler
 import java.util.logging.LogRecord
 import ru.arc.logging.ArcLogging
 import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
 import ru.arc.paper.testing.loadPlugin
 
 @Suppress("DEPRECATION")
@@ -82,7 +88,11 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.getString("server-display-names.survival") shouldBe "<#55ff8a>Выживание</#55ff8a>"
         plugin.config.getLong("shutdown.recovery-timeout-ms") shouldBe 5_000L
         plugin.getCommand("duel")?.executor?.javaClass shouldBe DuelCommand::class.java
-        KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf("archer", "axe", "boxing", "classic", "sumo", "tank", "uhc")
+        KitRegistry.load(plugin).all().map { it.id.value } shouldBe listOf(
+            "archer", "axe", "berserker", "boxing", "classic", "crossbow", "knockback", "mace", "rod", "sumo", "tank", "trident", "uhc",
+        )
+        KitRegistry.load(plugin).get(KitId("crossbow")).items.getValue(0).enchantments.size shouldBe 2
+        java.io.File(plugin.dataFolder, "loadouts.yml").isFile shouldBe true
         java.io.File(plugin.dataFolder, "lang/ru.yml").isFile shouldBe true
         java.io.File(plugin.dataFolder, "lang/en.yml").isFile shouldBe true
 
@@ -549,9 +559,10 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "case-normalized kit and arena ids cannot silently overwrite each other" {
+        plugin.config.set("kits.classic.icon", "IRON_SWORD")
         plugin.config.set("kits.Classic.icon", "STONE")
         shouldThrow<IllegalArgumentException> { KitRegistry.load(plugin) }
-        plugin.config.set("kits.Classic", null)
+        plugin.config.set("kits", null)
 
         plugin.config.set("arenas.example.bounds.min.x", -15.0)
         val originalArena = requireNotNull(plugin.config.getConfigurationSection("arenas.example"))
@@ -622,41 +633,82 @@ class ArcDuelsPluginTest : StringSpec({
         PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "Вызвать на бой"
     }
 
-    "admin command opens a real arena editor and its actions use the current position" {
-        val player = server.addPlayer("ArenaAdmin")
-        player.isOp = true
+    "kit catalog and multiplayer setup derive detailed contents from runtime stacks" {
+        val player = server.addPlayer("KitReader")
+        server.addPlayer("GroupMateOne")
+        server.addPlayer("GroupMateTwo")
         player.setLocale(java.util.Locale.ENGLISH)
-        val world = requireNotNull(server.getWorld("world"))
 
-        player.performCommand("duels admin") shouldBe true
-        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.FILLED_MAP
-        player.openInventory.topInventory.getItem(29)?.type shouldBe Material.NAME_TAG
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
-        player.openInventory.topInventory.getItem(10)?.type shouldBe Material.YELLOW_BANNER
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
-        player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
-        player.openInventory.topInventory.getItem(31)?.type shouldBe Material.LIME_CONCRETE
-        player.openInventory.topInventory.getItem(27)?.type shouldBe Material.CLOCK
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 27)
-        player.openInventory.topInventory.getItem(29)?.type shouldBe Material.LEATHER_BOOTS
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
-        plugin.config.getStringList("arenas.example.allowed-objectives").contains("BOXING") shouldBe false
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 36)
+        player.performCommand("duel") shouldBe true
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 31)
+        val crossbow = requireNotNull(
+            player.openInventory.topInventory.contents.filterNotNull().firstOrNull { it.type == Material.CROSSBOW },
+        )
+        val catalogLore = crossbow.plainLore()
+        val catalogTranslations = crossbow.itemMeta.lore().orEmpty().flatMap(Component::translationKeys)
+        catalogLore.contains("Kit contents") shouldBe true
+        catalogTranslations.contains("item.minecraft.crossbow") shouldBe true
+        catalogTranslations.contains("enchantment.minecraft.quick_charge") shouldBe true
+        catalogLore.contains("unbreakable") shouldBe true
+        catalogTranslations.contains("item.minecraft.arrow") shouldBe true
+        catalogLore.contains("×32") shouldBe true
 
-        player.teleport(Location(world, 7.5, 82.0, -4.5, 45f, 5f))
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 12)
+        player.performCommand("duel") shouldBe true
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 30)
+        player.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
+        requireNotNull(player.openInventory.topInventory.getItem(32)).plainLore().contains("Kit contents") shouldBe true
+    }
 
-        plugin.config.getDouble("arenas.example.first-spawn.x") shouldBe 7.5
-        plugin.config.getDouble("arenas.example.first-spawn.y") shouldBe 82.0
-        player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
+    "admin command opens a real arena editor and its actions use the current position" {
+        failOnUnsupportedMockBukkitOperation {
+            val player = server.addPlayer("ArenaAdmin")
+            player.isOp = true
+            player.setLocale(java.util.Locale.ENGLISH)
+            val world = requireNotNull(server.getWorld("world"))
 
-        player.performCommand("duels admin") shouldBe true
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
-        player.chat("gui_arena")
-        server.scheduler.performTicks(2)
-        plugin.config.isConfigurationSection("arenas.gui_arena") shouldBe true
-        player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
-        plugin.config.set("arenas.gui_arena", null)
+            player.performCommand("duels admin") shouldBe true
+            player.openInventory.topInventory.getItem(11)?.type shouldBe Material.FILLED_MAP
+            player.openInventory.topInventory.getItem(29)?.type shouldBe Material.NAME_TAG
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
+            player.openInventory.topInventory.getItem(10)?.type shouldBe Material.YELLOW_BANNER
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
+            player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
+            player.openInventory.topInventory.getItem(31)?.type shouldBe Material.LIME_CONCRETE
+            player.openInventory.topInventory.getItem(27)?.type shouldBe Material.CLOCK
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 27)
+            player.openInventory.topInventory.getItem(29)?.type shouldBe Material.LEATHER_BOOTS
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
+            plugin.config.getStringList("arenas.example.allowed-objectives").contains("BOXING") shouldBe false
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 36)
+
+            player.teleport(Location(world, 7.5, 82.0, -4.5, 45f, 5f))
+            player.performCommand("duels admin") shouldBe true
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 12)
+
+            plugin.config.getDouble("arenas.example.first-spawn.x") shouldBe 7.5
+            plugin.config.getDouble("arenas.example.first-spawn.y") shouldBe 82.0
+            player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
+
+            player.performCommand("duels admin") shouldBe true
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
+            val message = Component.text("gui_arena")
+            val event = AsyncChatEvent(
+                true,
+                player,
+                mutableSetOf<Audience>(player),
+                ChatRenderer.defaultRenderer(),
+                message,
+                message,
+                SignedMessage.system("gui_arena", message),
+            )
+            server.scheduler.executeAsyncEvent(event).get(5, TimeUnit.SECONDS)
+            server.scheduler.performTicks(2)
+            plugin.config.isConfigurationSection("arenas.gui_arena") shouldBe true
+            player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
+            plugin.config.set("arenas.gui_arena", null)
+        }
     }
 
     "admin status is a readable health card with the configured server name and pending recoveries" {
@@ -681,3 +733,14 @@ private fun Component.containsHoverText(fragment: String): Boolean {
     return (hovered != null && PlainTextComponentSerializer.plainText().serialize(hovered).contains(fragment)) ||
         children().any { it.containsHoverText(fragment) }
 }
+
+private fun ItemStack.plainLore(): String =
+    itemMeta.lore().orEmpty().joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+
+private fun Component.translationKeys(): List<String> =
+    buildList {
+        if (this@translationKeys is net.kyori.adventure.text.TranslatableComponent) {
+            add(this@translationKeys.key())
+        }
+        children().forEach { addAll(it.translationKeys()) }
+    }

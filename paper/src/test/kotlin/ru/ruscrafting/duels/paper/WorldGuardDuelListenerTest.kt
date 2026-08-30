@@ -25,6 +25,14 @@ import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.KitId
+import ru.ruscrafting.duels.domain.MatchId
+import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
+import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.MultiplayerMatch
+import ru.ruscrafting.duels.domain.MultiplayerParticipant
+import ru.ruscrafting.duels.domain.MultiplayerRoster
+import ru.ruscrafting.duels.domain.MultiplayerRules
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Instant
@@ -202,5 +210,42 @@ class WorldGuardDuelListenerTest : StringSpec({
         WorldGuardDuelListener(sessions, Logger.getAnonymousLogger()).onDisallowedPvp(event)
 
         event.isCancelled shouldBe false
+    }
+
+    "WorldGuard denial is overridden for one active in-bounds multiplayer match" {
+        val attacker = mockk<Player>()
+        val defender = mockk<Player>()
+        val third = PlayerId(UUID.randomUUID())
+        val attackerId = PlayerId(UUID.randomUUID())
+        val defenderId = PlayerId(UUID.randomUUID())
+        val attackerLocation = mockk<Location>()
+        val defenderLocation = mockk<Location>()
+        every { attacker.uniqueId } returns attackerId.value
+        every { defender.uniqueId } returns defenderId.value
+        every { attacker.location } returns attackerLocation
+        every { defender.location } returns defenderLocation
+        val kit = KitId("classic")
+        val match =
+            MultiplayerMatch.reserve(
+                MatchId.random(),
+                ArenaId("group-arena"),
+                ServerId("test"),
+                MultiplayerRoster(
+                    MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, kit),
+                    listOf(attackerId, defenderId, third).map { MultiplayerParticipant(it, kitId = kit) },
+                ),
+                Instant.EPOCH,
+            ).beginCountdown().activate(Instant.EPOCH)
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        val multiplayer = mockk<MultiplayerSessionManager>()
+        every { multiplayer.matchFor(attacker) } returns match
+        every { multiplayer.matchFor(defender) } returns match
+        every { multiplayer.isInsideArena(attacker, attackerLocation) } returns true
+        every { multiplayer.isInsideArena(defender, defenderLocation) } returns true
+        val event = DisallowedPVPEvent(attacker, defender, mockk<Event>())
+
+        WorldGuardDuelListener(sessions, Logger.getAnonymousLogger(), multiplayer).onDisallowedPvp(event)
+
+        event.isCancelled shouldBe true
     }
 })

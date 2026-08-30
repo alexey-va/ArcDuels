@@ -109,88 +109,6 @@ gui:
     confirm:
       material: LIME_CONCRETE
 
-kits:
-  classic:
-    display-name: '<gold>Классика</gold>'
-    icon: DIAMOND_SWORD
-    items:
-      '0': DIAMOND_SWORD
-      '1': BOW
-      '2': GOLDEN_APPLE 4
-      '8': ARROW 32
-    armor:
-      helmet: DIAMOND_HELMET
-      chestplate: DIAMOND_CHESTPLATE
-      leggings: DIAMOND_LEGGINGS
-      boots: DIAMOND_BOOTS
-  axe:
-    display-name: '<gold>Топор и щит</gold>'
-    icon: DIAMOND_AXE
-    items:
-      '0': DIAMOND_AXE
-      '1': SHIELD
-      '2': GOLDEN_APPLE 3
-    armor:
-      helmet: IRON_HELMET
-      chestplate: IRON_CHESTPLATE
-      leggings: IRON_LEGGINGS
-      boots: IRON_BOOTS
-  archer:
-    display-name: '<gold>Лучник</gold>'
-    icon: BOW
-    items:
-      '0': BOW
-      '1': STONE_SWORD
-      '7': GOLDEN_APPLE 2
-      '8': ARROW 24
-    armor:
-      helmet: CHAINMAIL_HELMET
-      chestplate: LEATHER_CHESTPLATE
-      leggings: CHAINMAIL_LEGGINGS
-      boots: LEATHER_BOOTS
-  uhc:
-    display-name: '<gold>UHC</gold>'
-    icon: GOLDEN_APPLE
-    items:
-      '0': DIAMOND_SWORD
-      '1': BOW
-      '2': GOLDEN_APPLE 6
-      '3': LAVA_BUCKET
-      '4': WATER_BUCKET
-      '8': ARROW 16
-    armor:
-      helmet: DIAMOND_HELMET
-      chestplate: DIAMOND_CHESTPLATE
-      leggings: IRON_LEGGINGS
-      boots: DIAMOND_BOOTS
-  tank:
-    display-name: '<gold>Танк</gold>'
-    icon: NETHERITE_CHESTPLATE
-    items:
-      '0': IRON_SWORD
-      '1': SHIELD
-      '2': GOLDEN_APPLE 2
-    armor:
-      helmet: DIAMOND_HELMET
-      chestplate: NETHERITE_CHESTPLATE
-      leggings: DIAMOND_LEGGINGS
-      boots: DIAMOND_BOOTS
-  sumo:
-    display-name: '<gold>Сумо</gold>'
-    icon: SLIME_BALL
-    items: {}
-    armor: {}
-  boxing:
-    display-name: '<gold>Боксинг</gold>'
-    icon: LEATHER_BOOTS
-    items:
-      '0': STONE_SWORD
-    armor:
-      helmet: LEATHER_HELMET
-      chestplate: LEATHER_CHESTPLATE
-      leggings: LEATHER_LEGGINGS
-      boots: LEATHER_BOOTS
-
 # The example is disabled intentionally. Set real isolated coordinates and
 # enable it before accepting production matches.
 arenas:
@@ -217,6 +135,21 @@ arenas:
       z: 10.5
       yaw: 180.0
       pitch: 0.0
+    # Explicit safe slots for 3..12-player matches. `team-2` and `team-3`
+    # describe which side receives this point in the corresponding layout.
+    multiplayer-spawns:
+      '1': {world: world, x: -8.5, y: 80.0, z: -12.5, yaw: 34.0, pitch: 0.0, team-2: 1, team-3: 1}
+      '2': {world: world, x: -2.5, y: 80.0, z: -12.5, yaw: 11.0, pitch: 0.0, team-2: 1, team-3: 1}
+      '3': {world: world, x: 3.5, y: 80.0, z: -12.5, yaw: -14.0, pitch: 0.0, team-2: 1, team-3: 1}
+      '4': {world: world, x: 9.5, y: 80.0, z: -12.5, yaw: -37.0, pitch: 0.0, team-2: 1, team-3: 1}
+      '5': {world: world, x: 12.5, y: 80.0, z: -5.5, yaw: -67.0, pitch: 0.0, team-2: 1, team-3: 2}
+      '6': {world: world, x: 12.5, y: 80.0, z: 5.5, yaw: -113.0, pitch: 0.0, team-2: 1, team-3: 2}
+      '7': {world: world, x: 9.5, y: 80.0, z: 12.5, yaw: -143.0, pitch: 0.0, team-2: 2, team-3: 2}
+      '8': {world: world, x: 3.5, y: 80.0, z: 12.5, yaw: -166.0, pitch: 0.0, team-2: 2, team-3: 2}
+      '9': {world: world, x: -2.5, y: 80.0, z: 12.5, yaw: 169.0, pitch: 0.0, team-2: 2, team-3: 3}
+      '10': {world: world, x: -8.5, y: 80.0, z: 12.5, yaw: 146.0, pitch: 0.0, team-2: 2, team-3: 3}
+      '11': {world: world, x: -12.5, y: 80.0, z: 5.5, yaw: 113.0, pitch: 0.0, team-2: 2, team-3: 3}
+      '12': {world: world, x: -12.5, y: 80.0, z: -5.5, yaw: 67.0, pitch: 0.0, team-2: 2, team-3: 3}
     # Safe post-match waiting point. Set it from the admin arena GUI or with
     # /duels admin arena setlobby <id>. Without one, each player returns to
     # their assigned spawn on this arena.

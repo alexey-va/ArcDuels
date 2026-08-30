@@ -3,8 +3,9 @@ package ru.ruscrafting.duels.redis
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import ru.arc.redis.RedisOperations
+import ru.arc.redis.network.RedisReplayPolicy
+import ru.arc.redis.network.ValidatedRedisTopic
 import ru.arc.redis.safety.MessageClaimResult
-import ru.arc.redis.safety.OriginBoundRedisBus
 import ru.arc.redis.safety.RecentMessageDeduplicator
 import ru.arc.redis.safety.RedisMessageRejection
 import ru.ruscrafting.duels.domain.DuelEvent
@@ -23,28 +24,27 @@ class CrossServerDuelBus(
     private val codec = DuelEventCodec()
     private val listeners = CopyOnWriteArrayList<(DuelEvent) -> Unit>()
     private val deduplicator = RecentMessageDeduplicator(SEEN_TTL_MILLIS, MAX_SEEN_EVENTS)
-    private val bus =
-        OriginBoundRedisBus(
+    private val topic =
+        ValidatedRedisTopic.open(
             redis = redis,
             channel = CHANNEL,
             codec = codec,
             originAllowed = { origin -> origin != localServer.value },
             embeddedOrigin = { event -> event.sourceServer.value },
-            messageId = { event -> replayKey(event.sourceServer, event.eventId) },
-            deduplicator = deduplicator,
+            replay = RedisReplayPolicy(
+                messageId = { event -> replayKey(event.sourceServer, event.eventId) },
+                ttlMillis = SEEN_TTL_MILLIS,
+                maxEntries = MAX_SEEN_EVENTS,
+            ),
             clockMillis = clock::millis,
             onMessage = { event, _ -> deliver(event) },
             onRejected = { reason -> logRejection(reason) },
         )
 
-    init {
-        bus.register()
-    }
-
     override fun publish(event: DuelEvent): CompletableFuture<Unit> {
         require(event.sourceServer == localServer) { "Cannot publish an event owned by another server" }
         if (claimFirstDelivery(event.sourceServer, event.eventId)) deliver(event)
-        bus.publish(event)
+        topic.publish(event)
         return CompletableFuture.completedFuture(Unit)
     }
 
@@ -54,7 +54,7 @@ class CrossServerDuelBus(
     }
 
     override fun close() {
-        bus.close()
+        topic.close()
         listeners.clear()
     }
 

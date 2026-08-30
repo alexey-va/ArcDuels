@@ -2,10 +2,11 @@ package ru.ruscrafting.duels.paper
 
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.configuration.file.YamlConfiguration
-import ru.arc.core.BukkitTaskScheduler
+import ru.arc.core.PaperArcRuntime
 import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.arc.paper.chunk.PaperChunkTicketRegistry
 import ru.arc.redis.RedisConnection
 import ru.arc.redis.RedisManager
 import ru.arc.redis.ServerIdentity
@@ -20,6 +21,7 @@ import ru.ruscrafting.duels.domain.DuelPresetRepository
 import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
 import ru.ruscrafting.duels.domain.MatchCompletedEvent
 import ru.ruscrafting.duels.domain.MatchCoordinator
+import ru.ruscrafting.duels.domain.MultiplayerMatchRepository
 import ru.ruscrafting.duels.domain.NoOpDuelEventPublisher
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
@@ -45,7 +47,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private var sessions: DuelSessionManager? = null
 
     override fun onEnable() {
-        val lifecycle = PaperPluginRuntime(this, "arc-duels", BukkitTaskScheduler(this)).also {
+        PaperArcRuntime.installScheduling(this)
+        val lifecycle = PaperPluginRuntime(this, "arc-duels").also {
             pluginRuntime = it
             it.start("version" to pluginMeta.version)
         }
@@ -182,6 +185,22 @@ open class ArcDuelsPlugin : JavaPlugin() {
             )
         sessions = sessionManager
         lifecycle.own(AutoCloseable { sessionManager.shutdown() })
+        val multiplayerChunkTickets = lifecycle.own(PaperChunkTicketRegistry(this))
+        val multiplayerSessions =
+            MultiplayerSessionManager(
+                serverId = serverId,
+                arenas = arenas,
+                kits = kits,
+                playerStates = playerStates,
+                results = persistence.multiplayerResults,
+                locales = locales,
+                tasks = lifecycle.tasks,
+                chunkTickets = multiplayerChunkTickets,
+                countdownSeconds = countdownSeconds,
+                externalCombatTagClear = cmiCombatTags::clear,
+            )
+        sessionManager.attachExternalEngagement(multiplayerSessions::isEngaged)
+        lifecycle.own(multiplayerSessions)
         val challenges =
             ChallengeRegistry(
                 Clock.systemUTC(),
@@ -210,7 +229,12 @@ open class ArcDuelsPlugin : JavaPlugin() {
             )
         lifecycle.own(controller)
         val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames, controller::hasReturnOffer)
-        val gui =
+        lateinit var gui: DuelGuiService
+        val multiplayerGui =
+            MultiplayerGuiService(this, kits, multiplayerSessions, sessionManager, locales, lifecycle.tasks) { player ->
+                gui.openMain(player)
+            }
+        gui =
             DuelGuiService(
                 this,
                 kits,
@@ -226,12 +250,15 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 arenaChoices = { rules ->
                     network.arenas?.choices(rules) ?: arenas.choices(serverId, rules)
                 },
+                multiplayerAction = multiplayerGui::open,
             )
         val command = DuelCommand(controller, gui, admin, targets, locales)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)
         pluginCommand.tabCompleter = command
         server.pluginManager.registerEvents(gui, this)
+        server.pluginManager.registerEvents(multiplayerGui, this)
+        server.pluginManager.registerEvents(MultiplayerGameplayListener(multiplayerSessions, locales), this)
         val boundaryWarningDistance = config.getDouble("boundary-warning-distance", 12.0)
         require(boundaryWarningDistance in 1.0..16.0) { "boundary-warning-distance must be between 1 and 16" }
         server.pluginManager.registerEvents(
@@ -246,7 +273,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val worldGuardEnabled = server.pluginManager.isPluginEnabled("WorldGuard")
         server.pluginManager.registerEvents(DuelFluidListener(sessionManager, worldGuardEnabled), this)
         if (worldGuardEnabled) {
-            server.pluginManager.registerEvents(WorldGuardDuelListener(sessionManager, logger), this)
+            server.pluginManager.registerEvents(WorldGuardDuelListener(sessionManager, logger, multiplayerSessions), this)
             logger.info("WorldGuard duel PvP and arena-fluid compatibility enabled")
         }
         val identities = PlayerIdentityListener(this, statistics)
@@ -272,7 +299,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             RuntimeHealthContribution(
                 state = if (mysqlReady && redisReady) RuntimeHealthState.UP else RuntimeHealthState.DEGRADED,
                 recoveryBacklog = playerStates.pendingCount(),
-                activeLeases = network.activeLeaseCount(),
+                activeLeases = network.activeLeaseCount() + multiplayerChunkTickets.activeLeaseCount,
                 schemas = buildMap {
                     put("player_escrow", DurablePlayerStateService.CORE_ESCROW_FORMAT_VERSION)
                     if (mysqlReady) put("mysql", MySqlDuelMigrations.CURRENT_VERSION)
@@ -283,6 +310,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         lifecycle.ready(
             "server" to serverId.value,
             "arenas" to arenas.size(),
+            "multiplayer" to multiplayerSessions.activeCount(),
             "mysql" to persistence.durable,
             "redis" to network.redisReady,
         )
@@ -311,7 +339,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private fun createPersistence(lifecycle: PaperPluginRuntime): Persistence {
         if (!config.getBoolean("mysql.enabled", false)) {
             val repository = InMemoryStatisticsRepository()
-            return Persistence(repository, repository, UnavailablePlayerStateEscrowRepository, durable = false)
+            return Persistence(repository, repository, UnavailablePlayerStateEscrowRepository, repository, durable = false)
         }
         val sslMode =
             runCatching { SqlSslMode.valueOf(config.getString("mysql.ssl-mode", "VERIFY_IDENTITY")!!.uppercase()) }
@@ -341,7 +369,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             throw IllegalStateException("MySQL is enabled but its schema could not be prepared", failure)
         }
         lifecycle.own(repository)
-        return Persistence(repository, repository, repository, durable = true)
+        return Persistence(repository, repository, repository, repository, durable = true)
     }
 
     private fun createNetwork(
@@ -473,6 +501,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val statistics: StatisticsRepository,
         val presets: DuelPresetRepository,
         val playerStates: PlayerStateEscrowRepository,
+        val multiplayerResults: MultiplayerMatchRepository,
         val durable: Boolean,
     )
 
@@ -498,6 +527,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
             CompletableFuture.failedFuture(IllegalStateException("MySQL durable inventory escrow is not configured"))
 
         override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> = unavailable()
+
+        override fun saveAll(snapshots: List<PlayerStateEscrow>): CompletableFuture<Unit> = unavailable()
 
         override fun savePair(
             first: PlayerStateEscrow,

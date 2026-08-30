@@ -1,0 +1,182 @@
+# ArcDuels loadouts are upgraded with arc-core's merge-forward configuration.
+# Existing operator values win; newly bundled kits and fields are added safely.
+kits:
+  classic:
+    display-name: '<gold>Классика</gold>'
+    icon: DIAMOND_SWORD
+    items:
+      '0': DIAMOND_SWORD
+      '1': BOW
+      '2': GOLDEN_APPLE 4
+      '8': ARROW 32
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: DIAMOND_CHESTPLATE
+      leggings: DIAMOND_LEGGINGS
+      boots: DIAMOND_BOOTS
+  axe:
+    display-name: '<gold>Топор и щит</gold>'
+    icon: DIAMOND_AXE
+    items:
+      '0': DIAMOND_AXE
+      '2': GOLDEN_APPLE 3
+    offhand: SHIELD
+    armor:
+      helmet: IRON_HELMET
+      chestplate: IRON_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: IRON_BOOTS
+  archer:
+    display-name: '<gold>Лучник</gold>'
+    icon: BOW
+    items:
+      '0': BOW
+      '1': STONE_SWORD
+      '7': GOLDEN_APPLE 2
+      '8': ARROW 24
+    armor:
+      helmet: CHAINMAIL_HELMET
+      chestplate: LEATHER_CHESTPLATE
+      leggings: CHAINMAIL_LEGGINGS
+      boots: LEATHER_BOOTS
+  uhc:
+    display-name: '<gold>UHC</gold>'
+    icon: GOLDEN_APPLE
+    items:
+      '0': DIAMOND_SWORD
+      '1': BOW
+      '2': GOLDEN_APPLE 6
+      '3': LAVA_BUCKET
+      '4': WATER_BUCKET
+      '8': ARROW 16
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: DIAMOND_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: DIAMOND_BOOTS
+  tank:
+    display-name: '<gold>Танк</gold>'
+    icon: NETHERITE_CHESTPLATE
+    items:
+      '0': IRON_SWORD
+      '2': GOLDEN_APPLE 2
+    offhand: SHIELD
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: NETHERITE_CHESTPLATE
+      leggings: DIAMOND_LEGGINGS
+      boots: DIAMOND_BOOTS
+  sumo:
+    display-name: '<gold>Сумо</gold>'
+    icon: SLIME_BALL
+    items: {}
+    armor: {}
+  boxing:
+    display-name: '<gold>Боксинг</gold>'
+    icon: LEATHER_BOOTS
+    items:
+      '0': STONE_SWORD
+    armor:
+      helmet: LEATHER_HELMET
+      chestplate: LEATHER_CHESTPLATE
+      leggings: LEATHER_LEGGINGS
+      boots: LEATHER_BOOTS
+  crossbow:
+    display-name: '<gold>Арбалетчик</gold>'
+    icon: CROSSBOW
+    items:
+      '0':
+        material: CROSSBOW
+        enchantments:
+          QUICK_CHARGE: 3
+          PIERCING: 4
+        unbreakable: true
+      '1': IRON_SWORD
+      '2': GOLDEN_APPLE 3
+      '8': ARROW 32
+    armor:
+      helmet: IRON_HELMET
+      chestplate: CHAINMAIL_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: CHAINMAIL_BOOTS
+  trident:
+    display-name: '<gold>Трезубец</gold>'
+    icon: TRIDENT
+    items:
+      '0':
+        material: TRIDENT
+        enchantments:
+          LOYALTY: 3
+          IMPALING: 5
+        unbreakable: true
+      '1': STONE_SWORD
+      '2': GOLDEN_APPLE 3
+    offhand: SHIELD
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: IRON_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: DIAMOND_BOOTS
+  mace:
+    display-name: '<gold>Булава</gold>'
+    icon: MACE
+    items:
+      '0':
+        material: MACE
+        enchantments:
+          DENSITY: 4
+        unbreakable: true
+      '1': WIND_CHARGE 8
+      '2': GOLDEN_APPLE 3
+    armor:
+      helmet: DIAMOND_HELMET
+      chestplate: DIAMOND_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: DIAMOND_BOOTS
+  berserker:
+    display-name: '<gold>Берсерк</gold>'
+    icon: NETHERITE_AXE
+    items:
+      '0':
+        material: NETHERITE_AXE
+        enchantments:
+          SHARPNESS: 3
+        unbreakable: true
+      '1': GOLDEN_APPLE 2
+    armor:
+      helmet: IRON_HELMET
+      chestplate: DIAMOND_CHESTPLATE
+      leggings: IRON_LEGGINGS
+      boots: IRON_BOOTS
+  rod:
+    display-name: '<gold>Удочка</gold>'
+    icon: FISHING_ROD
+    items:
+      '0': IRON_SWORD
+      '1':
+        material: FISHING_ROD
+        unbreakable: true
+      '2': BOW
+      '3': GOLDEN_APPLE 3
+      '8': ARROW 16
+    armor:
+      helmet: IRON_HELMET
+      chestplate: IRON_CHESTPLATE
+      leggings: CHAINMAIL_LEGGINGS
+      boots: IRON_BOOTS
+  knockback:
+    display-name: '<gold>Отбрасывание</gold>'
+    icon: STICK
+    items:
+      '0':
+        material: STICK
+        enchantments:
+          KNOCKBACK: 2
+        unbreakable: true
+      '1': SNOWBALL 16
+      '2': GOLDEN_APPLE 2
+    armor:
+      helmet: LEATHER_HELMET
+      chestplate: LEATHER_CHESTPLATE
+      leggings: LEATHER_LEGGINGS
+      boots: LEATHER_BOOTS

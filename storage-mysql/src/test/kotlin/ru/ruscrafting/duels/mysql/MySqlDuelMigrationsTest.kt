@@ -16,8 +16,9 @@ class MySqlDuelMigrationsTest : StringSpec({
         val inventoryMode = migrations[5]
         val history = migrations[6]
         val presets = migrations[7]
+        val multiplayer = migrations[8]
 
-        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5, 6, 7, 8)
+        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
         initial.statements shouldHaveSize 4
         initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
         initial.statements[2] shouldContain "INSERT IGNORE"
@@ -48,5 +49,10 @@ class MySqlDuelMigrationsTest : StringSpec({
         history.statements[53] shouldContain "WHERE `objective` = 'KING_OF_THE_HILL'"
         presets.statements.single() shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_rule_presets`"
         presets.statements.single() shouldContain "PRIMARY KEY (`player_id`, `slot`)"
+        multiplayer.statements shouldHaveSize 2
+        multiplayer.statements[0] shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_multiplayer_matches`"
+        multiplayer.statements[0] shouldContain "`outcome_sha256` BINARY(32) NOT NULL"
+        multiplayer.statements[1] shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_multiplayer_participants`"
+        multiplayer.statements[1] shouldContain "FOREIGN KEY (`match_id`)"
     }
 })

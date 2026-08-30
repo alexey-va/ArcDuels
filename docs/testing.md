@@ -3,7 +3,7 @@
 ArcDuels separates fast deterministic checks from disposable-service tests.
 
 Paper tests receive the Paper API and pinned MockBukkit version through
-`ru.ruscrafting.arc:arc-core-paper-testing:2.0.0`. New lifecycle tests should use
+`ru.ruscrafting.arc:arc-core-paper-testing:2.2.0`. New lifecycle tests should use
 `MockBukkitTestRuntime` so server/plugin teardown is owned by one closeable
 fixture and cannot leak into the next spec. Do not pin MockBukkit separately in
 this repository; update the shared testkit when the network Paper version moves.
@@ -19,6 +19,8 @@ The suite covers:
 - challenge authorization, expiry, single-pending-challenge player ownership,
   and bounded TTL;
 - every match transition, BO1/BO3 scoring, forfeits, objectives, and cleanup;
+- 3–12-player FFA/two-team/three-team roster validation, balanced team winners,
+  placement ordering, cancellation, and shared/per-player kit contracts;
 - exact KOTH capture thresholds, contested-progress pauses, boxing totals,
   combo resets, per-arena objective and loadout selection, and invalid
   controlled-objective/loadout combinations;
@@ -35,7 +37,12 @@ The suite covers:
   distinct current and recovery-origin servers, and no-fallback FIFO reservation;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
   finite snapshot encoding, queued network-reservation cleanup,
-  arena and kit validation, explicit sync-provider detection, origin-before-transfer
+  arena and kit validation, exact runtime-stack kit manifests, multiplayer spawn
+  assignment and 1v1/group lease exclusion, full multiplayer GUI setup across
+  pagination, three-team/per-player-kit readiness and start, invite timeout and
+  cancellation cleanup, team-aware damage and lethal completion, countdown
+  tick boundaries, arena movement, inventory, teleport, and command isolation,
+  explicit sync-provider detection, origin-before-transfer
   single-row escrow, HuskSync readiness, recovery-delay gating, compare-before-apply claims, pagination matrices,
   modern GUI CustomModelData components, accepted melee-hit scoring, teleport authorization,
   server-authoritative countdown anchoring and pre-countdown teleport stabilization,
@@ -67,7 +74,8 @@ protection, timestamp precision, 32 concurrent copies of one result, and 24
 concurrent unique matches sharing the same player rows, atomic two-player
 escrow, exact active-to-archive transfer, idempotent replay after an unknown
 archival outcome, retention deadlines, bounded expiry cleanup, checksum
-matching, claimed-snapshot lookup, recovery metadata, and rollback on a participant conflict. It also deletes a committed
+matching, claimed-snapshot lookup, recovery metadata, atomic 3–12-player
+escrow, durable group-result participants, and rollback on a participant conflict. It also deletes a committed
 migration-history row and proves that replay converges when MySQL DDL committed
 before its journal write, including the replayable-history and preset migrations.
 A crash-boundary scenario closes the writer after the

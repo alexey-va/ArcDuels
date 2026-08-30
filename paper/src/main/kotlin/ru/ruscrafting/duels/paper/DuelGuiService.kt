@@ -53,6 +53,7 @@ class DuelGuiService internal constructor(
     private val statisticsAction: (Player, DuelTarget) -> Unit,
     private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
     private val arenaChoices: (DuelRules) -> List<ArenaChoice> = { emptyList() },
+    private val multiplayerAction: (Player) -> Unit = {},
 ) : Listener {
     private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
     private val asyncMenuRequests = LatestRequestTracker()
@@ -78,6 +79,7 @@ class DuelGuiService internal constructor(
         )
         inventory.setItem(15, item(player, Material.GOLD_INGOT, "menu.main.leaderboard", "menu.main.leaderboard-lore"))
         inventory.setItem(29, item(player, Material.TARGET, "menu.main.modes", "menu.main.modes-lore"))
+        inventory.setItem(30, item(player, Material.PLAYER_HEAD, "menu.main.multiplayer", "menu.main.multiplayer-lore"))
         inventory.setItem(31, item(player, Material.ENDER_CHEST, "menu.main.kits", "menu.main.kits-lore"))
         inventory.setItem(33, playerHead(player, locales.component(player, "menu.main.stats"), locales.lines(player, "menu.main.stats-lore")))
         inventory.setItem(38, item(player, Material.BOOK, "menu.main.history", "menu.main.history-lore"))
@@ -649,6 +651,7 @@ class DuelGuiService internal constructor(
                 13 -> openQueue(player)
                 15 -> openLeaderboard(player)
                 29 -> openModes(player)
+                30 -> multiplayerAction(player)
                 31 -> openKits(player)
                 33 -> statisticsAction(player, targets.local(player))
                 38 -> openHistory(player)
@@ -1109,9 +1112,9 @@ class DuelGuiService internal constructor(
 
     private fun kitItem(player: Player, kit: DuelKit): ItemStack {
         val key = "kit.${kit.id.value}"
-        val name = if (locales.hasKey(locales.language(player), "$key.name")) locales.component(player, "$key.name") else kit.displayName
+        val name = kit.localizedName(player, locales)
         val lore = if (locales.hasKey(locales.language(player), "$key.description")) locales.lines(player, "$key.description") else emptyList()
-        return item(kit.icon, name, lore + locales.lines(player, "menu.loadouts.kit-hint"))
+        return item(kit.icon, name, lore + kit.contentLore(player, locales) + locales.lines(player, "menu.loadouts.kit-hint"))
     }
 
     private fun toggleItem(player: Player, key: String, value: Boolean, enabled: Boolean = true): ItemStack {

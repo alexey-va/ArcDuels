@@ -23,6 +23,12 @@ import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import ru.ruscrafting.duels.domain.ServerId
+import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
+import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.MultiplayerMatchOutcome
+import ru.ruscrafting.duels.domain.MultiplayerParticipant
+import ru.ruscrafting.duels.domain.MultiplayerRoster
+import ru.ruscrafting.duels.domain.MultiplayerRules
 import java.time.Instant
 import java.security.MessageDigest
 import java.nio.ByteBuffer
@@ -44,8 +50,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                 ),
             )
             repository = openRepository("arcduels-it")
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
+            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
         }
 
         afterSpec {
@@ -130,6 +136,39 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             repository.deletePreset(player, 2).get() shouldBe true
             repository.deletePreset(player, 2).get() shouldBe false
             repository.presets(player).get() shouldContainExactly emptyList()
+        }
+
+        "multiplayer result and every participant commit atomically and idempotently" {
+            val players = (101L..106L).map { PlayerId(UUID(0, it)) }
+            val roster = MultiplayerRoster(
+                MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("crossbow")),
+                players.map { MultiplayerParticipant(it, kitId = KitId("crossbow")) },
+            )
+            val outcome = MultiplayerMatchOutcome(
+                matchId = MatchId(UUID(0, 200L)),
+                serverId = ServerId("duels-it"),
+                arenaId = ArenaId("group-one"),
+                roster = roster,
+                winners = setOf(players.last()),
+                winningTeam = null,
+                eliminationOrder = players.dropLast(1),
+                completedAt = Instant.parse("2026-08-13T12:00:00Z"),
+                endReason = ru.ruscrafting.duels.domain.MatchEndReason.ELIMINATION,
+            )
+
+            repository.record(outcome).get() shouldBe true
+            repository.record(outcome).get() shouldBe false
+            mysql.endpoint.connect().use { connection ->
+                connection.prepareStatement(
+                    "SELECT COUNT(*) FROM `arcduels_multiplayer_participants` WHERE `match_id` = ?",
+                ).use { statement ->
+                    statement.setBytes(1, outcome.matchId.value.toBytes())
+                    statement.executeQuery().use { result -> result.next(); result.getInt(1) shouldBe 6 }
+                }
+            }
+            shouldThrow<ExecutionException> {
+                repository.record(outcome.copy(completedAt = outcome.completedAt.plusSeconds(1))).get()
+            }
         }
 
         "same match id with a different outcome is rejected" {
@@ -354,7 +393,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             }
 
             repository.migrate().get().appliedVersions shouldContainExactly listOf(4)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
         }
 
         "history and preset migrations converge after ddl committed before journal" {
@@ -374,7 +413,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             }
 
             repository.migrate().get().appliedVersions shouldContainExactly listOf(7, 8)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8)
+            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
             repository.findMatch(MatchId(UUID.fromString("00000000-0000-0000-0000-000000000010"))).get()?.outcome?.let {
                 it.modifiers.projectiles shouldBe false
                 it.modifiers.consumables shouldBe false

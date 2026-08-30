@@ -79,6 +79,7 @@ class DuelSessionManager internal constructor(
     private val restoringPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val expectedNetworkPlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val networkLobbyPlayers = ConcurrentHashMap<UUID, MatchId>()
+    @Volatile private var externalEngagement: ((Player) -> Boolean)? = null
     private val internalTeleports =
         ScopedTeleportAuthorizer(TeleportMatchTolerance(coordinate = 1.0e-7, angle = 1.0e-4f))
     private val celebrationEffects = CelebrationEffects(plugin)
@@ -386,12 +387,26 @@ class DuelSessionManager internal constructor(
             ?: sessionByPlayer[player.uniqueId]?.let(coordinator::find)
 
     fun isEngaged(player: Player): Boolean =
-        coordinator.isQueuedOrMatched(PlayerId(player.uniqueId)) || pendingStarts.containsKey(player.uniqueId)
+        isExternallyEngaged(player) ||
+            coordinator.isQueuedOrMatched(PlayerId(player.uniqueId)) ||
+            pendingStarts.containsKey(player.uniqueId)
 
     fun isStateLocked(player: Player): Boolean =
-        preparingPlayers.contains(player.uniqueId) ||
-            (playerStates.isPending(player.uniqueId) && !networkLobbyPlayers.containsKey(player.uniqueId)) ||
-            matchFor(player) != null
+        !isExternallyEngaged(player) &&
+            (preparingPlayers.contains(player.uniqueId) ||
+                (playerStates.isPending(player.uniqueId) && !networkLobbyPlayers.containsKey(player.uniqueId)) ||
+                matchFor(player) != null)
+
+    /**
+     * Keeps externally owned combat sessions unavailable to 1v1 matchmaking
+     * without treating their shared durable escrow as an orphaned 1v1 lock.
+     */
+    internal fun attachExternalEngagement(probe: (Player) -> Boolean) {
+        check(externalEngagement == null) { "An external duel owner is already attached" }
+        externalEngagement = probe
+    }
+
+    private fun isExternallyEngaged(player: Player): Boolean = externalEngagement?.invoke(player) == true
 
     fun isPreparing(player: Player): Boolean = preparingPlayers.contains(player.uniqueId)
 
@@ -1180,7 +1195,7 @@ class DuelSessionManager internal constructor(
             player.setItemOnCursor(ItemStack.empty())
             player.inventory.clear()
             player.inventory.armorContents = arrayOfNulls<ItemStack>(4)
-            player.inventory.setItemInOffHand(null)
+            player.inventory.setItemInOffHand(kit.offhand?.clone())
             for ((slot, item) in kit.items) player.inventory.setItem(slot, item.clone())
             player.inventory.helmet = kit.helmet?.clone()
             player.inventory.chestplate = kit.chestplate?.clone()

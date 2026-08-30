@@ -12,6 +12,14 @@ import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.CombatModifiers
+import ru.ruscrafting.duels.domain.KitId
+import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
+import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.MultiplayerParticipant
+import ru.ruscrafting.duels.domain.MultiplayerRoster
+import ru.ruscrafting.duels.domain.MultiplayerRules
+import ru.ruscrafting.duels.domain.PlayerId
+import java.util.UUID
 
 class PaperArenaQueueTest : StringSpec({
     lateinit var server: ServerMock
@@ -163,6 +171,28 @@ class PaperArenaQueueTest : StringSpec({
 
         catalog.size() shouldBe 2
     }
+
+    "multiplayer reservations assign every configured team and remain exclusive with pair matches" {
+        plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
+        plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
+        val catalog = PaperArenaCatalog.load(plugin)
+        val roster = MultiplayerRoster(
+            MultiplayerRules(MultiplayerLayout.THREE_TEAMS, MultiplayerKitPolicy.SHARED, KitId("classic")),
+            (0 until 6).map { index ->
+                MultiplayerParticipant(PlayerId(UUID(0, index + 1L)), team = index % 3 + 1, kitId = KitId("classic"))
+            },
+        )
+
+        val group = catalog.reserveMultiplayer(roster).get()
+        group.spawns.size shouldBe 6
+        group.spawns.values.map { Triple(it.x, it.y, it.z) }.distinct().size shouldBe 6
+        val pair = catalog.reserve(DuelRules(DuelMode.KIT, KitId("classic")), ArenaId("queue"))
+        pair.isDone shouldBe false
+
+        group.close()
+        pair.get().arenaId shouldBe ArenaId("queue")
+        pair.get().close()
+    }
 })
 
 private fun configureArena(
@@ -191,4 +221,15 @@ private fun configureArena(
     plugin.config.set("$path.bounds.max.x", 10.0)
     plugin.config.set("$path.bounds.max.y", 90.0)
     plugin.config.set("$path.bounds.max.z", 10.0)
+    repeat(6) { index ->
+        val slot = index + 1
+        plugin.config.set("$path.multiplayer-spawns.$slot.world", world)
+        plugin.config.set("$path.multiplayer-spawns.$slot.x", -7.5 + index * 3.0)
+        plugin.config.set("$path.multiplayer-spawns.$slot.y", 70.0)
+        plugin.config.set("$path.multiplayer-spawns.$slot.z", if (index % 2 == 0) -5.0 else 5.0)
+        plugin.config.set("$path.multiplayer-spawns.$slot.yaw", 0.0)
+        plugin.config.set("$path.multiplayer-spawns.$slot.pitch", 0.0)
+        plugin.config.set("$path.multiplayer-spawns.$slot.team-2", if (index < 3) 1 else 2)
+        plugin.config.set("$path.multiplayer-spawns.$slot.team-3", index % 3 + 1)
+    }
 }

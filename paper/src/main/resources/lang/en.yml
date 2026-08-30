@@ -21,6 +21,8 @@ menu:
     leaderboard-lore: ['<dark_gray>✖</dark_gray> <white>Network-wide player ranking</white>', '   <white>across all servers.</white>', '', '<aqua>Left click</aqua> <gray>Open leaderboard</gray>']
     modes: '<gold>Game modes</gold>'
     modes-lore: ['<dark_gray>✖</dark_gray> <white>Classic, king of the hill, sumo,</white>', '   <white>boxing, and combo.</white>', '', '<aqua>Left click</aqua> <gray>Browse modes</gray>']
+    multiplayer: '<gold>Group match</gold>'
+    multiplayer-lore: ['<dark_gray>✖</dark_gray> <white>3 to 12 players:</white>', '   <white>free-for-all or 2–3 teams.</white>', '', '<aqua>Left click</aqua> <gray>Build a match</gray>']
     kits: '<gold>Loadout kits</gold>'
     kits-lore: ['<dark_gray>✖</dark_gray> <white>Ready-made equipment for a match.</white>', '', '<aqua>Left click</aqua> <gray>Browse kits</gray>']
     stats: '<gold>My statistics</gold>'
@@ -137,6 +139,8 @@ menu:
     title: '<dark_gray>Game modes</dark_gray>'
   kits:
     title: '<dark_gray>Loadout kits</dark_gray>'
+    contents: '<#fff4d6>Kit contents</#fff4d6>'
+    unbreakable: '<dark_gray>unbreakable</dark_gray>'
   queue:
     title: '<dark_gray>Arenas and queue</dark_gray>'
     active: '<gold>Busy arenas: <active></gold>'
@@ -236,6 +240,90 @@ kit:
   boxing:
     name: '<gold>Boxing</gold>'
     description: ['<gray>Equal light equipment for hit-race modes.</gray>']
+  crossbow:
+    name: '<gold>Crossbow</gold>'
+    description: ['<gray>A fast piercing crossbow with a limited arrow supply.</gray>']
+  trident:
+    name: '<gold>Trident</gold>'
+    description: ['<gray>A returning trident, shield, and backup melee weapon.</gray>']
+  mace:
+    name: '<gold>Mace</gold>'
+    description: ['<gray>Vertical mace attacks supported by wind charges.</gray>']
+  berserker:
+    name: '<gold>Berserker</gold>'
+    description: ['<gray>High damage paired with lighter protection.</gray>']
+  rod:
+    name: '<gold>Rod</gold>'
+    description: ['<gray>Classic sword, fishing rod, and bow combos.</gray>']
+  knockback:
+    name: '<gold>Knockback</gold>'
+    description: ['<gray>Control distance with a stick and snowballs.</gray>']
+
+multiplayer:
+  busy: '<red>Finish your current match or recovery first.</red>'
+  no-kits: '<red>A group match requires at least one configured kit.</red>'
+  invalid-size: '<red>Select 3 to 12 participants and keep every team non-empty.</red>'
+  player-left: '<red>A participant left or became busy.</red>'
+  invited: '<#fff4d6><player> invited you to a group match.</#fff4d6>'
+  expired: '<gray>The group lobby expired.</gray>'
+  cancelled: '<gray>The host cancelled the group match.</gray>'
+  declined: '<gray>A player declined the invitation.</gray>'
+  start-failed: '<red>Could not start the group match:</red> <gray><reason></gray>'
+  result-pending: '<yellow>The result is still being saved; every player state remains protected.</yellow>'
+  countdown:
+    title: '<#fff4d6><seconds></#fff4d6>'
+    subtitle: '<gray>Get ready</gray>'
+  start:
+    title: '<green>Fight!</green>'
+  eliminated:
+    title: '<red>Eliminated</red>'
+    subtitle: '<gray>You can spectate the remaining players</gray>'
+  victory:
+    title: '<green>Victory</green>'
+  defeat:
+    title: '<red>Defeat</red>'
+  finish:
+    subtitle: '<gray>Restoring your protected state</gray>'
+  layout:
+    free_for_all: '<white>free-for-all</white>'
+    two_teams: '<white>two teams</white>'
+    three_teams: '<white>three teams</white>'
+  kit-policy:
+    shared: '<white>one kit for everyone</white>'
+    per_player: '<white>each player chooses</white>'
+  menu:
+    setup-title: '<dark_gray>Group match · setup</dark_gray>'
+    lobby-title: '<dark_gray>Group match · ready check</dark_gray>'
+    no-players: '<red>No available players</red>'
+    player: '<gold><player></gold>'
+    player-lore: ['<gray>Status:</gray> <state>', '<gray>Team:</gray> <white><team></white>', '', '<aqua>Left click</aqua> <gray>Select or remove</gray>']
+    player-status-lore: ['<gray>Status:</gray> <state>', '<gray>Team:</gray> <white><team></white>']
+    selected: '<green>selected / ready</green>'
+    not-selected: '<gray>not selected / waiting</gray>'
+    layout: '<gold>Format: <value></gold>'
+    layout-lore: ['<gray>Free-for-all, two teams, or three</gray>', '<gray>automatically balanced teams.</gray>', '', '<aqua>Left click</aqua> <gray>Cycle</gray>']
+    kit-policy: '<gold>Kits: <value></gold>'
+    kit-policy-lore: ['<gray>One kit for everyone or an individual</gray>', '<gray>choice for every participant.</gray>', '', '<aqua>Left click</aqua> <gray>Cycle</gray>']
+    readonly-lore: ['<gray>Selected by the host:</gray> <value>']
+    shared-kit-lore: ['<gray>Every participant receives this kit.</gray>', '', '<aqua>Left click</aqua> <gray>Next kit</gray>']
+    personal-kit-lore: ['<gray>This is your kit for the upcoming match.</gray>', '', '<aqua>Left click</aqua> <gray>Next kit</gray>']
+    shared-kit-readonly-lore: ['<gray>Every participant receives this kit.</gray>', '<dark_gray>Selected by the host.</dark_gray>']
+    personal-kit-readonly-lore: ['<gray>This is your confirmed kit.</gray>', '<dark_gray>It can be changed before accepting.</dark_gray>']
+    back-lore: ['', '<aqua>Left click</aqua> <gray>Return to the main menu</gray>']
+    invite: '<green>Send invitations</green>'
+    invite-lore: ['<gray>Participants:</gray> <white><players></white>', '<gray>The match starts after everyone accepts.</gray>', '', '<aqua>Left click</aqua> <gray>Create lobby</gray>']
+    invite-disabled: '<gray>Match is not ready</gray>'
+    invite-disabled-lore: ['<gray>Current participants:</gray> <white><players></white>', '<gray>Need 3 to 12 and every team non-empty.</gray>']
+    waiting: '<gold>Waiting for players</gold>'
+    waiting-lore: ['<gray>Ready:</gray> <white><ready>/<players></white>', '<gray>The match starts automatically.</gray>']
+    accept: '<green>Accept invitation</green>'
+    accept-lore: ['<gray>Review the format and your kit.</gray>', '', '<aqua>Left click</aqua> <gray>I am ready</gray>']
+    accepted: '<green>You are ready</green>'
+    accepted-lore: ['<gray>Waiting for the other participants.</gray>']
+    cancel: '<red>Cancel match</red>'
+    decline: '<red>Decline invitation</red>'
+    cancel-lore: ['', '<red>Left click</red> <gray>Close the lobby for everyone</gray>']
+    left-player: '<red>Player left</red>'
 
 player-link:
   name: '<#92bed8><player></#92bed8>'

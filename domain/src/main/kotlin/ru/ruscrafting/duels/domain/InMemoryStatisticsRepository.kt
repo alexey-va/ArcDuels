@@ -3,11 +3,12 @@ package ru.ruscrafting.duels.domain
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
-class InMemoryStatisticsRepository : StatisticsRepository, DuelPresetRepository {
+class InMemoryStatisticsRepository : StatisticsRepository, DuelPresetRepository, MultiplayerMatchRepository {
     private val statistics = ConcurrentHashMap<PlayerId, PlayerStatistics>()
     private val playerNames = ConcurrentHashMap<PlayerId, String>()
     private val recordedMatches = ConcurrentHashMap<MatchId, PersistedMatchResult>()
     private val savedPresets = ConcurrentHashMap<Pair<PlayerId, Int>, DuelPreset>()
+    private val multiplayerMatches = ConcurrentHashMap<MatchId, MultiplayerMatchOutcome>()
     private val writeLock = Any()
     private var leaderboardRevision = 0L
 
@@ -164,6 +165,16 @@ class InMemoryStatisticsRepository : StatisticsRepository, DuelPresetRepository 
     ): CompletableFuture<Boolean> {
         require(slot in 1..MAX_DUEL_PRESETS) { "Preset slot must be between 1 and $MAX_DUEL_PRESETS" }
         return CompletableFuture.completedFuture(synchronized(writeLock) { savedPresets.remove(playerId to slot) != null })
+    }
+
+    override fun record(outcome: MultiplayerMatchOutcome): CompletableFuture<Boolean> {
+        var newlyRecorded = false
+        multiplayerMatches.compute(outcome.matchId) { _, existing ->
+            check(existing == null || existing == outcome) { "Match id collision with a different multiplayer outcome" }
+            newlyRecorded = existing == null
+            outcome
+        }
+        return CompletableFuture.completedFuture(newlyRecorded)
     }
 
     private fun PersistedMatchResult.toRecordedMatch(): RecordedMatch =

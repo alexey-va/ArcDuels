@@ -8,6 +8,7 @@ import ru.arc.paper.playerstate.PaperPlayerStateSnapshot
 import ru.arc.persistence.DurableAcknowledgementOutcome
 import ru.arc.persistence.DurableRecoveryCompletion
 import ru.arc.persistence.DurableRecoveryWorkflow
+import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
@@ -78,22 +79,33 @@ internal class DurablePlayerStateService(
         first: Player,
         second: Player,
         inventoryReplaced: Boolean,
+    ): CompletableFuture<Map<UUID, StoredPlayerSnapshot>> =
+        storeAll(matchId, listOf(first, second), inventoryReplaced)
+
+    fun storeAll(
+        matchId: MatchId,
+        players: Collection<Player>,
+        inventoryReplaced: Boolean,
     ): CompletableFuture<Map<UUID, StoredPlayerSnapshot>> {
         check(plugin.server.isPrimaryThread) { "Player state must be captured on the Paper primary thread" }
-        val firstStored = capture(matchId, first, inventoryReplaced)
-        val secondStored = capture(matchId, second, inventoryReplaced)
-        return repository.savePair(firstStored.escrow, secondStored.escrow)
+        require(players.size in 2..MAX_MULTIPLAYER_PARTICIPANTS) {
+            "Atomic match escrow requires 2..$MAX_MULTIPLAYER_PARTICIPANTS player states"
+        }
+        require(players.map(Player::getUniqueId).distinct().size == players.size) { "Match escrow players must be distinct" }
+        val stored = players.map { capture(matchId, it, inventoryReplaced) }
+        val escrows = stored.map(StoredPlayerSnapshot::escrow)
+        return repository.saveAll(escrows)
             .handle { _, failure ->
                 if (failure == null) {
                     CompletableFuture.completedFuture(Unit)
                 } else {
-                    reconcileUnknownSave(firstStored.escrow, secondStored.escrow, failure.unwrapCompletion())
+                    reconcileUnknownSave(escrows, failure.unwrapCompletion())
                 }
             }.thenCompose { it }
             .thenApply {
-                pending[first.uniqueId] = firstStored.escrow
-                pending[second.uniqueId] = secondStored.escrow
-                mapOf(first.uniqueId to firstStored, second.uniqueId to secondStored)
+                stored.associateBy { snapshot ->
+                    snapshot.escrow.playerId.value.also { playerId -> pending[playerId] = snapshot.escrow }
+                }
             }
     }
 
@@ -270,40 +282,43 @@ internal class DurablePlayerStateService(
     }
 
     private fun reconcileUnknownSave(
-        first: PlayerStateEscrow,
-        second: PlayerStateEscrow,
+        expected: List<PlayerStateEscrow>,
         originalFailure: Throwable,
         emptyConfirmations: Int = 0,
-    ): CompletableFuture<Unit> =
-        repository.findPending(first.playerId)
-            .thenCombine(repository.findPending(second.playerId), ::Pair)
+    ): CompletableFuture<Unit> {
+        require(expected.isNotEmpty()) { "Expected escrow set cannot be empty" }
+        val lookups = expected.map { repository.findPending(it.playerId) }
+        return CompletableFuture.allOf(*lookups.toTypedArray())
+            .thenApply { lookups.map(CompletableFuture<PlayerStateEscrow?>::join) }
             .handle { actual, lookupFailure ->
                 if (lookupFailure != null) {
-                    return@handle retryReconciliation(first, second, originalFailure, emptyConfirmations)
+                    return@handle retryReconciliation(expected, originalFailure, emptyConfirmations)
                 }
-                val firstActual = requireNotNull(actual).first
-                val secondActual = actual.second
+                val committed = requireNotNull(actual)
+                val exact = committed.zip(expected).all { (found, wanted) -> found?.sameContent(wanted) == true }
+                val allAbsent = committed.all { it == null }
+                val mismatch = committed.zip(expected).any { (found, wanted) -> found != null && !found.sameContent(wanted) }
                 when {
-                    firstActual?.sameContent(first) == true && secondActual?.sameContent(second) == true ->
+                    exact ->
                         CompletableFuture.completedFuture(Unit)
 
-                    firstActual == null && secondActual == null && emptyConfirmations + 1 >= EMPTY_CONFIRMATIONS_REQUIRED ->
+                    allAbsent && emptyConfirmations + 1 >= EMPTY_CONFIRMATIONS_REQUIRED ->
                         CompletableFuture.failedFuture(
-                            IllegalStateException("MySQL confirmed that the player state pair was not committed", originalFailure),
+                            IllegalStateException("MySQL confirmed that the player state set was not committed", originalFailure),
                         )
 
-                    firstActual == null && secondActual == null ->
-                        retryReconciliation(first, second, originalFailure, emptyConfirmations + 1)
+                    allAbsent ->
+                        retryReconciliation(expected, originalFailure, emptyConfirmations + 1)
 
-                    (firstActual != null && !firstActual.sameContent(first)) ||
-                        (secondActual != null && !secondActual.sameContent(second)) ->
+                    mismatch ->
                         CompletableFuture.failedFuture(
                             IllegalStateException("A participant already has a different recovery snapshot", originalFailure),
                         )
 
-                    else -> retryReconciliation(first, second, originalFailure, emptyConfirmations = 0)
+                    else -> retryReconciliation(expected, originalFailure, emptyConfirmations = 0)
                 }
             }.thenCompose { it }
+    }
 
     private fun reconcileUnknownSave(
         expected: PlayerStateEscrow,
@@ -328,8 +343,7 @@ internal class DurablePlayerStateService(
             }.thenCompose { it }
 
     private fun retryReconciliation(
-        first: PlayerStateEscrow,
-        second: PlayerStateEscrow,
+        expected: List<PlayerStateEscrow>,
         originalFailure: Throwable,
         emptyConfirmations: Int,
     ): CompletableFuture<Unit> {
@@ -341,7 +355,7 @@ internal class DurablePlayerStateService(
         return CompletableFuture.runAsync(
             {},
             CompletableFuture.delayedExecutor(reconciliationDelay.toMillis(), TimeUnit.MILLISECONDS),
-        ).thenCompose { reconcileUnknownSave(first, second, originalFailure, emptyConfirmations) }
+        ).thenCompose { reconcileUnknownSave(expected, originalFailure, emptyConfirmations) }
     }
 
     private fun retryReconciliation(
@@ -410,7 +424,7 @@ internal class DurablePlayerStateService(
         const val MAX_ESCROW_PAYLOAD_BYTES = 8 * 1024 * 1024
         // A lost COMMIT response can race a fresh connection. Require an
         // immediate read plus six delayed confirmations (30 seconds total)
-        // before declaring the atomic pair absent and releasing the players.
+        // before declaring the atomic participant set absent and releasing the players.
         const val EMPTY_CONFIRMATIONS_REQUIRED = 7
         const val CORE_ESCROW_FORMAT_VERSION = 2
     }

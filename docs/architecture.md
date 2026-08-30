@@ -69,6 +69,18 @@ against the exact row through fresh connections; an immediate read plus six
 delayed empty confirmations over 30 seconds are required before absence is
 accepted.
 
+Group matches use a separate local owner and never reinterpret the two-party
+Redis protocol. Their immutable domain roster validates 3–12 unique players,
+balanced two/three-team layouts, FFA team absence, and shared-kit agreement.
+Paper atomically commits every participant snapshot in one MySQL transaction
+before applying any kit or starting any arena teleport. The group owner uses
+arc-core lifecycle scopes, typed audience and asynchronous teleport ports,
+scoped teleport authorization, player-data persistence, and leased chunk
+tickets. Results are written idempotently to dedicated match and participant
+tables before snapshots are restored and the exclusive arena lease is released.
+A persistence failure leaves participants protected and retries instead of
+publishing an unrecorded result.
+
 When the node policy selects HuskSync, accepted matches remain in the pre-start state until
 both players have emitted its successful synchronization-complete event.
 ArcDuels does not capture or mutate player state while that barrier is closed.

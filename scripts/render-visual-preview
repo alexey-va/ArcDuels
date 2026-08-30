@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Render ArcDuels' player-facing multiplayer and kit visual catalog."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ops-root", type=Path)
+    parser.add_argument("--client-jar", type=Path)
+    parser.add_argument("--resource-pack", type=Path)
+    parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "build/reports/visual-preview")
+    parser.add_argument("--gui-scale", type=int, default=3)
+    args = parser.parse_args()
+
+    candidates = [args.ops_root] if args.ops_root else []
+    configured = os.environ.get("RUSCRAFTING_OPS_ROOT")
+    if configured:
+        candidates.append(Path(configured))
+    candidates.extend((PROJECT_ROOT.parent, PROJECT_ROOT.parent / ".deploy-ruscrafting-ops"))
+    relative_tool = Path(".agents/skills/design-ruscrafting-surfaces/scripts/render_plugin_surface_dump.py")
+    ops_root = next((path.resolve() for path in candidates if path and (path / relative_tool).is_file()), None)
+    if ops_root is None:
+        parser.error("RusCrafting ops checkout was not found; pass --ops-root or RUSCRAFTING_OPS_ROOT")
+
+    command = [
+        sys.executable,
+        "-B",
+        str(ops_root / relative_tool),
+        "--manifest",
+        str(PROJECT_ROOT / "visual-preview.yml"),
+        "--project-root",
+        str(PROJECT_ROOT),
+        "--output",
+        str(args.output),
+        "--gui-scale",
+        str(args.gui_scale),
+    ]
+    if args.client_jar:
+        command.extend(("--client-jar", str(args.client_jar)))
+    if args.resource_pack:
+        command.extend(("--resource-pack", str(args.resource_pack)))
+    return subprocess.run(command, check=False).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -3,7 +3,7 @@ package ru.ruscrafting.duels.mysql
 import ru.arc.sql.SqlMigration
 
 object MySqlDuelMigrations {
-    const val CURRENT_VERSION = 8
+    const val CURRENT_VERSION = 9
 
     val all: List<SqlMigration> =
         listOf(
@@ -240,6 +240,44 @@ object MySqlDuelMigrations {
                             CONSTRAINT `chk_arcduels_preset_arena_pair` CHECK (
                                 (`selected_arena_server` IS NULL) = (`selected_arena_id` IS NULL)
                             )
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """.trimIndent(),
+                ),
+            ),
+            SqlMigration(
+                version = 9,
+                description = "create durable multiplayer match history",
+                statements =
+                    listOf(
+                        """
+                        CREATE TABLE IF NOT EXISTS `arcduels_multiplayer_matches` (
+                            `match_id` BINARY(16) NOT NULL,
+                            `server_id` VARCHAR(48) NOT NULL,
+                            `arena_id` VARCHAR(48) NOT NULL,
+                            `layout` VARCHAR(32) NOT NULL,
+                            `kit_policy` VARCHAR(32) NOT NULL,
+                            `shared_kit_id` VARCHAR(48) NULL,
+                            `winning_team` TINYINT UNSIGNED NULL,
+                            `end_reason` VARCHAR(32) NOT NULL,
+                            `completed_at` DATETIME(3) NOT NULL,
+                            `outcome_sha256` BINARY(32) NOT NULL,
+                            PRIMARY KEY (`match_id`),
+                            KEY `idx_arcduels_multiplayer_completed` (`completed_at` DESC)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """.trimIndent(),
+                        """
+                        CREATE TABLE IF NOT EXISTS `arcduels_multiplayer_participants` (
+                            `match_id` BINARY(16) NOT NULL,
+                            `player_id` BINARY(16) NOT NULL,
+                            `team` TINYINT UNSIGNED NULL,
+                            `kit_id` VARCHAR(48) NOT NULL,
+                            `placement` TINYINT UNSIGNED NOT NULL,
+                            `won` BOOLEAN NOT NULL,
+                            PRIMARY KEY (`match_id`, `player_id`),
+                            KEY `idx_arcduels_multiplayer_player` (`player_id`, `match_id`),
+                            CONSTRAINT `fk_arcduels_multiplayer_match`
+                                FOREIGN KEY (`match_id`) REFERENCES `arcduels_multiplayer_matches` (`match_id`)
+                                ON DELETE CASCADE
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                         """.trimIndent(),
                     ),

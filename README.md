@@ -12,7 +12,7 @@ Paper, MySQL, and Redis:
 | `network-redis` | Network player discovery, challenges, arena routing, events and cache invalidation |
 | `paper` | Commands, inventories, arena runtime and player presentation |
 
-`arc-core` is pinned to immutable public Maven release `2.0.0`; agents can opt
+`arc-core` is pinned to immutable public Maven release `2.2.0`; agents can opt
 into a local composite with `-ParcCoreDir=/absolute/path/to/arc-core` while
 developing both repositories. Redis is optional at runtime. MySQL is mandatory for starting matches
 because ArcDuels will not mutate a player's inventory or location without a
@@ -38,7 +38,11 @@ This repository is under active development. The first vertical slice targets:
   help, leaderboard, and administrative branches;
 - elimination, king-of-the-hill, sumo, boxing, and combo objectives with BO1/BO3/BO5,
   ranked play, sudden death, and per-match combat modifiers;
-- seven bundled starter kits and Russian/English client-locale presentation;
+- thirteen merge-forward starter kits, exact item/enchantment manifests in every
+  kit picker, and Russian/English client-locale presentation;
+- local 3–12-player matches with free-for-all, two-team, or three-team layouts,
+  automatic balanced team assignment, and either one shared kit or an explicit
+  kit choice from every participant;
 - optional countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
 - short server-authoritative arena-teleport stabilization that absorbs stale
   movement packets before combat begins;

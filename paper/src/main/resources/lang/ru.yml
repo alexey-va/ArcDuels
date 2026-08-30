@@ -21,6 +21,8 @@ menu:
     leaderboard-lore: ['<dark_gray>✖</dark_gray> <white>Общий рейтинг игроков</white>', '   <white>на всех серверах.</white>', '', '<aqua>ЛКМ</aqua> <gray>Открыть таблицу</gray>']
     modes: '<gold>Режимы боя</gold>'
     modes-lore: ['<dark_gray>✖</dark_gray> <white>Классика, царь горы, сумо,</white>', '   <white>боксинг и комбо.</white>', '', '<aqua>ЛКМ</aqua> <gray>Посмотреть режимы</gray>']
+    multiplayer: '<gold>Групповой матч</gold>'
+    multiplayer-lore: ['<dark_gray>✖</dark_gray> <white>От 3 до 12 игроков:</white>', '   <white>каждый за себя или 2–3 команды.</white>', '', '<aqua>ЛКМ</aqua> <gray>Собрать матч</gray>']
     kits: '<gold>Наборы</gold>'
     kits-lore: ['<dark_gray>✖</dark_gray> <white>Готовое снаряжение для боя.</white>', '', '<aqua>ЛКМ</aqua> <gray>Посмотреть наборы</gray>']
     stats: '<gold>Моя статистика</gold>'
@@ -137,6 +139,8 @@ menu:
     title: '<dark_gray>Режимы боя</dark_gray>'
   kits:
     title: '<dark_gray>Наборы</dark_gray>'
+    contents: '<#fff4d6>Состав набора</#fff4d6>'
+    unbreakable: '<dark_gray>неразрушимый</dark_gray>'
   queue:
     title: '<dark_gray>Арены и очередь</dark_gray>'
     active: '<gold>Занятые арены: <active></gold>'
@@ -236,6 +240,90 @@ kit:
   boxing:
     name: '<gold>Боксинг</gold>'
     description: ['<gray>Равное лёгкое снаряжение для ударных режимов.</gray>']
+  crossbow:
+    name: '<gold>Арбалетчик</gold>'
+    description: ['<gray>Быстрый пробивающий арбалет и запас стрел.</gray>']
+  trident:
+    name: '<gold>Трезубец</gold>'
+    description: ['<gray>Возвращающийся трезубец, щит и ближний бой.</gray>']
+  mace:
+    name: '<gold>Булава</gold>'
+    description: ['<gray>Вертикальные атаки булавой и заряды ветра.</gray>']
+  berserker:
+    name: '<gold>Берсерк</gold>'
+    description: ['<gray>Высокий урон и облегчённая защита.</gray>']
+  rod:
+    name: '<gold>Удочка</gold>'
+    description: ['<gray>Классические комбо мечом, удочкой и луком.</gray>']
+  knockback:
+    name: '<gold>Отбрасывание</gold>'
+    description: ['<gray>Контроль дистанции палкой и снежками.</gray>']
+
+multiplayer:
+  busy: '<#c42323>Сначала заверши текущий бой или восстановление.</#c42323>'
+  no-kits: '<#c42323>Для группового матча нужен хотя бы один настроенный кит.</#c42323>'
+  invalid-size: '<#c42323>Выбери от 3 до 12 участников и оставь непустые команды.</#c42323>'
+  player-left: '<#c42323>Один из участников вышел или уже занят.</#c42323>'
+  invited: '<#fff4d6><player> приглашает тебя в групповой матч.</#fff4d6>'
+  expired: '<#8c8c8c>Сбор группового матча завершён: время приглашения истекло.</#8c8c8c>'
+  cancelled: '<#8c8c8c>Организатор отменил групповой матч.</#8c8c8c>'
+  declined: '<#8c8c8c>Один из игроков отклонил приглашение.</#8c8c8c>'
+  start-failed: '<#c42323>Не удалось начать групповой матч:</#c42323> <#8c8c8c><reason></#8c8c8c>'
+  result-pending: '<#ffb347>Результат ещё сохраняется; состояние игроков остаётся защищённым.</#ffb347>'
+  countdown:
+    title: '<#fff4d6><seconds></#fff4d6>'
+    subtitle: '<#8c8c8c>Приготовься</#8c8c8c>'
+  start:
+    title: '<#2bba43>В бой!</#2bba43>'
+  eliminated:
+    title: '<#c42323>Ты выбыл</#c42323>'
+    subtitle: '<#8c8c8c>Можно наблюдать за оставшимися игроками</#8c8c8c>'
+  victory:
+    title: '<#2bba43>Победа</#2bba43>'
+  defeat:
+    title: '<#c42323>Поражение</#c42323>'
+  finish:
+    subtitle: '<#8c8c8c>Возвращаю твоё состояние</#8c8c8c>'
+  layout:
+    free_for_all: '<white>каждый за себя</white>'
+    two_teams: '<white>две команды</white>'
+    three_teams: '<white>три команды</white>'
+  kit-policy:
+    shared: '<white>один кит для всех</white>'
+    per_player: '<white>каждый выбирает свой</white>'
+  menu:
+    setup-title: '<dark_gray>Групповой матч · настройка</dark_gray>'
+    lobby-title: '<dark_gray>Групповой матч · готовность</dark_gray>'
+    no-players: '<red>Нет свободных игроков</red>'
+    player: '<gold><player></gold>'
+    player-lore: ['<gray>Состояние:</gray> <state>', '<gray>Команда:</gray> <white><team></white>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать или убрать</gray>']
+    player-status-lore: ['<gray>Состояние:</gray> <state>', '<gray>Команда:</gray> <white><team></white>']
+    selected: '<green>выбран / готов</green>'
+    not-selected: '<gray>не выбран / ожидает</gray>'
+    layout: '<gold>Формат: <value></gold>'
+    layout-lore: ['<gray>Каждый за себя, две или три</gray>', '<gray>автоматически сбалансированные команды.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    kit-policy: '<gold>Киты: <value></gold>'
+    kit-policy-lore: ['<gray>Один набор для всех либо личный</gray>', '<gray>выбор каждого участника.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    readonly-lore: ['<gray>Выбрано организатором:</gray> <value>']
+    shared-kit-lore: ['<gray>Этот набор получат все участники.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Следующий кит</gray>']
+    personal-kit-lore: ['<gray>Это твой набор в предстоящем матче.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Следующий кит</gray>']
+    shared-kit-readonly-lore: ['<gray>Этот набор получат все участники.</gray>', '<dark_gray>Выбрано организатором.</dark_gray>']
+    personal-kit-readonly-lore: ['<gray>Это твой подтверждённый набор.</gray>', '<dark_gray>Изменить его можно до подтверждения.</dark_gray>']
+    back-lore: ['', '<aqua>ЛКМ</aqua> <gray>Вернуться в главное меню</gray>']
+    invite: '<green>Отправить приглашения</green>'
+    invite-lore: ['<gray>Участников:</gray> <white><players></white>', '<gray>Матч начнётся, когда все подтвердят.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Создать лобби</gray>']
+    invite-disabled: '<gray>Матч пока не готов</gray>'
+    invite-disabled-lore: ['<gray>Сейчас участников:</gray> <white><players></white>', '<gray>Нужно от 3 до 12 и непустые команды.</gray>']
+    waiting: '<gold>Ожидаем игроков</gold>'
+    waiting-lore: ['<gray>Готовы:</gray> <white><ready>/<players></white>', '<gray>Матч запустится автоматически.</gray>']
+    accept: '<green>Подтвердить участие</green>'
+    accept-lore: ['<gray>Проверь формат и свой кит.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Я готов</gray>']
+    accepted: '<green>Ты готов</green>'
+    accepted-lore: ['<gray>Ожидаем остальных участников.</gray>']
+    cancel: '<red>Отменить матч</red>'
+    decline: '<red>Отклонить приглашение</red>'
+    cancel-lore: ['', '<red>ЛКМ</red> <gray>Закрыть лобби для всех</gray>']
+    left-player: '<red>Игрок вышел</red>'
 
 player-link:
   name: '<#92bed8><player></#92bed8>'

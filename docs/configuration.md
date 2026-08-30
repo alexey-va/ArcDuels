@@ -151,6 +151,11 @@ arenas:
     allowed-objectives: [ELIMINATION, KING_OF_THE_HILL, SUMO, BOXING, COMBO]
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
     second-spawn: { world: duels, x: 8.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
+    multiplayer-spawns:
+      '1': { world: duels, x: -8.5, y: 65, z: -8.5, yaw: -45, pitch: 0, team-2: 1, team-3: 1 }
+      '2': { world: duels, x: 8.5, y: 65, z: -8.5, yaw: 45, pitch: 0, team-2: 1, team-3: 2 }
+      '3': { world: duels, x: 8.5, y: 65, z: 8.5, yaw: 135, pitch: 0, team-2: 2, team-3: 3 }
+      '4': { world: duels, x: -8.5, y: 65, z: 8.5, yaw: -135, pitch: 0, team-2: 2, team-3: 1 }
     lobby: { world: duels, x: 0.5, y: 65, z: 20.5, yaw: 180, pitch: 0 }
     post-match-action: LOCAL_LOBBY # or RETURN_TO_ORIGIN
     bounds:
@@ -161,6 +166,21 @@ arenas:
       radius: 3.5
       height: 3.0
 ```
+
+`multiplayer-spawns` is the explicit safety contract for group matches. A
+group-capable arena needs enough distinct bounded points for the requested
+3–12-player roster. `team-2` and `team-3` declare which side owns each point in
+the corresponding layout; free-for-all uses the points in configured order.
+ArcDuels validates capacity before reservation and shares the same exclusive
+arena lease with 1v1, so the two runtimes cannot overlap. The in-game arena
+editor does not invent group coordinates: operators must survey and configure
+real safe points before enabling this path on a production arena.
+
+Group matchmaking is deliberately local to one Paper node. Its GUI covers
+participant selection, free-for-all/two-team/three-team format, automatic
+balanced teams, shared/per-player kit policy, per-player kit confirmation, and
+readiness. It is unranked BO1 elimination and does not advertise a cross-server
+group protocol. Existing cross-server 1v1 routing remains unchanged.
 
 `allowed-loadouts` is an arena policy, not a server role. It accepts
 `OWN_INVENTORY`, `KIT`, or both; omitting it keeps both modes enabled for
@@ -225,10 +245,20 @@ screen.
 
 ## Kits
 
-Kit inventory entries use `MATERIAL [amount]` and slots `0..35`. Armor has
-dedicated helmet, chestplate, leggings, and boots keys. Invalid materials,
-oversized stacks, and unknown kits stop startup instead of failing halfway
-through a match.
+Bundled kits live in `loadouts.yml`, not the general runtime configuration.
+arc-core merge-forward loading preserves operator-owned values and adds newly
+bundled kits or fields on upgrade. An existing legacy `config.yml` `kits`
+section remains an authoritative compatibility override and can be removed
+after its values have been reconciled into `loadouts.yml`.
+
+Kit inventory entries accept compact `MATERIAL [amount]` values or structured
+items with `material`, `amount`, `enchantments`, and `unbreakable`. Slots are
+`0..35`; `offhand` and armor have dedicated keys. Invalid materials,
+enchantments, levels, oversized stacks, duplicate case-normalized ids, and
+unknown kits stop startup instead of failing halfway through a match. Every kit
+picker builds its visible contents from the parsed runtime `ItemStack`s,
+including amounts and enchantment levels, so descriptive lore cannot drift from
+what the match actually equips.
 
 Both own-inventory and kit modes snapshot both players on their origin backend and restore their
 original location, inventory, armor, off-hand, health, hunger, experience, game
@@ -303,9 +333,10 @@ shutdown:
 ```
 
 The bundled starter kits are `classic`, `axe`, `archer`, `uhc`, `tank`, `sumo`,
-and `boxing`. Sumo and hit-race objectives use their controlled kits only. The
-UHC selection starts with natural regeneration disabled; every
-setting remains visible before the challenge is sent.
+`boxing`, `crossbow`, `trident`, `mace`, `berserker`, `rod`, and `knockback`.
+Sumo and hit-race objectives use their controlled kits only. The UHC selection
+starts with natural regeneration disabled; every setting remains visible before
+the challenge is sent.
 
 `/duel` opens the main hub. The opponent picker includes players from every
 ProxyARC backend and shows their current server. Challenge setup is deliberately hierarchical:

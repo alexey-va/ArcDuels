@@ -9,7 +9,7 @@ plugins {
 
 allprojects {
     group = "ru.ruscrafting.duels"
-    version = "0.8.4"
+    version = "0.9.0"
 }
 
 subprojects {
@@ -35,6 +35,10 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
+        // arc-core's MockBukkit bridge instruments Paper classes in the test JVM.
+        // Enable direct self-attachment so Byte Buddy does not depend on a
+        // separate macOS attach helper, which can block indefinitely on JDK 25.
+        jvmArgs("-Djdk.attach.allowAttachSelf=true", "-XX:+EnableDynamicAgentLoading")
     }
 }
 

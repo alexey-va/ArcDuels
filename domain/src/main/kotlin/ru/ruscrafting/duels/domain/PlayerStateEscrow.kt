@@ -64,11 +64,14 @@ interface PlayerStateEscrowRepository {
     /** Stores one origin-owned snapshot idempotently and verifies its committed bytes. */
     fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit>
 
-    /** Stores both participants atomically and verifies their committed bytes. */
+    /** Stores every participant atomically and verifies their committed bytes. */
+    fun saveAll(snapshots: List<PlayerStateEscrow>): CompletableFuture<Unit>
+
+    /** Compatibility entry point for the established 1v1 flow. */
     fun savePair(
         first: PlayerStateEscrow,
         second: PlayerStateEscrow,
-    ): CompletableFuture<Unit>
+    ): CompletableFuture<Unit> = saveAll(listOf(first, second))
 
     fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?>
 

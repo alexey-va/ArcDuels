@@ -16,6 +16,9 @@ import ru.ruscrafting.duels.domain.LeaderboardEntry
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.MatchEndReason
+import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
+import ru.ruscrafting.duels.domain.MultiplayerMatchOutcome
+import ru.ruscrafting.duels.domain.MultiplayerMatchRepository
 import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.PersistedMatchResult
 import ru.ruscrafting.duels.domain.PlayerId
@@ -39,7 +42,7 @@ import java.util.concurrent.TimeUnit
 
 class MySqlStatisticsRepository(
     private val runtime: SqlRuntime,
-) : StatisticsRepository, DuelPresetRepository, PlayerStateEscrowRepository, AutoCloseable {
+) : StatisticsRepository, DuelPresetRepository, PlayerStateEscrowRepository, MultiplayerMatchRepository, AutoCloseable {
     fun migrate(): CompletableFuture<SqlMigrationReport> =
         runtime.executor.submit {
             MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(MySqlDuelMigrations.all)
@@ -92,6 +95,67 @@ class MySqlStatisticsRepository(
 
     override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> =
         recordWithRetry(outcome.canonicalized(), attempt = 0)
+
+    override fun record(outcome: MultiplayerMatchOutcome): CompletableFuture<Boolean> {
+        val fingerprint = multiplayerFingerprint(outcome)
+        return runtime.executor.transaction { connection ->
+            val existing =
+                connection.prepareStatement(
+                    "SELECT `outcome_sha256` FROM `arcduels_multiplayer_matches` WHERE `match_id` = ? FOR UPDATE",
+                ).use { statement ->
+                    statement.setBytes(1, UuidBytes.encode(outcome.matchId.value))
+                    statement.executeQuery().use { result -> if (result.next()) result.getBytes(1) else null }
+                }
+            if (existing != null) {
+                check(MessageDigest.isEqual(existing, fingerprint)) {
+                    "Match id collision with a different multiplayer outcome"
+                }
+                return@transaction false
+            }
+            connection.prepareStatement(
+                """
+                INSERT INTO `arcduels_multiplayer_matches`
+                    (`match_id`, `server_id`, `arena_id`, `layout`, `kit_policy`, `shared_kit_id`,
+                     `winning_team`, `end_reason`, `completed_at`, `outcome_sha256`)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setBytes(1, UuidBytes.encode(outcome.matchId.value))
+                statement.setString(2, outcome.serverId.value)
+                statement.setString(3, outcome.arenaId.value)
+                statement.setString(4, outcome.roster.rules.layout.name)
+                statement.setString(5, outcome.roster.rules.kitPolicy.name)
+                statement.setString(6, outcome.roster.rules.sharedKitId?.value)
+                outcome.winningTeam?.let { statement.setInt(7, it) } ?: statement.setNull(7, java.sql.Types.TINYINT)
+                statement.setString(8, outcome.endReason.name)
+                statement.setTimestamp(9, Timestamp.from(outcome.completedAt))
+                statement.setBytes(10, fingerprint)
+                check(statement.executeUpdate() == 1) { "Multiplayer match insert was not acknowledged" }
+            }
+            connection.prepareStatement(
+                """
+                INSERT INTO `arcduels_multiplayer_participants`
+                    (`match_id`, `player_id`, `team`, `kit_id`, `placement`, `won`)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                outcome.roster.participants.forEach { participant ->
+                    statement.setBytes(1, UuidBytes.encode(outcome.matchId.value))
+                    statement.setBytes(2, UuidBytes.encode(participant.playerId.value))
+                    participant.team?.let { statement.setInt(3, it) } ?: statement.setNull(3, java.sql.Types.TINYINT)
+                    statement.setString(4, participant.kitId.value)
+                    statement.setInt(5, multiplayerPlacement(outcome, participant.playerId))
+                    statement.setBoolean(6, participant.playerId in outcome.winners)
+                    statement.addBatch()
+                }
+                val counts = statement.executeBatch()
+                check(counts.size == outcome.roster.participants.size && counts.all { it == 1 || it == java.sql.Statement.SUCCESS_NO_INFO }) {
+                    "Multiplayer participant batch was not fully acknowledged"
+                }
+            }
+            true
+        }
+    }
 
     override fun leaderboard(limit: Int): CompletableFuture<List<LeaderboardEntry>> {
         require(limit in 1..100) { "Leaderboard limit must be between 1 and 100" }
@@ -269,16 +333,21 @@ class MySqlStatisticsRepository(
         }
     }
 
-    override fun savePair(
-        first: PlayerStateEscrow,
-        second: PlayerStateEscrow,
-    ): CompletableFuture<Unit> {
-        require(first.playerId != second.playerId) { "Escrow participants must be different players" }
-        require(first.matchId == second.matchId) { "Escrow participants must belong to the same match" }
-        require(first.serverId == second.serverId) { "Escrow participants must belong to the same server" }
-        validateEscrow(first)
-        validateEscrow(second)
-        return savePairWithRetry(listOf(first, second).sortedBy { it.playerId.value }, attempt = 0)
+    override fun saveAll(snapshots: List<PlayerStateEscrow>): CompletableFuture<Unit> {
+        require(snapshots.size in 2..MAX_MULTIPLAYER_PARTICIPANTS) {
+            "Atomic match escrow requires 2..$MAX_MULTIPLAYER_PARTICIPANTS participants"
+        }
+        require(snapshots.map(PlayerStateEscrow::playerId).distinct().size == snapshots.size) {
+            "Escrow participants must be different players"
+        }
+        require(snapshots.map(PlayerStateEscrow::matchId).distinct().size == 1) {
+            "Escrow participants must belong to the same match"
+        }
+        require(snapshots.map(PlayerStateEscrow::serverId).distinct().size == 1) {
+            "Escrow participants must belong to the same server"
+        }
+        snapshots.forEach(::validateEscrow)
+        return saveAllWithRetry(snapshots.sortedBy { it.playerId.value }, attempt = 0)
     }
 
     override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> {
@@ -372,11 +441,11 @@ class MySqlStatisticsRepository(
 
     override fun close() = runtime.close()
 
-    private fun savePairWithRetry(
+    private fun saveAllWithRetry(
         snapshots: List<PlayerStateEscrow>,
         attempt: Int,
     ): CompletableFuture<Unit> =
-        runtime.executor.transaction { connection -> savePairTransaction(connection, snapshots) }
+        runtime.executor.transaction { connection -> saveAllTransaction(connection, snapshots) }
             .handle { result, failure ->
                 if (failure == null) {
                     CompletableFuture.completedFuture(result)
@@ -386,7 +455,7 @@ class MySqlStatisticsRepository(
                         CompletableFuture.runAsync(
                             {},
                             CompletableFuture.delayedExecutor(RETRY_BASE_DELAY_MS shl attempt, TimeUnit.MILLISECONDS),
-                        ).thenCompose { savePairWithRetry(snapshots, attempt + 1) }
+                        ).thenCompose { saveAllWithRetry(snapshots, attempt + 1) }
                     } else {
                         CompletableFuture.failedFuture(cause)
                     }
@@ -425,22 +494,24 @@ class MySqlStatisticsRepository(
             }
         }.thenCompose { it }
 
-    private fun savePairTransaction(
+    private fun saveAllTransaction(
         connection: Connection,
         snapshots: List<PlayerStateEscrow>,
     ) {
+        val placeholders = List(snapshots.size) { "?" }.joinToString(", ")
         val existing =
             connection.prepareStatement(
                 """
                 SELECT `player_id`, `match_id`, `server_id`, `format_version`, `inventory_replaced`, `payload`, `payload_sha256`, `created_at`
                 FROM `arcduels_player_state_escrow`
-                WHERE `player_id` IN (?, ?)
+                WHERE `player_id` IN ($placeholders)
                 ORDER BY `player_id`
                 FOR UPDATE
                 """.trimIndent(),
             ).use { statement ->
-                statement.setBytes(1, UuidBytes.encode(snapshots[0].playerId.value))
-                statement.setBytes(2, UuidBytes.encode(snapshots[1].playerId.value))
+                snapshots.forEachIndexed { index, snapshot ->
+                    statement.setBytes(index + 1, UuidBytes.encode(snapshot.playerId.value))
+                }
                 statement.executeQuery().use { result ->
                     buildMap {
                         while (result.next()) {
@@ -886,6 +957,39 @@ class MySqlStatisticsRepository(
             rating = getInt("rating"),
             revision = getLong("revision"),
         )
+
+    private fun multiplayerPlacement(outcome: MultiplayerMatchOutcome, playerId: PlayerId): Int {
+        if (playerId in outcome.winners) return 1
+        val eliminatedAt = outcome.eliminationOrder.indexOf(playerId)
+        check(eliminatedAt >= 0) { "Every non-winner must appear in multiplayer elimination order" }
+        return outcome.roster.participants.size - eliminatedAt
+    }
+
+    private fun multiplayerFingerprint(outcome: MultiplayerMatchOutcome): ByteArray {
+        val modifiers = outcome.roster.rules.modifiers
+        val canonical = buildString {
+            append(outcome.matchId.value).append('|')
+            append(outcome.serverId.value).append('|').append(outcome.arenaId.value).append('|')
+            append(outcome.roster.rules.layout.name).append('|').append(outcome.roster.rules.kitPolicy.name).append('|')
+            append(outcome.roster.rules.sharedKitId?.value ?: "-").append('|')
+            append(modifiers.projectiles).append('|').append(modifiers.consumables).append('|')
+            append(modifiers.enderPearls).append('|').append(modifiers.naturalRegeneration).append('|')
+            append(modifiers.suddenDeathAfterSeconds).append('|')
+            append(modifiers.kingOfTheHillCaptureSeconds).append('|')
+            append(modifiers.boxingHitsToWin).append('|').append(modifiers.comboHitsToWin).append('|')
+            append(outcome.winningTeam ?: 0).append('|').append(outcome.endReason.name).append('|')
+            append(outcome.completedAt.toEpochMilli()).append('|')
+            outcome.roster.participants.sortedBy { it.playerId.value }.forEach { participant ->
+                append(participant.playerId.value).append(':')
+                append(participant.team ?: 0).append(':').append(participant.kitId.value).append(':')
+                append(multiplayerPlacement(outcome, participant.playerId)).append(':')
+                append(participant.playerId in outcome.winners).append(';')
+            }
+            append('|')
+            outcome.eliminationOrder.forEach { append(it.value).append(';') }
+        }
+        return MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+    }
 
     private companion object {
         // A four-connection pool can produce several consecutive InnoDB victims

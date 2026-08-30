@@ -10,6 +10,9 @@ import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.MultiplayerRoster
+import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.redis.ArenaAdvertisement
 import ru.ruscrafting.duels.redis.ArenaChoice
@@ -144,6 +147,7 @@ data class PaperArena(
     val allowedObjectives: Set<DuelObjectiveType> = DuelObjectiveType.entries.toSet(),
     val lobby: Location? = null,
     val postMatchAction: ArenaPostMatchAction? = null,
+    val multiplayerSpawns: List<MultiplayerArenaSpawn> = emptyList(),
 ) {
     init {
         require(displayName.isNotBlank() && displayName.length <= 64 && displayName.none(Char::isISOControl)) {
@@ -162,6 +166,53 @@ data class PaperArena(
         mode in allowedLoadouts &&
             objective in allowedObjectives &&
             (objective != DuelObjectiveType.KING_OF_THE_HILL || hill != null)
+
+    fun supports(roster: MultiplayerRoster): Boolean {
+        if (DuelMode.KIT !in allowedLoadouts || DuelObjectiveType.ELIMINATION !in allowedObjectives) return false
+        return when (roster.rules.layout) {
+            MultiplayerLayout.FREE_FOR_ALL -> multiplayerSpawns.size >= roster.participants.size
+            MultiplayerLayout.TWO_TEAMS -> (1..2).all { team ->
+                multiplayerSpawns.count { it.twoTeam == team } >= roster.participants.count { it.team == team }
+            }
+            MultiplayerLayout.THREE_TEAMS -> (1..3).all { team ->
+                multiplayerSpawns.count { it.threeTeam == team } >= roster.participants.count { it.team == team }
+            }
+        }
+    }
+
+    fun assignSpawns(roster: MultiplayerRoster): Map<PlayerId, Location> {
+        require(supports(roster)) { "Arena $id does not have enough multiplayer spawns for this roster" }
+        val remaining = multiplayerSpawns.toMutableList()
+        return roster.participants.associate { participant ->
+            val slot =
+                when (roster.rules.layout) {
+                    MultiplayerLayout.FREE_FOR_ALL -> remaining.first()
+                    MultiplayerLayout.TWO_TEAMS -> remaining.first { it.twoTeam == participant.team }
+                    MultiplayerLayout.THREE_TEAMS -> remaining.first { it.threeTeam == participant.team }
+                }
+            remaining.remove(slot)
+            participant.playerId to slot.location.clone()
+        }
+    }
+}
+
+data class MultiplayerArenaSpawn(
+    val location: Location,
+    val twoTeam: Int,
+    val threeTeam: Int,
+) {
+    init {
+        require(twoTeam in 1..2) { "A multiplayer spawn two-team value must be 1 or 2" }
+        require(threeTeam in 1..3) { "A multiplayer spawn three-team value must be 1, 2, or 3" }
+    }
+}
+
+class MultiplayerArenaReservation internal constructor(
+    val arenaId: ArenaId,
+    val spawns: Map<PlayerId, Location>,
+    private val release: () -> Unit,
+) : AutoCloseable {
+    override fun close() = release()
 }
 
 data class HillZone(
@@ -232,6 +283,22 @@ class PaperArenaCatalog private constructor(
     }
 
     fun get(id: ArenaId): PaperArena = arenas[id] ?: error("Arena $id disappeared from the catalog")
+
+    fun reserveMultiplayer(roster: MultiplayerRoster): CompletableFuture<MultiplayerArenaReservation> =
+        synchronized(lock) {
+            val compatible = arenas.values.filter { it.supports(roster) }
+            if (compatible.isEmpty()) {
+                return@synchronized CompletableFuture.failedFuture(
+                    IllegalStateException("No arena has enough configured multiplayer spawns"),
+                )
+            }
+            val arena = compatible.firstOrNull { it.id !in reserved }
+                ?: return@synchronized CompletableFuture.failedFuture(IllegalStateException("All multiplayer arenas are occupied"))
+            reserved += arena.id
+            CompletableFuture.completedFuture(
+                MultiplayerArenaReservation(arena.id, arena.assignSpawns(roster)) { release(arena.id) },
+            )
+        }
 
     fun size(): Int = arenas.size
 
@@ -379,6 +446,16 @@ class PaperArenaCatalog private constructor(
                             ?.takeIf(String::isNotBlank)
                             ?.let(ArenaPostMatchAction::parse)
                     require(hill == null || bounds.contains(hill)) { "Arena $id hill zone must be fully inside its bounds" }
+                    val multiplayerSpawns = section.readMultiplayerSpawns(plugin)
+                    require(multiplayerSpawns.all { bounds.contains(it.location) }) {
+                        "Arena $id multiplayer spawns must be inside its bounds"
+                    }
+                    require(multiplayerSpawns.map { spawn ->
+                        val location = spawn.location
+                        listOf(location.world?.uid, location.x, location.y, location.z)
+                    }.distinct().size == multiplayerSpawns.size) {
+                        "Arena $id multiplayer spawn locations must be distinct"
+                    }
                     id to
                         PaperArena(
                             id,
@@ -391,6 +468,7 @@ class PaperArenaCatalog private constructor(
                             readArenaAllowedObjectives(section),
                             lobby,
                             postMatchAction,
+                            multiplayerSpawns,
                         )
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
@@ -446,6 +524,23 @@ class PaperArenaCatalog private constructor(
                 radius = getDouble("radius", 3.5),
                 height = getDouble("height", 3.0),
             )
+        }
+
+        private fun ConfigurationSection.readMultiplayerSpawns(plugin: JavaPlugin): List<MultiplayerArenaSpawn> {
+            val root = getConfigurationSection("multiplayer-spawns") ?: return emptyList()
+            return root.getKeys(false)
+                .sortedWith(compareBy<String> { it.toIntOrNull() ?: Int.MAX_VALUE }.thenBy(String::lowercase))
+                .map { key ->
+                    val slot = root.getConfigurationSection(key) ?: error("Invalid multiplayer spawn $currentPath.$key")
+                    require(slot.contains("team-2") && slot.contains("team-3")) {
+                        "Multiplayer spawn ${slot.currentPath} must declare team-2 and team-3"
+                    }
+                    MultiplayerArenaSpawn(
+                        location = root.readLocation(plugin, key),
+                        twoTeam = slot.getInt("team-2"),
+                        threeTeam = slot.getInt("team-3"),
+                    )
+                }
         }
 
         private fun ConfigurationSection.requireCoordinates() {

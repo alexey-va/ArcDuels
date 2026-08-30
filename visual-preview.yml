@@ -1,0 +1,156 @@
+schema: 1
+plugin: ArcDuels
+minecraft-version: '1.21.11'
+minecraft-client-sha1: ba2df812c2d12e0219c489c4cd9a5e1f0760f5bd
+gallery-accent: '#32d6ff'
+
+resource-pack:
+  url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip
+  sha256-url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip.sha256
+
+custom-items:
+  arc:background:
+    material: GRAY_STAINED_GLASS_PANE
+    model: assets/arc/models/gui/background.json
+
+sources:
+  duels:
+    path: paper/src/main/resources/lang/ru.yml
+    include:
+      - menu.main.multiplayer
+      - menu.main.multiplayer-lore
+      - menu.common.back
+      - menu.common.page
+      - menu.common.previous
+      - menu.common.next
+      - menu.kits.title
+      - menu.kits.contents
+      - kit.*
+      - multiplayer.layout.*
+      - multiplayer.kit-policy.*
+      - multiplayer.menu.*
+
+placeholders:
+  player: Alexey23
+  players: '6'
+  ready: '4'
+  team: '2'
+  page: '2'
+  pages: '3'
+  state: '<green>готов</green>'
+  value: '<white>три команды</white>'
+
+surfaces:
+  items:
+    - {id: main-multiplayer, material: PLAYER_HEAD, name: duels:menu.main.multiplayer, lore: duels:menu.main.multiplayer-lore}
+    - {id: kit-classic, material: DIAMOND_SWORD, name: duels:kit.classic.name, lore: [duels:kit.classic.description, duels:menu.kits.contents]}
+    - {id: kit-axe, material: DIAMOND_AXE, name: duels:kit.axe.name, lore: [duels:kit.axe.description, duels:menu.kits.contents]}
+    - {id: kit-archer, material: BOW, name: duels:kit.archer.name, lore: [duels:kit.archer.description, duels:menu.kits.contents]}
+    - {id: kit-uhc, material: GOLDEN_APPLE, name: duels:kit.uhc.name, lore: [duels:kit.uhc.description, duels:menu.kits.contents]}
+    - {id: kit-tank, material: NETHERITE_CHESTPLATE, name: duels:kit.tank.name, lore: [duels:kit.tank.description, duels:menu.kits.contents]}
+    - {id: kit-sumo, material: SLIME_BALL, name: duels:kit.sumo.name, lore: [duels:kit.sumo.description, duels:menu.kits.contents]}
+    - {id: kit-boxing, material: LEATHER_BOOTS, name: duels:kit.boxing.name, lore: [duels:kit.boxing.description, duels:menu.kits.contents]}
+    - {id: kit-crossbow, material: CROSSBOW, name: duels:kit.crossbow.name, lore: [duels:kit.crossbow.description, duels:menu.kits.contents]}
+    - {id: kit-trident, material: TRIDENT, name: duels:kit.trident.name, lore: [duels:kit.trident.description, duels:menu.kits.contents]}
+    - {id: kit-mace, material: MACE, name: duels:kit.mace.name, lore: [duels:kit.mace.description, duels:menu.kits.contents]}
+    - {id: kit-berserker, material: NETHERITE_AXE, name: duels:kit.berserker.name, lore: [duels:kit.berserker.description, duels:menu.kits.contents]}
+    - {id: kit-rod, material: FISHING_ROD, name: duels:kit.rod.name, lore: [duels:kit.rod.description, duels:menu.kits.contents]}
+    - {id: kit-knockback, material: STICK, name: duels:kit.knockback.name, lore: [duels:kit.knockback.description, duels:menu.kits.contents]}
+    - {id: state-selected, material: LIME_DYE, name: duels:multiplayer.menu.selected}
+    - {id: state-not-selected, material: GRAY_DYE, name: duels:multiplayer.menu.not-selected}
+    - {id: layout-ffa, material: TNT, name: duels:multiplayer.layout.free_for_all}
+    - {id: layout-two-teams, material: RED_WOOL, name: duels:multiplayer.layout.two_teams}
+    - {id: layout-three-teams, material: YELLOW_WOOL, name: duels:multiplayer.layout.three_teams}
+    - {id: policy-shared, material: CHEST, name: duels:multiplayer.kit-policy.shared}
+    - {id: policy-personal, material: BUNDLE, name: duels:multiplayer.kit-policy.per_player}
+
+  inventories:
+    - id: kit-catalog-expanded
+      title: duels:menu.kits.title
+      rows: 5
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 10, material: BOW, name: duels:kit.archer.name, lore: duels:kit.archer.description}
+        - {slot: 11, material: DIAMOND_AXE, name: duels:kit.axe.name, lore: duels:kit.axe.description}
+        - {slot: 12, material: NETHERITE_AXE, name: duels:kit.berserker.name, lore: duels:kit.berserker.description}
+        - {slot: 13, material: LEATHER_BOOTS, name: duels:kit.boxing.name, lore: duels:kit.boxing.description}
+        - {slot: 14, material: DIAMOND_SWORD, name: duels:kit.classic.name, lore: duels:kit.classic.description}
+        - {slot: 15, material: CROSSBOW, name: duels:kit.crossbow.name, lore: duels:kit.crossbow.description}
+        - {slot: 16, material: STICK, name: duels:kit.knockback.name, lore: duels:kit.knockback.description}
+        - {slot: 19, material: MACE, name: duels:kit.mace.name, lore: duels:kit.mace.description}
+        - {slot: 20, material: FISHING_ROD, name: duels:kit.rod.name, lore: duels:kit.rod.description}
+        - {slot: 21, material: SLIME_BALL, name: duels:kit.sumo.name, lore: duels:kit.sumo.description}
+        - {slot: 22, material: NETHERITE_CHESTPLATE, name: duels:kit.tank.name, lore: duels:kit.tank.description}
+        - {slot: 23, material: TRIDENT, name: duels:kit.trident.name, lore: duels:kit.trident.description}
+        - {slot: 24, material: GOLDEN_APPLE, name: duels:kit.uhc.name, lore: duels:kit.uhc.description}
+    - id: multiplayer-setup-ready
+      title: duels:multiplayer.menu.setup-title
+      rows: 5
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 10, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-lore, placeholders: {player: Alexey23, state: '<green>выбран</green>', team: '1'}}
+        - {slot: 11, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-lore, placeholders: {player: Skoren, state: '<green>выбран</green>', team: '2'}}
+        - {slot: 12, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-lore, placeholders: {player: Builder, state: '<green>выбран</green>', team: '3'}}
+        - {slot: 13, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-lore, placeholders: {player: Miner, state: '<gray>не выбран</gray>', team: '1'}}
+        - {slot: 28, material: YELLOW_WOOL, name: duels:multiplayer.menu.layout, lore: duels:multiplayer.menu.layout-lore, placeholders: {value: '<white>три команды</white>'}}
+        - {slot: 30, material: BUNDLE, name: duels:multiplayer.menu.kit-policy, lore: duels:multiplayer.menu.kit-policy-lore, placeholders: {value: '<white>каждый выбирает свой</white>'}}
+        - {slot: 32, material: CROSSBOW, name: duels:kit.crossbow.name, lore: duels:multiplayer.menu.personal-kit-lore}
+        - {slot: 34, material: LIME_CONCRETE, name: duels:multiplayer.menu.invite, lore: duels:multiplayer.menu.invite-lore, placeholders: {players: '6'}}
+        - {slot: 36, material: BLUE_STAINED_GLASS_PANE, name: duels:menu.common.back, lore: duels:multiplayer.menu.back-lore}
+        - {slot: 37, material: ARROW, name: duels:menu.common.previous}
+        - {slot: 40, material: CLOCK, name: duels:menu.common.page, placeholders: {page: '2', pages: '3'}}
+        - {slot: 43, material: SPECTRAL_ARROW, name: duels:menu.common.next}
+    - id: multiplayer-setup-disabled
+      title: duels:multiplayer.menu.setup-title
+      rows: 5
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 22, material: BARRIER, name: duels:multiplayer.menu.no-players}
+        - {slot: 28, material: TNT, name: duels:multiplayer.menu.layout, lore: duels:multiplayer.menu.layout-lore, placeholders: {value: '<white>каждый за себя</white>'}}
+        - {slot: 30, material: CHEST, name: duels:multiplayer.menu.kit-policy, lore: duels:multiplayer.menu.kit-policy-lore, placeholders: {value: '<white>один кит для всех</white>'}}
+        - {slot: 32, material: DIAMOND_SWORD, name: duels:kit.classic.name, lore: duels:multiplayer.menu.shared-kit-lore}
+        - {slot: 34, material: GRAY_CONCRETE, name: duels:multiplayer.menu.invite-disabled, lore: duels:multiplayer.menu.invite-disabled-lore, placeholders: {players: '1'}}
+        - {slot: 36, material: BLUE_STAINED_GLASS_PANE, name: duels:menu.common.back, lore: duels:multiplayer.menu.back-lore}
+        - {slot: 40, material: CLOCK, name: duels:menu.common.page, placeholders: {page: '1', pages: '1'}}
+    - id: multiplayer-lobby-host
+      title: duels:multiplayer.menu.lobby-title
+      rows: 5
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 10, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-status-lore, placeholders: {player: Alexey23, state: '<green>готов</green>', team: '1'}}
+        - {slot: 11, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-status-lore, placeholders: {player: Skoren, state: '<green>готов</green>', team: '2'}}
+        - {slot: 12, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-status-lore, placeholders: {player: Builder, state: '<gray>ожидает</gray>', team: '3'}}
+        - {slot: 28, material: YELLOW_WOOL, name: duels:multiplayer.menu.layout, lore: duels:multiplayer.menu.readonly-lore, placeholders: {value: '<white>три команды</white>'}}
+        - {slot: 30, material: BUNDLE, name: duels:multiplayer.menu.kit-policy, lore: duels:multiplayer.menu.readonly-lore, placeholders: {value: '<white>каждый выбирает свой</white>'}}
+        - {slot: 32, material: CROSSBOW, name: duels:kit.crossbow.name, lore: duels:multiplayer.menu.personal-kit-readonly-lore}
+        - {slot: 34, material: CLOCK, name: duels:multiplayer.menu.waiting, lore: duels:multiplayer.menu.waiting-lore, placeholders: {ready: '4', players: '6'}}
+        - {slot: 36, material: RED_CONCRETE, name: duels:multiplayer.menu.cancel, lore: duels:multiplayer.menu.cancel-lore}
+    - id: multiplayer-lobby-invite
+      title: duels:multiplayer.menu.lobby-title
+      rows: 5
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 10, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-status-lore, placeholders: {player: Alexey23, state: '<green>готов</green>', team: '1'}}
+        - {slot: 11, material: PLAYER_HEAD, name: duels:multiplayer.menu.player, lore: duels:multiplayer.menu.player-status-lore, placeholders: {player: Skoren, state: '<gray>ожидает</gray>', team: '2'}}
+        - {slot: 28, material: RED_WOOL, name: duels:multiplayer.menu.layout, lore: duels:multiplayer.menu.readonly-lore, placeholders: {value: '<white>две команды</white>'}}
+        - {slot: 30, material: CHEST, name: duels:multiplayer.menu.kit-policy, lore: duels:multiplayer.menu.readonly-lore, placeholders: {value: '<white>один кит для всех</white>'}}
+        - {slot: 32, material: MACE, name: duels:kit.mace.name, lore: duels:multiplayer.menu.shared-kit-readonly-lore}
+        - {slot: 34, material: LIME_CONCRETE, name: duels:multiplayer.menu.accept, lore: duels:multiplayer.menu.accept-lore}
+        - {slot: 36, material: RED_CONCRETE, name: duels:multiplayer.menu.decline, lore: duels:multiplayer.menu.cancel-lore}
+    - id: multiplayer-lobby-accepted
+      title: duels:multiplayer.menu.lobby-title
+      rows: 5
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 10, material: PLAYER_HEAD, name: duels:multiplayer.menu.left-player}
+        - {slot: 28, material: TNT, name: duels:multiplayer.menu.layout, lore: duels:multiplayer.menu.readonly-lore, placeholders: {value: '<white>каждый за себя</white>'}}
+        - {slot: 30, material: BUNDLE, name: duels:multiplayer.menu.kit-policy, lore: duels:multiplayer.menu.readonly-lore, placeholders: {value: '<white>каждый выбирает свой</white>'}}
+        - {slot: 32, material: TRIDENT, name: duels:kit.trident.name, lore: duels:multiplayer.menu.personal-kit-readonly-lore}
+        - {slot: 34, material: LIME_DYE, name: duels:multiplayer.menu.accepted, lore: duels:multiplayer.menu.accepted-lore}
+        - {slot: 36, material: RED_CONCRETE, name: duels:multiplayer.menu.decline, lore: duels:multiplayer.menu.cancel-lore}
