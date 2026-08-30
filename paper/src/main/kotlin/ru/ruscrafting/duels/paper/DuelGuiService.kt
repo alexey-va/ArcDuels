@@ -65,9 +65,13 @@ class DuelGuiService internal constructor(
         val holder = MainMenuHolder()
         val inventory = create(holder, locales.component(player, "menu.main.title"))
         decorate(inventory)
+        inventory.setItem(4, playerHead(player, locales.component(player, "menu.main.stats"), locales.lines(player, "menu.main.stats-lore")))
         inventory.setItem(11, item(player, Material.NETHERITE_SWORD, "menu.main.challenge", "menu.main.challenge-lore"))
+        inventory.setItem(15, item(player, Material.PLAYER_HEAD, "menu.main.multiplayer", "menu.main.multiplayer-lore"))
+        inventory.setItem(28, item(player, Material.TARGET, "menu.main.modes", "menu.main.modes-lore"))
+        inventory.setItem(29, item(player, Material.CHEST, "menu.main.kits", "menu.main.kits-lore"))
         inventory.setItem(
-            13,
+            31,
             item(
                 player,
                 Material.CLOCK,
@@ -77,19 +81,10 @@ class DuelGuiService internal constructor(
                 LocaleService.text("waiting", sessions.queueSize()),
             ),
         )
-        inventory.setItem(15, item(player, Material.GOLD_INGOT, "menu.main.leaderboard", "menu.main.leaderboard-lore"))
-        inventory.setItem(29, item(player, Material.TARGET, "menu.main.modes", "menu.main.modes-lore"))
-        inventory.setItem(30, item(player, Material.PLAYER_HEAD, "menu.main.multiplayer", "menu.main.multiplayer-lore"))
-        inventory.setItem(31, item(player, Material.ENDER_CHEST, "menu.main.kits", "menu.main.kits-lore"))
-        inventory.setItem(33, playerHead(player, locales.component(player, "menu.main.stats"), locales.lines(player, "menu.main.stats-lore")))
-        inventory.setItem(38, item(player, Material.BOOK, "menu.main.history", "menu.main.history-lore"))
-        inventory.setItem(40, item(player, Material.WRITABLE_BOOK, "menu.main.help", "menu.main.help-lore"))
-        if (sessions.hasPendingRecovery(player)) {
-            inventory.setItem(42, item(player, Material.RECOVERY_COMPASS, "menu.main.recovery", "menu.main.recovery-lore"))
-        }
-        if (player.hasPermission(ADMIN_PERMISSION)) {
-            inventory.setItem(44, item(player, Material.COMPARATOR, "menu.main.admin", "menu.main.admin-lore"))
-        }
+        inventory.setItem(33, item(player, Material.GOLD_INGOT, "menu.main.leaderboard", "menu.main.leaderboard-lore"))
+        inventory.setItem(34, item(player, Material.WRITABLE_BOOK, "menu.main.help", "menu.main.help-lore"))
+        mainRecoverySlot(player)?.let { inventory.setItem(it, item(player, Material.RECOVERY_COMPASS, "menu.main.recovery", "menu.main.recovery-lore")) }
+        mainAdminSlot(player)?.let { inventory.setItem(it, item(player, Material.COMPARATOR, "menu.main.admin", "menu.main.admin-lore")) }
         player.openInventory(inventory)
     }
 
@@ -647,22 +642,21 @@ class DuelGuiService internal constructor(
         val slot = event.rawSlot
         when (holder) {
             is MainMenuHolder -> when (slot) {
+                4 -> statisticsAction(player, targets.local(player))
                 11 -> openTargets(player)
-                13 -> openQueue(player)
-                15 -> openLeaderboard(player)
-                29 -> openModes(player)
-                30 -> multiplayerAction(player)
-                31 -> openKits(player)
-                33 -> statisticsAction(player, targets.local(player))
-                38 -> openHistory(player)
-                40 -> showHelp(player)
-                42 -> if (sessions.hasPendingRecovery(player)) {
+                15 -> multiplayerAction(player)
+                28 -> openModes(player)
+                29 -> openKits(player)
+                31 -> openQueue(player)
+                33 -> openLeaderboard(player)
+                34 -> showHelp(player)
+                mainRecoverySlot(player) -> if (sessions.hasPendingRecovery(player)) {
                     player.closeInventory()
                     if (sessions.requestRecovery(player)) {
                         player.sendMessage(locales.notice(player, "session.recovery-requested"))
                     }
                 }
-                44 -> if (player.hasPermission(ADMIN_PERMISSION)) openAdmin(player)
+                mainAdminSlot(player) -> if (player.hasPermission(ADMIN_PERMISSION)) openAdmin(player)
             }
             is TargetMenuHolder -> when (slot) {
                 BACK_SLOT -> openMain(player)
@@ -1129,15 +1123,22 @@ class DuelGuiService internal constructor(
     private fun decorate(inventory: Inventory) {
         val filler = roleItem("background", Material.GRAY_STAINED_GLASS_PANE, Component.text(" "))
         for (slot in 0 until inventory.size) inventory.setItem(slot, filler)
-        CONTENT_SLOTS.forEach { inventory.setItem(it, null) }
     }
 
     private fun <T> navigation(player: Player, inventory: Inventory, page: PageWindow<T>, back: MenuBack) {
         if (back == MenuBack.MAIN) inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         if (page.hasPrevious) inventory.setItem(PREVIOUS_SLOT, roleItem(player, "previous", Material.ARROW, "menu.common.previous"))
-        inventory.setItem(PAGE_SLOT, roleItem(player, "info", Material.CLOCK, "menu.common.page", resolvers = arrayOf(LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages))))
+        if (page.totalPages > 1) {
+            inventory.setItem(PAGE_SLOT, roleItem(player, "info", Material.CLOCK, "menu.common.page", resolvers = arrayOf(LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages))))
+        }
         if (page.hasNext) inventory.setItem(NEXT_SLOT, roleItem(player, "next", Material.SPECTRAL_ARROW, "menu.common.next"))
     }
+
+    private fun mainRecoverySlot(player: Player): Int? =
+        if (!sessions.hasPendingRecovery(player)) null else if (player.hasPermission(ADMIN_PERMISSION)) 39 else 40
+
+    private fun mainAdminSlot(player: Player): Int? =
+        if (!player.hasPermission(ADMIN_PERMISSION)) null else if (sessions.hasPendingRecovery(player)) 41 else 40
 
     private fun item(player: Player, material: Material, nameKey: String, loreKey: String? = null, vararg resolvers: LocaleValue): ItemStack =
         item(material, locales.component(player, nameKey, *resolvers), loreKey?.let { locales.lines(player, it, *resolvers) }.orEmpty())

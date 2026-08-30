@@ -6,6 +6,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
+import io.mockk.verify
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
@@ -15,17 +16,25 @@ import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
-import org.bukkit.inventory.meta.SkullMeta
 import org.mockbukkit.mockbukkit.entity.PlayerMock
 import org.mockbukkit.mockbukkit.simulate.entity.LivingEntitySimulation
 import org.mockbukkit.mockbukkit.simulate.entity.PlayerSimulation
+import ru.arc.redis.InMemoryRedis
+import ru.arc.redis.ServerIdentity
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.PaperAudienceEffectObservation
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
 import ru.ruscrafting.duels.domain.MultiplayerMatchState
+import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.ServerId
+import ru.ruscrafting.duels.redis.CrossServerGroupBus
+import ru.ruscrafting.duels.redis.GroupLobbyMessageType
+import ru.ruscrafting.duels.redis.CrossServerGroupMessage
+import ru.ruscrafting.duels.redis.NetworkGroupParticipant
+import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
 import java.util.Locale
 
 class MultiplayerMockBukkitIntegrationTest : StringSpec({
@@ -41,6 +50,7 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     host.setLocale(Locale.ENGLISH)
 
                     gui.open(host)
+                    host.openInventory.topInventory.getItem(40)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
                     (10..14).forEach { slot ->
                         host.click(slot).isCancelled shouldBe true
                     }
@@ -91,7 +101,7 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     gui.open(host)
                     host.click(10)
                     host.click(43)
-                    (host.openInventory.topInventory.getItem(10)?.itemMeta as SkullMeta).owningPlayer?.name shouldBe "Candidate11"
+                    host.openInventory.topInventory.getItem(10).plainName() shouldBe "Candidate11"
                     host.click(10)
                     host.click(37)
                     host.openInventory.topInventory.getItem(10).plainLore().contains("selected / ready") shouldBe true
@@ -100,13 +110,103 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     val lobbyPlayers = host.openInventory.topInventory.contents
                         .filterNotNull()
                         .filter { it.type == Material.PLAYER_HEAD }
-                        .mapNotNull { (it.itemMeta as SkullMeta).owningPlayer?.name }
+                        .map { it.plainName() }
                     lobbyPlayers shouldContainExactlyInAnyOrder listOf("GroupHost", "Candidate00", "Candidate11")
 
                     host.click(36)
                     gui.open(harness.players[1])
                     harness.players[1].openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
                     harness.manager.activeCount() shouldBe 0
+                }
+            }
+        }
+    }
+
+    "network player directory feeds the MockBukkit group picker and publishes a remote offer" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("GroupHost", "Alpha")).use { harness ->
+                    val redis = InMemoryRedis(ServerIdentity { "group-test" })
+                    val networkPlayers = NetworkPlayerDirectory(redis)
+                    val remoteId = java.util.UUID.randomUUID()
+                    redis.simulateExternalMessage(
+                        NetworkPlayerDirectory.CHANNEL,
+                        """[{"username":"RemotePlayer","uuid":"$remoteId","server":"parkour","joinTime":1}]""",
+                        "proxy",
+                    )
+                    val bus = CrossServerGroupBus(redis, ServerId("group-test"))
+                    val sent = mutableListOf<ru.ruscrafting.duels.redis.CrossServerGroupMessage>()
+                    bus.subscribe(sent::add)
+                    val gui = harness.registerGui(
+                        targets = DuelTargetDirectory(harness.plugin, ServerId("group-test"), networkPlayers),
+                        groupBus = bus,
+                        transfer = PlayerTransfer { _, _ -> },
+                    )
+                    val host = harness.players.first()
+
+                    gui.open(host)
+                    val shownNames = (10..11).mapNotNull { slot ->
+                        host.openInventory.topInventory.getItem(slot)?.itemMeta?.displayName()
+                            ?.let(PlainTextComponentSerializer.plainText()::serialize)
+                    }
+                    shownNames shouldContainExactly listOf("Alpha", "RemotePlayer")
+                    host.click(10)
+                    host.click(11)
+                    host.click(34)
+
+                    sent.single { it.type == GroupLobbyMessageType.OFFER }.targetId?.value shouldBe remoteId
+                    host.click(36)
+                    gui.close()
+                    bus.close()
+                    networkPlayers.close()
+                }
+            }
+        }
+    }
+
+    "unauthorized network preparation cannot freeze or transfer a MockBukkit player" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("GroupHost", "Victim")).use { harness ->
+                    val attackerRedis = InMemoryRedis(ServerIdentity { "parkour" })
+                    val attackerBus = CrossServerGroupBus(attackerRedis, ServerId("parkour"))
+                    val victimRedis = InMemoryRedis(ServerIdentity { "group-test" })
+                    val victimBus = CrossServerGroupBus(victimRedis, ServerId("group-test"))
+                    val duelSessions = mockk<DuelSessionManager>(relaxed = true)
+                    val transfers = mutableListOf<Pair<java.util.UUID, ServerId>>()
+                    val victim = harness.players[1]
+                    val attacker = NetworkGroupParticipant(PlayerId(java.util.UUID.randomUUID()), "Attacker", ServerId("parkour"))
+                    val victimRoute = NetworkGroupParticipant(PlayerId(victim.uniqueId), victim.name, ServerId("group-test"))
+                    val third = NetworkGroupParticipant(PlayerId(java.util.UUID.randomUUID()), "Third", ServerId("parkour"))
+                    val prepare = CrossServerGroupMessage(
+                        messageId = "malicious:prepare",
+                        sourceServer = ServerId("parkour"),
+                        type = GroupLobbyMessageType.PREPARE,
+                        lobbyId = java.util.UUID.randomUUID(),
+                        hostId = attacker.playerId,
+                        hostServer = ServerId("parkour"),
+                        participants = listOf(attacker, victimRoute, third),
+                        layout = MultiplayerLayout.FREE_FOR_ALL,
+                        kitPolicy = MultiplayerKitPolicy.SHARED,
+                        sharedKitId = KitId("classic"),
+                        expiresAtEpochMillis = System.currentTimeMillis() + 30_000L,
+                    )
+                    val gui = harness.registerGui(
+                        groupBus = victimBus,
+                        transfer = PlayerTransfer { player, destination -> transfers += player.uniqueId to destination },
+                        duelSessions = duelSessions,
+                    )
+
+                    attackerBus.publish(prepare)
+                    val payload = attackerRedis.getPublishedMessages().single { it.channel == CrossServerGroupBus.CHANNEL }.message
+                    victimRedis.simulateExternalMessage(CrossServerGroupBus.CHANNEL, payload, "parkour")
+                    paper.performTicks(2)
+
+                    verify(exactly = 0) { duelSessions.storeOriginSnapshot(any(), any(), any()) }
+                    transfers shouldBe emptyList()
+                    gui.close()
+                    victimBus.close()
+                    attackerBus.close()
                 }
             }
         }
@@ -230,14 +330,24 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
     }
 })
 
-private fun MultiplayerHarness.registerGui(): MultiplayerGuiService =
+private fun MultiplayerHarness.registerGui(
+    targets: DuelTargetDirectory = DuelTargetDirectory(plugin, ServerId("group-test"), null),
+    groupBus: CrossServerGroupBus? = null,
+    transfer: PlayerTransfer? = null,
+    duelSessions: DuelSessionManager = mockk(relaxed = true),
+): MultiplayerGuiService =
     MultiplayerGuiService(
         plugin = plugin,
         kits = kits,
         sessions = manager,
-        duelSessions = mockk(relaxed = true),
+        duelSessions = duelSessions,
         locales = locales,
         tasks = tasks,
+        targets = targets,
+        localServer = ServerId("group-test"),
+        serverNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
+        groupBus = groupBus,
+        transfer = transfer,
         backAction = { },
     ).also { plugin.server.pluginManager.registerEvents(it, plugin) }
 
@@ -260,3 +370,6 @@ private fun damage(victim: PlayerMock, attacker: PlayerMock, amount: Double) =
 
 private fun org.bukkit.inventory.ItemStack?.plainLore(): String =
     this?.itemMeta?.lore().orEmpty().joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+
+private fun org.bukkit.inventory.ItemStack?.plainName(): String =
+    this?.itemMeta?.displayName()?.let(PlainTextComponentSerializer.plainText()::serialize).orEmpty()

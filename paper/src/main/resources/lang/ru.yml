@@ -13,75 +13,75 @@ menu:
     missing: '<red>Не задано</red>'
   main:
     title: '<dark_gray>Дуэли</dark_gray>'
-    challenge: '<gold>Вызвать на бой</gold>'
-    challenge-lore: ['<dark_gray>✖</dark_gray> <white>Выбрать соперника, режим,</white>', '   <white>снаряжение и правила матча.</white>', '', '<aqua>ЛКМ</aqua> <gray>Начать настройку</gray>']
+    challenge: '<gold>Вызвать на дуэль 1 на 1</gold>'
+    challenge-lore: ['<#e6fff3>Ты и один соперник.</#e6fff3>', '<#e6fff3>Выбери режим, снаряжение и правила.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Настроить дуэль</#e6fff3>']
     queue: '<gold>Арены и очередь</gold>'
-    queue-lore: ['<gray>Занято арен:</gray> <yellow><active></yellow>', '<gray>Ожидают арену:</gray> <yellow><waiting></yellow>', '', '<aqua>ЛКМ</aqua> <gray>Открыть состояние</gray>']
+    queue-lore: ['<gray>Занято арен:</gray> <yellow><active></yellow>', '<gray>Ожидают арену:</gray> <yellow><waiting></yellow>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть состояние</#e6fff3>']
     leaderboard: '<gold>Таблица лидеров</gold>'
-    leaderboard-lore: ['<dark_gray>✖</dark_gray> <white>Общий рейтинг игроков</white>', '   <white>на всех серверах.</white>', '', '<aqua>ЛКМ</aqua> <gray>Открыть таблицу</gray>']
+    leaderboard-lore: ['<#e6fff3>Общий рейтинг игроков</#e6fff3>', '<#e6fff3>на всех серверах.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть таблицу</#e6fff3>']
     modes: '<gold>Режимы боя</gold>'
-    modes-lore: ['<dark_gray>✖</dark_gray> <white>Классика, царь горы, сумо,</white>', '   <white>боксинг и комбо.</white>', '', '<aqua>ЛКМ</aqua> <gray>Посмотреть режимы</gray>']
-    multiplayer: '<gold>Групповой матч</gold>'
-    multiplayer-lore: ['<dark_gray>✖</dark_gray> <white>От 3 до 12 игроков:</white>', '   <white>каждый за себя или 2–3 команды.</white>', '', '<aqua>ЛКМ</aqua> <gray>Собрать матч</gray>']
+    modes-lore: ['<#e6fff3>Классика, царь горы, сумо,</#e6fff3>', '<#e6fff3>боксинг и комбо.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Посмотреть режимы</#e6fff3>']
+    multiplayer: '<gold>Вызвать на групповой матч</gold>'
+    multiplayer-lore: ['<#e6fff3>От 3 до 12 игроков со всей сети:</#e6fff3>', '<#e6fff3>каждый за себя или 2–3 команды.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Собрать групповой матч</#e6fff3>']
     kits: '<gold>Наборы</gold>'
-    kits-lore: ['<dark_gray>✖</dark_gray> <white>Готовое снаряжение для боя.</white>', '', '<aqua>ЛКМ</aqua> <gray>Посмотреть наборы</gray>']
+    kits-lore: ['<#e6fff3>Готовое снаряжение для боя.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Посмотреть наборы</#e6fff3>']
     stats: '<gold>Моя статистика</gold>'
-    stats-lore: ['<dark_gray>✖</dark_gray> <white>Рейтинг, победы и серии.</white>', '', '<aqua>ЛКМ</aqua> <gray>Показать статистику</gray>']
+    stats-lore: ['<#e6fff3>Рейтинг, победы и серии.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Показать статистику</#e6fff3>']
     history: '<gold>История боёв</gold>'
-    history-lore: ['<dark_gray>✖</dark_gray> <white>Последние результаты и счёт</white>', '   <white>личных встреч с соперниками.</white>', '', '<aqua>ЛКМ</aqua> <gray>Открыть историю</gray>']
+    history-lore: ['<#e6fff3>Последние результаты и счёт</#e6fff3>', '<#e6fff3>личных встреч с соперниками.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть историю</#e6fff3>']
     help: '<gold>Как проходят дуэли</gold>'
-    help-lore: ['<dark_gray>✖</dark_gray> <white>Правила и защита инвентаря.</white>', '', '<aqua>ЛКМ</aqua> <gray>Открыть справку</gray>']
+    help-lore: ['<#e6fff3>Правила и защита инвентаря.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть справку</#e6fff3>']
     recovery: '<gold>Забрать свои вещи</gold>'
-    recovery-lore: ['<gray>Есть незавершённое восстановление.</gray>', '<gray>Выдача произойдёт после полной</gray>', '<gray>загрузки данных игрока.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Начать восстановление</gray>']
-    admin: '<gold>Управление дуэлями</gold>'
-    admin-lore: ['<dark_gray>✖</dark_gray> <white>Арены, точки, границы</white>', '   <white>и восстановление игроков.</white>', '', '<aqua>ЛКМ</aqua> <gray>Открыть меню администратора</gray>']
+    recovery-lore: ['<#e6fff3>Есть незавершённое восстановление.</#e6fff3>', '<#e6fff3>Выдача произойдёт после полной</#e6fff3>', '<#e6fff3>загрузки данных игрока.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Начать восстановление</#e6fff3>']
+    admin: '<gold>Только для администраторов · Управление</gold>'
+    admin-lore: ['<#e6fff3>Арены, точки, границы</#e6fff3>', '<#e6fff3>и восстановление игроков.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть управление</#e6fff3>']
   targets:
     title: '<dark_gray>Соперник · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
-    player-lore: ['<gray>Сервер:</gray> <white><server></white>', '<dark_gray>✖</dark_gray> <white>Игрок свободен для боя.</white>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
+    player-lore: ['<gray>Сервер:</gray> <white><server></white>', '<#e6fff3>Игрок свободен для боя.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
     empty: '<red>Нет свободных игроков</red>'
   objectives:
     title: '<dark_gray>Режим · <player></dark_gray>'
   loadouts:
     title: '<dark_gray>Снаряжение</dark_gray>'
     own: '<gold>Свои вещи</gold>'
-    own-lore: ['<dark_gray>✖</dark_gray> <white>Каждый использует свой инвентарь.</white>', '<gray>Состояние защищено до телепорта</gray>', '<gray>и восстанавливается после боя.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать</gray>']
+    own-lore: ['<#e6fff3>Каждый использует свой инвентарь.</#e6fff3>', '<#e6fff3>Состояние защищено до телепорта</#e6fff3>', '<#e6fff3>и восстанавливается после боя.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать</#e6fff3>']
     controlled-missing: '<red>Обязательный набор <kit> не настроен</red>'
-    kit-hint: ['', '<aqua>ЛКМ</aqua> <gray>Выбрать набор</gray>']
+    kit-hint: ['', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать набор</#e6fff3>']
   rules:
     title: '<dark_gray>Правила · <player></dark_gray>'
     ranked: '<gold>Рейтинговый матч</gold>'
-    ranked-lore: ['<gray>Состояние:</gray> <state>', '<gray>Доступно только с одинаковым набором.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    ranked-lore: ['<gray>Состояние:</gray> <state>', '<gray>Доступно только с одинаковым набором.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     best-of: '<gold>Формат: BO<value></gold>'
-    best-of-lore: ['<gray>До одной, двух или трёх побед.</gray>', '', '<aqua>ЛКМ</aqua> <gray>BO1 → BO3 → BO5</gray>']
+    best-of-lore: ['<gray>До одной, двух или трёх побед.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — BO1 → BO3 → BO5</#e6fff3>']
     sudden-death: '<gold>Внезапная смерть: <seconds> с</gold>'
-    sudden-death-lore: ['<gray>После таймера оба получают иссушение.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить время</gray>']
+    sudden-death-lore: ['<gray>После таймера оба получают иссушение.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Изменить время</#e6fff3>']
     projectiles: '<gold>Снаряды</gold>'
-    projectiles-lore: ['<gray>Состояние:</gray> <state>', '<gray>Луки, арбалеты и трезубцы.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    projectiles-lore: ['<gray>Состояние:</gray> <state>', '<gray>Луки, арбалеты и трезубцы.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     consumables: '<gold>Расходники</gold>'
-    consumables-lore: ['<gray>Состояние:</gray> <state>', '<gray>Еда, зелья и золотые яблоки.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    consumables-lore: ['<gray>Состояние:</gray> <state>', '<gray>Еда, зелья и золотые яблоки.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     pearls: '<gold>Эндер-жемчуг</gold>'
-    pearls-lore: ['<gray>Состояние:</gray> <state>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    pearls-lore: ['<gray>Состояние:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     regeneration: '<gold>Естественная регенерация</gold>'
-    regeneration-lore: ['<gray>Состояние:</gray> <state>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    regeneration-lore: ['<gray>Состояние:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     capture: '<gold>Захват холма: <seconds> с</gold>'
-    capture-lore: ['<gray>Время удержания точки одним игроком.</gray>', '<gray>При спорном захвате прогресс стоит.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить время</gray>']
+    capture-lore: ['<gray>Время удержания точки одним игроком.</gray>', '<gray>При спорном захвате прогресс стоит.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Изменить время</#e6fff3>']
     hit-target: '<gold>Цель: <hits> попаданий</gold>'
-    hit-target-lore: ['<gray>Раунд завершится, когда игрок первым</gray>', '<gray>наберёт указанное число попаданий.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить цель</gray>']
+    hit-target-lore: ['<gray>Раунд завершится, когда игрок первым</gray>', '<gray>наберёт указанное число попаданий.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Изменить цель</#e6fff3>']
     arena-auto: '<gold>Арена: автовыбор</gold>'
-    arena-auto-lore: ['<gray>Система выберет подходящую арену</gray>', '<gray>с наименьшей очередью на всей сети.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать арену вручную</gray>']
+    arena-auto-lore: ['<gray>Система выберет подходящую арену</gray>', '<gray>с наименьшей очередью на всей сети.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать арену вручную</#e6fff3>']
     arena-selected: '<gold>Арена: <arena></gold>'
-    arena-selected-lore: ['<gray>Сервер:</gray> <server>', '<gray>Вызов закреплён за этой ареной.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Изменить выбор</gray>']
+    arena-selected-lore: ['<gray>Сервер:</gray> <server>', '<gray>Вызов закреплён за этой ареной.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Изменить выбор</#e6fff3>']
     presets: '<gold>Сохранённые наборы правил</gold>'
-    presets-lore: ['<gray>Необязательные ярлыки для частых настроек.</gray>', '<gray>Обычный путь создания боя не меняется.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Открыть сохранённые настройки</gray>']
+    presets-lore: ['<gray>Необязательные ярлыки для частых настроек.</gray>', '<gray>Обычный путь создания боя не меняется.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть сохранённые настройки</#e6fff3>']
     confirm: '<green>Отправить вызов</green>'
-    confirm-lore: ['<dark_gray>✖</dark_gray> <white>Все параметры выбраны.</white>', '', '<aqua>ЛКМ</aqua> <gray>Подтвердить</gray>']
+    confirm-lore: ['<#e6fff3>Все параметры выбраны.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Подтвердить</#e6fff3>']
   arenas:
     title: '<dark_gray>Выбор арены</dark_gray>'
     auto: '<gold>Автовыбор</gold>'
-    auto-lore: ['<gray>Предпочесть свободную арену</gray>', '<gray>с наименьшей очередью.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать</gray>']
+    auto-lore: ['<gray>Предпочесть свободную арену</gray>', '<gray>с наименьшей очередью.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать</#e6fff3>']
     entry: '<gold><arena></gold>'
-    entry-lore: ['<gray>Сервер:</gray> <server>', '<gray>Состояние:</gray> <state>', '', '<aqua>ЛКМ</aqua> <gray>Закрепить арену</gray>']
+    entry-lore: ['<gray>Сервер:</gray> <server>', '<gray>Состояние:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Закрепить арену</#e6fff3>']
     available: '<green>свободна</green>'
     busy: '<yellow>занята — бой встанет в очередь</yellow>'
     empty: '<red>Подходящих арен сейчас нет</red>'
@@ -99,7 +99,7 @@ menu:
     empty-lore: ['<gray>Здесь появятся результаты твоих дуэлей.</gray>']
     win: '<green>Победа</green> <dark_gray>·</dark_gray> <white><player></white>'
     loss: '<red>Поражение</red> <dark_gray>·</dark_gray> <white><player></white>'
-    entry-lore: ['<gray>Счёт:</gray> <white><score></white>  <gray>Формат:</gray> <white>BO<bestof></white>', '<gray>Режим:</gray> <objective>', '<gray>Снаряжение:</gray> <loadout>  <ranked>', '<gray>Арена:</gray> <white><arena></white>', '<gray>Сервер:</gray> <server>', '<gray>Завершён:</gray> <white><time></white>', '<gray>Причина:</gray> <reason>', '<gray>Рейтинг после боя:</gray> <aqua><rating></aqua>', '', '<aqua>ЛКМ</aqua> <gray>Открыть счёт личных встреч</gray>']
+    entry-lore: ['<gray>Счёт:</gray> <white><score></white>  <gray>Формат:</gray> <white>BO<bestof></white>', '<gray>Режим:</gray> <objective>', '<gray>Снаряжение:</gray> <loadout>  <ranked>', '<gray>Арена:</gray> <white><arena></white>', '<gray>Сервер:</gray> <server>', '<gray>Завершён:</gray> <white><time></white>', '<gray>Причина:</gray> <reason>', '<gray>Рейтинг после боя:</gray> <aqua><rating></aqua>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть счёт личных встреч</#e6fff3>']
     legacy-arena: 'старая арена'
     reason:
       elimination: '<white>победа в бою</white>'
@@ -116,21 +116,21 @@ menu:
     offline: '<gray>Соперник не в сети</gray>'
     offline-lore: ['<gray>Его можно будет вызвать после возвращения.</gray>']
     challenge: '<green>Вызвать <player></green>'
-    challenge-lore: ['<gray>Открыть обычную настройку дуэли.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать правила</gray>']
+    challenge-lore: ['<gray>Открыть обычную настройку дуэли.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать правила</#e6fff3>']
   presets:
     loading: '<gray>Загружаю сохранённые настройки…</gray>'
     title: '<dark_gray>Сохранённые настройки</dark_gray>'
     empty: '<gold>Ячейка <slot> · Пусто</gold>'
-    empty-lore: ['<gray>Сохранить сюда текущие правила.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Сохранить</gray>']
+    empty-lore: ['<gray>Сохранить сюда текущие правила.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Сохранить</#e6fff3>']
     auto-arena: 'автовыбор'
     entry: '<gold>Настройка <slot></gold>'
     entry-lore: ['<gray>Режим:</gray> <objective>', '<gray>Снаряжение:</gray> <loadout>', '<gray>Формат:</gray> <white>BO<bestof></white>', '<gray>Арена:</gray> <white><arena></white>', '<gray>Состояние:</gray> <state>', '']
     ready: '<green>Готово</green>'
     arena-missing: '<yellow>Сохранённая арена недоступна</yellow>'
     kit-missing: '<red>Сохранённый кит недоступен</red>'
-    ready-actions: ['<aqua>ЛКМ</aqua> <gray>Применить</gray>', '<aqua>Shift + ЛКМ</aqua> <gray>Перезаписать</gray>', '<red>Shift + ПКМ</red> <gray>Удалить</gray>']
-    arena-missing-actions: ['<aqua>ПКМ</aqua> <gray>Применить с автовыбором арены</gray>', '<aqua>Shift + ЛКМ</aqua> <gray>Перезаписать</gray>', '<red>Shift + ПКМ</red> <gray>Удалить</gray>']
-    kit-missing-actions: ['<aqua>Shift + ЛКМ</aqua> <gray>Перезаписать</gray>', '<red>Shift + ПКМ</red> <gray>Удалить</gray>']
+    ready-actions: ['<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Применить</#e6fff3>', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Shift + ЛКМ</#2bba43><#e6fff3> — Перезаписать</#e6fff3>', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Shift + ПКМ</#c42323><#e6fff3> — Удалить</#e6fff3>']
+    arena-missing-actions: ['<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ПКМ</#2bba43><#e6fff3> — Применить с автовыбором арены</#e6fff3>', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Shift + ЛКМ</#2bba43><#e6fff3> — Перезаписать</#e6fff3>', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Shift + ПКМ</#c42323><#e6fff3> — Удалить</#e6fff3>']
+    kit-missing-actions: ['<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Shift + ЛКМ</#2bba43><#e6fff3> — Перезаписать</#e6fff3>', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Shift + ПКМ</#c42323><#e6fff3> — Удалить</#e6fff3>']
     kit-unavailable: '<#c42323>В этой настройке указан кит, которого больше нет.</#c42323>'
     arena-unavailable: '<#ffb347>Сохранённая арена недоступна. Нажми ПКМ, чтобы включить автовыбор.</#ffb347>'
     saved: '<#2bba43>Настройка <slot> сохранена.</#2bba43>'
@@ -150,22 +150,22 @@ menu:
   admin:
     title: '<dark_gray>Управление дуэлями</dark_gray>'
     arenas: '<gold>Арены</gold>'
-    arenas-lore: ['<gray>Создано:</gray> <yellow><arenas></yellow>', '', '<aqua>ЛКМ</aqua> <gray>Открыть список арен</gray>']
+    arenas-lore: ['<gray>Создано:</gray> <yellow><arenas></yellow>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть список арен</#e6fff3>']
     status: '<gold>Состояние</gold>'
     status-lore: ['<gray>Сервер:</gray> <server>', '<gray>Включено арен:</gray> <yellow><arenas></yellow>', '<gray>Активных боёв:</gray> <yellow><active></yellow>', '<gray>Пар в очереди:</gray> <yellow><waiting></yellow>', '<gray>Ожидают восстановления:</gray> <#ffb347><recoveries></#ffb347>']
     recovery: '<gold>Восстановление игроков</gold>'
-    recovery-lore: ['<gray>Игроков онлайн:</gray> <yellow><players></yellow>', '<gray>Проверить сохранённый снимок</gray>', '<gray>и безопасно восстановить состояние.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать игрока</gray>']
+    recovery-lore: ['<gray>Игроков онлайн:</gray> <yellow><players></yellow>', '<gray>Проверить сохранённый снимок</gray>', '<gray>и безопасно восстановить состояние.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать игрока</#e6fff3>']
     create: '<gold>Создать арену</gold>'
-    create-lore: ['<dark_gray>✖</dark_gray> <white>Ввести идентификатор арены в чат.</white>', '', '<aqua>ЛКМ</aqua> <gray>Начать создание</gray>']
+    create-lore: ['<#e6fff3>Ввести идентификатор арены в чат.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Начать создание</#e6fff3>']
     reload: '<gold>Перечитать конфигурацию</gold>'
-    reload-lore: ['<dark_gray>✖</dark_gray> <white>Проверить и применить все арены.</white>', '', '<aqua>ЛКМ</aqua> <gray>Перечитать</gray>']
+    reload-lore: ['<#e6fff3>Проверить и применить все арены.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Перечитать</#e6fff3>']
     create-prompt: '<gray>Напиши идентификатор новой арены в чат.</gray> <yellow>Допустимы латинские буквы, цифры, _ и -.</yellow> <gray>Для отмены напиши</gray> <white>отмена</white><gray>.</gray>'
     create-cancelled: '<gray>Создание арены отменено.</gray>'
     create-timeout: '<gray>Время ввода идентификатора истекло.</gray>'
   admin-arenas:
     title: '<dark_gray>Арены · <page>/<pages></dark_gray>'
     entry: '<gold><arena></gold>'
-    entry-lore: ['<gray>Состояние:</gray> <state>', '<gray>Точка 1:</gray> <spawn1>  <gray>Точка 2:</gray> <spawn2>', '<gray>Угол 1:</gray> <corner1>  <gray>Угол 2:</gray> <corner2>', '<gray>Холм:</gray> <hill>', '', '<aqua>ЛКМ</aqua> <gray>Открыть редактор</gray>']
+    entry-lore: ['<gray>Состояние:</gray> <state>', '<gray>Точка 1:</gray> <spawn1>  <gray>Точка 2:</gray> <spawn2>', '<gray>Угол 1:</gray> <corner1>  <gray>Угол 2:</gray> <corner2>', '<gray>Холм:</gray> <hill>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть редактор</#e6fff3>']
     empty: '<gold>Арены не созданы</gold>'
     empty-lore: ['<gray>Вернись назад и создай первую арену.</gray>']
   admin-arena:
@@ -177,46 +177,46 @@ menu:
     lobby: '<gold>Лобби после боя</gold>'
     corner1: '<gold>Угол границ 1</gold>'
     corner2: '<gold>Угол границ 2</gold>'
-    point-lore: ['<gray>Сейчас:</gray> <yellow><value></yellow>', '', '<aqua>ЛКМ</aqua> <gray>Сохранить текущую позицию</gray>']
+    point-lore: ['<gray>Сейчас:</gray> <yellow><value></yellow>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Сохранить текущую позицию</#e6fff3>']
     hill: '<gold>Точка захвата</gold>'
-    hill-lore: ['<gray>Сейчас:</gray> <yellow><value></yellow>', '<gray>Радиус 3.5, высота 3 блока.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Сохранить текущую позицию</gray>']
+    hill-lore: ['<gray>Сейчас:</gray> <yellow><value></yellow>', '<gray>Радиус 3.5, высота 3 блока.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Сохранить текущую позицию</#e6fff3>']
     loadouts: '<gold>Снаряжение на арене</gold>'
-    loadouts-lore: ['<gray>Разрешено:</gray> <loadout>', '', '<aqua>ЛКМ</aqua> <gray>Переключить режим</gray>']
+    loadouts-lore: ['<gray>Разрешено:</gray> <loadout>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить режим</#e6fff3>']
     loadouts-all: '<white>свои вещи и киты</white>'
     loadouts-own_inventory: '<white>только свои вещи</white>'
     loadouts-kit: '<white>только киты</white>'
     objectives: '<gold>Режимы боя</gold>'
-    objectives-lore: ['<gray>Разрешить режимы, подходящие</gray>', '<gray>геометрии и назначению этой арены.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Настроить режимы</gray>']
+    objectives-lore: ['<gray>Разрешить режимы, подходящие</gray>', '<gray>геометрии и назначению этой арены.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Настроить режимы</#e6fff3>']
     enable: '<green>Проверить и включить</green>'
-    enable-lore: ['<gray>Проверить мир, точки, границы, холм</gray>', '<gray>и отсутствие пересечений с аренами.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Включить арену</gray>']
+    enable-lore: ['<gray>Проверить мир, точки, границы, холм</gray>', '<gray>и отсутствие пересечений с аренами.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Включить арену</#e6fff3>']
     disable: '<red>Выключить арену</red>'
-    disable-lore: ['<gray>Новые бои больше не получат эту арену.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выключить</gray>']
+    disable-lore: ['<gray>Новые бои больше не получат эту арену.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выключить</#e6fff3>']
   admin-objectives:
     title: '<dark_gray>Режимы · <arena></dark_gray>'
     entry: '<objective>'
-    entry-lore: ['<gray>Состояние:</gray> <state>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    entry-lore: ['<gray>Состояние:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     required: '<red>На арене должен остаться хотя бы один режим боя.</red>'
   admin-recovery:
     title: '<dark_gray>Восстановление · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
-    player-lore: ['<gray>Проверить ожидающий снимок игрока.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Начать безопасное восстановление</gray>']
+    player-lore: ['<gray>Проверить ожидающий снимок игрока.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Начать безопасное восстановление</#e6fff3>']
 
 objective:
   elimination:
     name: '<gold>Классическая дуэль</gold>'
-    description: ['<gray>Победи соперника в прямом бою.</gray>', '<gray>Выход за границу считается поражением.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
+    description: ['<gray>Победи соперника в прямом бою.</gray>', '<gray>Выход за границу считается поражением.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
   koth:
     name: '<gold>Царь горы</gold>'
-    description: ['<gray>Удерживай отмеченную точку на арене.</gray>', '<gray>Если оба стоят на ней — захват спорный.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
+    description: ['<gray>Удерживай отмеченную точку на арене.</gray>', '<gray>Если оба стоят на ней — захват спорный.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
   sumo:
     name: '<gold>Сумо</gold>'
-    description: ['<gray>Урон отключён: вытолкни соперника</gray>', '<gray>за безопасные границы арены.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
+    description: ['<gray>Урон отключён: вытолкни соперника</gray>', '<gray>за безопасные границы арены.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
   boxing:
     name: '<gold>Боксинг</gold>'
-    description: ['<gray>Первым набери заданное число ударов.</gray>', '<gray>Урон отключён, учитываются только</gray>', '<gray>прямые удары в ближнем бою.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
+    description: ['<gray>Первым набери заданное число ударов.</gray>', '<gray>Урон отключён, учитываются только</gray>', '<gray>прямые удары в ближнем бою.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
   combo:
     name: '<gold>Комбо</gold>'
-    description: ['<gray>Собери серию ударов без ответа.</gray>', '<gray>Ответный удар соперника сбрасывает</gray>', '<gray>твою текущую серию.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать режим</gray>']
+    description: ['<gray>Собери серию ударов без ответа.</gray>', '<gray>Ответный удар соперника сбрасывает</gray>', '<gray>твою текущую серию.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
 
 kit:
   classic:
@@ -262,6 +262,7 @@ kit:
 multiplayer:
   busy: '<#c42323>Сначала заверши текущий бой или восстановление.</#c42323>'
   no-kits: '<#c42323>Для группового матча нужен хотя бы один настроенный кит.</#c42323>'
+  network-unavailable: '<#c42323>Сетевые групповые матчи сейчас недоступны.</#c42323>'
   invalid-size: '<#c42323>Выбери от 3 до 12 участников и оставь непустые команды.</#c42323>'
   player-left: '<#c42323>Один из участников вышел или уже занят.</#c42323>'
   invited: '<#fff4d6><player> приглашает тебя в групповой матч.</#fff4d6>'
@@ -296,33 +297,33 @@ multiplayer:
     lobby-title: '<dark_gray>Групповой матч · готовность</dark_gray>'
     no-players: '<red>Нет свободных игроков</red>'
     player: '<gold><player></gold>'
-    player-lore: ['<gray>Состояние:</gray> <state>', '<gray>Команда:</gray> <white><team></white>', '', '<aqua>ЛКМ</aqua> <gray>Выбрать или убрать</gray>']
-    player-status-lore: ['<gray>Состояние:</gray> <state>', '<gray>Команда:</gray> <white><team></white>']
+    player-lore: ['<gray>Сервер:</gray> <server>', '<gray>Состояние:</gray> <state>', '<gray>Команда:</gray> <white><team></white>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать или убрать</#e6fff3>']
+    player-status-lore: ['<gray>Сервер:</gray> <server>', '<gray>Состояние:</gray> <state>', '<gray>Команда:</gray> <white><team></white>']
     selected: '<green>выбран / готов</green>'
     not-selected: '<gray>не выбран / ожидает</gray>'
     layout: '<gold>Формат: <value></gold>'
-    layout-lore: ['<gray>Каждый за себя, две или три</gray>', '<gray>автоматически сбалансированные команды.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    layout-lore: ['<gray>Каждый за себя, две или три</gray>', '<gray>автоматически сбалансированные команды.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     kit-policy: '<gold>Киты: <value></gold>'
-    kit-policy-lore: ['<gray>Один набор для всех либо личный</gray>', '<gray>выбор каждого участника.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Переключить</gray>']
+    kit-policy-lore: ['<gray>Один набор для всех либо личный</gray>', '<gray>выбор каждого участника.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     readonly-lore: ['<gray>Выбрано организатором:</gray> <value>']
-    shared-kit-lore: ['<gray>Этот набор получат все участники.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Следующий кит</gray>']
-    personal-kit-lore: ['<gray>Это твой набор в предстоящем матче.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Следующий кит</gray>']
+    shared-kit-lore: ['<gray>Этот набор получат все участники.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Следующий кит</#e6fff3>']
+    personal-kit-lore: ['<gray>Это твой набор в предстоящем матче.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Следующий кит</#e6fff3>']
     shared-kit-readonly-lore: ['<gray>Этот набор получат все участники.</gray>', '<dark_gray>Выбрано организатором.</dark_gray>']
     personal-kit-readonly-lore: ['<gray>Это твой подтверждённый набор.</gray>', '<dark_gray>Изменить его можно до подтверждения.</dark_gray>']
-    back-lore: ['', '<aqua>ЛКМ</aqua> <gray>Вернуться в главное меню</gray>']
+    back-lore: ['', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Вернуться в главное меню</#e6fff3>']
     invite: '<green>Отправить приглашения</green>'
-    invite-lore: ['<gray>Участников:</gray> <white><players></white>', '<gray>Матч начнётся, когда все подтвердят.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Создать лобби</gray>']
+    invite-lore: ['<gray>Участников:</gray> <white><players></white>', '<gray>Матч начнётся, когда все подтвердят.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Создать лобби</#e6fff3>']
     invite-disabled: '<gray>Матч пока не готов</gray>'
     invite-disabled-lore: ['<gray>Сейчас участников:</gray> <white><players></white>', '<gray>Нужно от 3 до 12 и непустые команды.</gray>']
     waiting: '<gold>Ожидаем игроков</gold>'
     waiting-lore: ['<gray>Готовы:</gray> <white><ready>/<players></white>', '<gray>Матч запустится автоматически.</gray>']
     accept: '<green>Подтвердить участие</green>'
-    accept-lore: ['<gray>Проверь формат и свой кит.</gray>', '', '<aqua>ЛКМ</aqua> <gray>Я готов</gray>']
+    accept-lore: ['<gray>Проверь формат и свой кит.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Я готов</#e6fff3>']
     accepted: '<green>Ты готов</green>'
     accepted-lore: ['<gray>Ожидаем остальных участников.</gray>']
     cancel: '<red>Отменить матч</red>'
     decline: '<red>Отклонить приглашение</red>'
-    cancel-lore: ['', '<red>ЛКМ</red> <gray>Закрыть лобби для всех</gray>']
+    cancel-lore: ['', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>ЛКМ</#c42323><#e6fff3> — Закрыть лобби для всех</#e6fff3>']
     left-player: '<red>Игрок вышел</red>'
 
 player-link:

@@ -247,24 +247,37 @@ class DuelSessionManager internal constructor(
     }
 
     fun expectNetworkMatch(challenge: DuelChallenge) {
-        expectedNetworkPlayers += challenge.challenger.value
-        expectedNetworkPlayers += challenge.target.value
+        expectNetworkPlayers(listOf(challenge.challenger, challenge.target))
     }
 
     fun stopExpectingNetworkMatch(challenge: DuelChallenge) {
-        expectedNetworkPlayers -= challenge.challenger.value
-        expectedNetworkPlayers -= challenge.target.value
+        stopExpectingNetworkPlayers(listOf(challenge.challenger, challenge.target))
+    }
+
+    internal fun expectNetworkPlayers(players: Collection<PlayerId>) {
+        expectedNetworkPlayers.addAll(players.map(PlayerId::value))
+    }
+
+    internal fun stopExpectingNetworkPlayers(players: Collection<PlayerId>) {
+        expectedNetworkPlayers.removeAll(players.map(PlayerId::value).toSet())
     }
 
     internal fun storeOriginSnapshot(
         challenge: DuelChallenge,
         player: Player,
+    ): CompletableFuture<StoredPlayerSnapshot> =
+        storeOriginSnapshot(MatchId(challenge.id.value), player, challenge.rules.mode == DuelMode.KIT)
+
+    internal fun storeOriginSnapshot(
+        matchId: MatchId,
+        player: Player,
+        inventoryReplaced: Boolean,
     ): CompletableFuture<StoredPlayerSnapshot> {
         check(plugin.server.isPrimaryThread) { "Origin snapshots must be captured on the Paper primary thread" }
         preparingPlayers += player.uniqueId
         DuelLog.debug(
             "origin-snapshot-freeze",
-            MatchId(challenge.id.value),
+            matchId,
             player,
             "player={} locked_before_capture=true",
             player.name,
@@ -272,9 +285,9 @@ class DuelSessionManager internal constructor(
         val future =
             runCatching {
                 playerStates.store(
-                    MatchId(challenge.id.value),
+                    matchId,
                     player,
-                    inventoryReplaced = challenge.rules.mode == DuelMode.KIT,
+                    inventoryReplaced = inventoryReplaced,
                 )
             }.getOrElse { failure ->
                 preparingPlayers -= player.uniqueId
@@ -287,7 +300,10 @@ class DuelSessionManager internal constructor(
     fun hasOriginSnapshot(
         player: Player,
         challenge: DuelChallenge,
-    ): Boolean = playerStates.pending(player.uniqueId)?.matchId == MatchId(challenge.id.value)
+    ): Boolean = hasOriginSnapshot(player, MatchId(challenge.id.value))
+
+    internal fun hasOriginSnapshot(player: Player, matchId: MatchId): Boolean =
+        playerStates.pending(player.uniqueId)?.matchId == matchId
 
     fun startNetwork(
         challenge: DuelChallenge,

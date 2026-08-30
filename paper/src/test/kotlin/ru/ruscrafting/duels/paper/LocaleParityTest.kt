@@ -62,6 +62,58 @@ class LocaleParityTest : StringSpec({
         }
     }
 
+    "GUI click hints use the canonical button footer" {
+        val physicalInput = Regex("(?:Shift \\+ )?(?:ЛКМ|ПКМ|Left click|Right click|left click|right click)")
+        val allowedPrefixes =
+            listOf(
+                "<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>",
+                "<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>",
+            )
+        for (language in listOf("ru", "en")) {
+            val bundle = loadBundle(language)
+            for (key in bundle.getKeys(true)) {
+                val values = bundle.getList(key) ?: continue
+                values.filterIsInstance<String>().forEach { value ->
+                    if (!physicalInput.containsMatchIn(value.replace(Regex("<[^>]+>"), ""))) return@forEach
+                    withClue("$language:$key") {
+                        allowedPrefixes.any(value::startsWith) shouldBe true
+                        ("<#e6fff3> — " in value) shouldBe true
+                    }
+                }
+            }
+        }
+    }
+
+    "GUI prose stays flush without decorative pseudo bullets" {
+        for (language in listOf("ru", "en")) {
+            val bundle = loadBundle(language)
+            for (key in bundle.getKeys(true)) {
+                val values = bundle.getList(key) ?: continue
+                values.filterIsInstance<String>().forEach { value ->
+                    val plain = value.replace(Regex("<[^>]+>"), "")
+                    withClue("$language:$key") {
+                        plain.startsWith(" ") shouldBe false
+                        ("✖" in plain) shouldBe false
+                    }
+                }
+            }
+        }
+    }
+
+    "main menu description zones use one body style" {
+        for (language in listOf("ru", "en")) {
+            val bundle = loadBundle(language)
+            for (key in MAIN_MENU_DESCRIPTION_KEYS) {
+                bundle.getStringList(key).takeWhile(String::isNotEmpty).forEach { value ->
+                    withClue("$language:$key") {
+                        value.startsWith("<#e6fff3>") shouldBe true
+                        value.endsWith("</#e6fff3>") shouldBe true
+                    }
+                }
+            }
+        }
+    }
+
     "player-facing copy does not expose storage implementation details" {
         val forbidden = Regex("(?i)mysql|mariadb|jdbc|redis|database|escrow|баз[а-я]*\\s+данн")
         for (language in listOf("ru", "en")) {
@@ -93,6 +145,20 @@ private val OPTIONAL_FEEDBACK_KEYS =
     setOf(
         "controller.network-return",
         "session.restored",
+    )
+
+private val MAIN_MENU_DESCRIPTION_KEYS =
+    setOf(
+        "menu.main.challenge-lore",
+        "menu.main.leaderboard-lore",
+        "menu.main.modes-lore",
+        "menu.main.multiplayer-lore",
+        "menu.main.kits-lore",
+        "menu.main.stats-lore",
+        "menu.main.history-lore",
+        "menu.main.help-lore",
+        "menu.main.recovery-lore",
+        "menu.main.admin-lore",
     )
 
 private fun loadBundle(language: String): YamlConfiguration {

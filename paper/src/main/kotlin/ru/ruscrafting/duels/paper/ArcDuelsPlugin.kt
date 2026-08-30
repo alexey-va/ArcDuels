@@ -32,6 +32,7 @@ import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
 import ru.ruscrafting.duels.mysql.MySqlDuelMigrations
 import ru.ruscrafting.duels.redis.ArenaNodeStatus
 import ru.ruscrafting.duels.redis.CrossServerChallengeBus
+import ru.ruscrafting.duels.redis.CrossServerGroupBus
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 import ru.ruscrafting.duels.redis.NetworkArenaDirectory
 import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
@@ -84,7 +85,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val persistence = createPersistence(lifecycle)
         val statistics = persistence.statistics
         val network = createNetwork(serverId, statistics, locales, lifecycle)
-        val transfer = network.challenges?.let { ProxyPlayerTransfer(this) }
+        val transfer = if (network.challenges != null || network.groups != null) ProxyPlayerTransfer(this) else null
         if (transfer != null) lifecycle.own(transfer)
         val battlePass = BattlePassIntegration(this)
         val coordinator =
@@ -198,6 +199,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 chunkTickets = multiplayerChunkTickets,
                 countdownSeconds = countdownSeconds,
                 externalCombatTagClear = cmiCombatTags::clear,
+                networkReturn = { player, destination -> transfer?.connect(player, destination) },
             )
         sessionManager.attachExternalEngagement(multiplayerSessions::isEngaged)
         lifecycle.own(multiplayerSessions)
@@ -231,9 +233,23 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames, controller::hasReturnOffer)
         lateinit var gui: DuelGuiService
         val multiplayerGui =
-            MultiplayerGuiService(this, kits, multiplayerSessions, sessionManager, locales, lifecycle.tasks) { player ->
+            MultiplayerGuiService(
+                plugin = this,
+                kits = kits,
+                sessions = multiplayerSessions,
+                duelSessions = sessionManager,
+                locales = locales,
+                tasks = lifecycle.tasks,
+                targets = targets,
+                localServer = serverId,
+                serverNames = serverNames,
+                groupBus = network.groups,
+                transfer = transfer,
+                playerDataReady = playerDataSync::isReady,
+            ) { player ->
                 gui.openMain(player)
             }
+        lifecycle.own(multiplayerGui)
         gui =
             DuelGuiService(
                 this,
@@ -392,6 +408,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             )
         val bus = CrossServerDuelBus(manager, serverId)
         val challengeBus = CrossServerChallengeBus(manager, serverId)
+        val groupBus = CrossServerGroupBus(manager, serverId)
         val players =
             NetworkPlayerDirectory(
                 manager,
@@ -452,6 +469,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             runCatching(players::close)
             runCatching(arenas::close)
             runCatching(challengeBus::close)
+            runCatching(groupBus::close)
             runCatching(bus::close)
             runCatching(manager::close)
             logger.warning("Redis is unavailable; ArcDuels will continue without cross-server events: ${failure.javaClass.simpleName}")
@@ -459,7 +477,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         }
         lifecycle.own(AutoCloseable {
             var firstFailure: Throwable? = null
-            listOf(players::close, arenas::close, challengeBus::close, bus::close, manager::close).forEach { close ->
+            listOf(players::close, arenas::close, groupBus::close, challengeBus::close, bus::close, manager::close).forEach { close ->
                 runCatching(close).onFailure { failure ->
                     val existing = firstFailure
                     if (existing == null) firstFailure = failure else existing.addSuppressed(failure)
@@ -467,7 +485,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             }
             firstFailure?.let { throw it }
         })
-        return NetworkRuntime(bus, players, arenas, challengeBus, redisReady = true)
+        return NetworkRuntime(bus, players, arenas, challengeBus, groupBus, redisReady = true)
     }
 
     private fun redisSettings(): RedisSettings {
@@ -510,6 +528,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val players: NetworkPlayerDirectory? = null,
         val arenas: NetworkArenaDirectory? = null,
         val challenges: CrossServerChallengeBus? = null,
+        val groups: CrossServerGroupBus? = null,
         val redisReady: Boolean,
     ) {
         fun activeLeaseCount(): Int = (players?.activeLeaseCount() ?: 0) + (arenas?.activeLeaseCount() ?: 0)

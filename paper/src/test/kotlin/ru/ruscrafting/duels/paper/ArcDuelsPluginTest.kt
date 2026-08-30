@@ -582,19 +582,26 @@ class ArcDuelsPluginTest : StringSpec({
 
         player.performCommand("duel") shouldBe true
         player.openInventory.topInventory.size shouldBe 45
+        player.openInventory.topInventory.contents.all { it != null } shouldBe true
+        player.openInventory.topInventory.getItem(4)?.type shouldBe Material.PLAYER_HEAD
         player.openInventory.topInventory.getItem(11)?.type shouldBe Material.NETHERITE_SWORD
-        player.openInventory.topInventory.getItem(38)?.type shouldBe Material.BOOK
-        val challengeName = requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())
-        PlainTextComponentSerializer.plainText().serialize(challengeName) shouldBe "Challenge a player"
+        (12..14).forEach { slot ->
+            player.openInventory.topInventory.getItem(slot)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
+        }
+        player.openInventory.topInventory.getItem(15)?.type shouldBe Material.PLAYER_HEAD
+        player.openInventory.topInventory.getItem(33)?.type shouldBe Material.GOLD_INGOT
+        player.openInventory.topInventory.contents.filterNotNull().none {
+            it.itemMeta.displayName()?.let(PlainTextComponentSerializer.plainText()::serialize) == "Match history"
+        } shouldBe true
+        val challengeItem = requireNotNull(player.openInventory.topInventory.getItem(11))
+        val challengeName = requireNotNull(challengeItem.itemMeta.displayName())
+        PlainTextComponentSerializer.plainText().serialize(challengeName) shouldBe "Challenge to a 1v1 duel"
         challengeName.decoration(TextDecoration.ITALIC) shouldBe TextDecoration.State.FALSE
-
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 38)
-        player.openInventory.topInventory.getItem(22)?.type shouldBe Material.PAPER
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 36)
-        player.openInventory.topInventory.getItem(11)?.type shouldBe Material.NETHERITE_SWORD
+        challengeItem.plainLore().lineSequence().last() shouldBe "[▶] Left click — Configure the duel"
 
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
         player.openInventory.topInventory.getItem(10)?.type shouldBe Material.PLAYER_HEAD
+        player.openInventory.topInventory.getItem(40)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
         player.openInventory.topInventory.getItem(13)?.type shouldBe Material.BEACON
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 13)
@@ -630,7 +637,11 @@ class ArcDuelsPluginTest : StringSpec({
         player.closeInventory()
         player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         player.performCommand("duel") shouldBe true
-        PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "Вызвать на бой"
+        PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName())) shouldBe "Вызвать на дуэль 1 на 1"
+        player.isOp = true
+        player.performCommand("duel") shouldBe true
+        val adminName = requireNotNull(player.openInventory.topInventory.getItem(40)?.itemMeta?.displayName())
+        PlainTextComponentSerializer.plainText().serialize(adminName).contains("Только для администраторов") shouldBe true
     }
 
     "kit catalog and multiplayer setup derive detailed contents from runtime stacks" {
@@ -640,7 +651,7 @@ class ArcDuelsPluginTest : StringSpec({
         player.setLocale(java.util.Locale.ENGLISH)
 
         player.performCommand("duel") shouldBe true
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 31)
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
         val crossbow = requireNotNull(
             player.openInventory.topInventory.contents.filterNotNull().firstOrNull { it.type == Material.CROSSBOW },
         )
@@ -654,7 +665,7 @@ class ArcDuelsPluginTest : StringSpec({
         catalogLore.contains("×32") shouldBe true
 
         player.performCommand("duel") shouldBe true
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 30)
+        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 15)
         player.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
         requireNotNull(player.openInventory.topInventory.getItem(32)).plainLore().contains("Kit contents") shouldBe true
     }

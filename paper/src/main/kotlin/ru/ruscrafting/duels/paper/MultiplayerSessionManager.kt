@@ -53,6 +53,7 @@ internal class MultiplayerSessionManager(
     private val teleports: PaperTeleportExecutor = NativePaperTeleportExecutor,
     private val playerData: PaperPlayerDataPersistence = NativePaperPlayerDataPersistence,
     private val externalCombatTagClear: (Player, MatchId, String) -> Unit = { _, _, _ -> },
+    private val networkReturn: (Player, ServerId) -> Unit = { _, _ -> },
     private val clock: Clock = Clock.systemUTC(),
     private val countdownSeconds: Int = 3,
 ) : AutoCloseable {
@@ -62,6 +63,7 @@ internal class MultiplayerSessionManager(
         val snapshots: Map<UUID, StoredPlayerSnapshot>,
         val anchors: Map<UUID, Location>,
         val leases: List<PaperChunkTicketLease>,
+        val origins: Map<PlayerId, ServerId>? = null,
         var restoreInFlight: Boolean = false,
         var arrivals: CompletableFuture<Void>? = null,
         var waitingForArrivals: Boolean = false,
@@ -107,6 +109,41 @@ internal class MultiplayerSessionManager(
                         completion.completeExceptionally(failure)
                     }
                 }
+        }
+        return completion
+    }
+
+    fun startNetwork(
+        matchId: MatchId,
+        roster: MultiplayerRoster,
+        onlinePlayers: Map<PlayerId, Player>,
+        origins: Map<PlayerId, ServerId>,
+    ): CompletableFuture<MatchId> {
+        check(Bukkit.isPrimaryThread()) { "Network multiplayer matches must start on the Paper primary thread" }
+        require(onlinePlayers.keys == roster.playerIds) { "Every roster participant must be online on this Paper node" }
+        require(origins.keys == roster.playerIds) { "Every roster participant must have an origin route" }
+        require(onlinePlayers.values.all(Player::isOnline)) { "Every multiplayer participant must remain online" }
+        require(onlinePlayers.values.none { isEngaged(it) }) { "A multiplayer participant is already engaged" }
+        val completion = CompletableFuture<MatchId>()
+        val snapshots = playerStates.findMatchSnapshots(matchId, origins)
+        val reservation = arenas.reserveMultiplayer(roster)
+        reservation.thenCombine(snapshots, ::Pair).whenCompleteSync(tasks) { prepared, failure ->
+            if (failure != null || prepared == null) {
+                reservation.whenCompleteSync(tasks) { reserved, _ -> reserved?.close() }
+                completion.completeExceptionally(failure ?: IllegalStateException("Network multiplayer preparation failed"))
+                return@whenCompleteSync
+            }
+            val (reserved, escrows) = prepared
+            runCatching {
+                val stored = onlinePlayers.mapValues { (playerId, player) ->
+                    playerStates.decodeForArena(escrows.getValue(playerId), player)
+                }.mapKeys { it.key.value }
+                createSession(matchId, roster, onlinePlayers, reserved, stored, origins)
+            }.onSuccess {
+                completion.complete(matchId)
+            }.onFailure { startFailure ->
+                completion.completeExceptionally(startFailure)
+            }
         }
         return completion
     }
@@ -215,6 +252,7 @@ internal class MultiplayerSessionManager(
         onlinePlayers: Map<PlayerId, Player>,
         reservation: MultiplayerArenaReservation,
         snapshots: Map<UUID, StoredPlayerSnapshot>,
+        origins: Map<PlayerId, ServerId>? = null,
     ) {
         val leases = mutableListOf<PaperChunkTicketLease>()
         var session: Session? = null
@@ -222,7 +260,7 @@ internal class MultiplayerSessionManager(
             reservation.spawns.values.mapTo(leases, ::acquireChunkTicket)
             val match = MultiplayerMatch.reserve(matchId, reservation.arenaId, serverId, roster, clock.instant())
             val anchors = reservation.spawns.mapKeys { it.key.value }
-            val created = Session(match, reservation, snapshots, anchors, leases)
+            val created = Session(match, reservation, snapshots, anchors, leases, origins)
             session = created
             check(sessions.putIfAbsent(matchId, created) == null) { "Multiplayer match id collision" }
             check(roster.playerIds.none { byPlayer.putIfAbsent(it.value, matchId) != null }) { "A participant became engaged" }
@@ -397,6 +435,24 @@ internal class MultiplayerSessionManager(
         session.match.roster.playerIds.forEach { byPlayer.remove(it.value, session.match.id) }
         session.leases.forEach { runCatching { it.close() } }
         runCatching { session.reservation.close() }
+        session.origins?.forEach { (playerId, destination) ->
+            if (destination != serverId) {
+                Bukkit.getPlayer(playerId.value)?.takeIf(Player::isOnline)?.let { player ->
+                    runCatching { networkReturn(player, destination) }
+                        .onFailure { failure ->
+                            DuelLog.warn(
+                                "multiplayer-return-failed",
+                                session.match.id,
+                                player,
+                                "player={} destination={} error={}",
+                                player.name,
+                                destination.value,
+                                failure.message,
+                            )
+                        }
+                }
+            }
+        }
     }
 
     private fun abortBeforeStart(

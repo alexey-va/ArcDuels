@@ -148,19 +148,22 @@ internal class DurablePlayerStateService(
         matchId: MatchId,
         origins: Map<PlayerId, ServerId>,
     ): CompletableFuture<Map<PlayerId, PlayerStateEscrow>> {
-        require(origins.size == 2) { "A network match requires exactly two origin snapshots" }
-        val entries = origins.entries.toList()
-        return repository.findPending(entries[0].key)
-            .thenCombine(repository.findPending(entries[1].key), ::Pair)
-            .thenApply { found ->
-                val snapshots = listOfNotNull(found.first, found.second).associateBy(PlayerStateEscrow::playerId)
-                check(snapshots.size == origins.size) { "Both origin inventory snapshots must exist before arena transfer" }
+        require(origins.size in 2..MAX_MULTIPLAYER_PARTICIPANTS) {
+            "A network match requires 2..$MAX_MULTIPLAYER_PARTICIPANTS origin snapshots"
+        }
+        val lookups = origins.keys.associateWith(repository::findPending)
+        return CompletableFuture.allOf(*lookups.values.toTypedArray())
+            .thenApply {
+                val snapshots = lookups.values.mapNotNull(CompletableFuture<PlayerStateEscrow?>::join)
+                    .associateBy(PlayerStateEscrow::playerId)
+                check(snapshots.size == origins.size) { "Every origin inventory snapshot must exist before arena transfer" }
                 origins.forEach { (playerId, origin) ->
                     val escrow = requireNotNull(snapshots[playerId]) { "Missing origin snapshot for $playerId" }
                     verifyChecksum(escrow)
                     check(escrow.matchId == matchId) { "Origin snapshot for $playerId belongs to another match" }
                     check(escrow.serverId == origin) { "Origin snapshot for $playerId belongs to ${escrow.serverId}, not $origin" }
                 }
+                snapshots.forEach { (playerId, escrow) -> pending[playerId.value] = escrow }
                 snapshots
             }
     }

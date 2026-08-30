@@ -13,75 +13,75 @@ menu:
     missing: '<red>Missing</red>'
   main:
     title: '<dark_gray>Duels</dark_gray>'
-    challenge: '<gold>Challenge a player</gold>'
-    challenge-lore: ['<dark_gray>✖</dark_gray> <white>Choose an opponent, objective,</white>', '   <white>loadout, and match rules.</white>', '', '<aqua>Left click</aqua> <gray>Start configuring</gray>']
+    challenge: '<gold>Challenge to a 1v1 duel</gold>'
+    challenge-lore: ['<#e6fff3>You and one opponent.</#e6fff3>', '<#e6fff3>Choose the objective, loadout, and rules.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Configure the duel</#e6fff3>']
     queue: '<gold>Arenas and queue</gold>'
-    queue-lore: ['<gray>Busy arenas:</gray> <yellow><active></yellow>', '<gray>Waiting pairs:</gray> <yellow><waiting></yellow>', '', '<aqua>Left click</aqua> <gray>Open status</gray>']
+    queue-lore: ['<gray>Busy arenas:</gray> <yellow><active></yellow>', '<gray>Waiting pairs:</gray> <yellow><waiting></yellow>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open status</#e6fff3>']
     leaderboard: '<gold>Leaderboard</gold>'
-    leaderboard-lore: ['<dark_gray>✖</dark_gray> <white>Network-wide player ranking</white>', '   <white>across all servers.</white>', '', '<aqua>Left click</aqua> <gray>Open leaderboard</gray>']
+    leaderboard-lore: ['<#e6fff3>Network-wide player ranking</#e6fff3>', '<#e6fff3>across all servers.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open leaderboard</#e6fff3>']
     modes: '<gold>Game modes</gold>'
-    modes-lore: ['<dark_gray>✖</dark_gray> <white>Classic, king of the hill, sumo,</white>', '   <white>boxing, and combo.</white>', '', '<aqua>Left click</aqua> <gray>Browse modes</gray>']
-    multiplayer: '<gold>Group match</gold>'
-    multiplayer-lore: ['<dark_gray>✖</dark_gray> <white>3 to 12 players:</white>', '   <white>free-for-all or 2–3 teams.</white>', '', '<aqua>Left click</aqua> <gray>Build a match</gray>']
+    modes-lore: ['<#e6fff3>Classic, king of the hill, sumo,</#e6fff3>', '<#e6fff3>boxing, and combo.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Browse modes</#e6fff3>']
+    multiplayer: '<gold>Challenge to a group match</gold>'
+    multiplayer-lore: ['<#e6fff3>3 to 12 players across the network:</#e6fff3>', '<#e6fff3>free-for-all or 2–3 teams.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Build a group match</#e6fff3>']
     kits: '<gold>Loadout kits</gold>'
-    kits-lore: ['<dark_gray>✖</dark_gray> <white>Ready-made equipment for a match.</white>', '', '<aqua>Left click</aqua> <gray>Browse kits</gray>']
+    kits-lore: ['<#e6fff3>Ready-made equipment for a match.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Browse kits</#e6fff3>']
     stats: '<gold>My statistics</gold>'
-    stats-lore: ['<dark_gray>✖</dark_gray> <white>Rating, wins, and streaks.</white>', '', '<aqua>Left click</aqua> <gray>View statistics</gray>']
+    stats-lore: ['<#e6fff3>Rating, wins, and streaks.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — View statistics</#e6fff3>']
     history: '<gold>Match history</gold>'
-    history-lore: ['<dark_gray>✖</dark_gray> <white>Recent results and head-to-head</white>', '   <white>records with your opponents.</white>', '', '<aqua>Left click</aqua> <gray>Open history</gray>']
+    history-lore: ['<#e6fff3>Recent results and head-to-head</#e6fff3>', '<#e6fff3>records with your opponents.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open history</#e6fff3>']
     help: '<gold>How duels work</gold>'
-    help-lore: ['<dark_gray>✖</dark_gray> <white>Rules and inventory protection.</white>', '', '<aqua>Left click</aqua> <gray>Open help</gray>']
+    help-lore: ['<#e6fff3>Rules and inventory protection.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open help</#e6fff3>']
     recovery: '<gold>Retrieve your items</gold>'
-    recovery-lore: ['<gray>An unfinished recovery is available.</gray>', '<gray>It will be applied after player data</gray>', '<gray>has finished loading.</gray>', '', '<aqua>Left click</aqua> <gray>Start recovery</gray>']
-    admin: '<gold>Manage duels</gold>'
-    admin-lore: ['<dark_gray>✖</dark_gray> <white>Arenas, locations, bounds,</white>', '   <white>and player recovery.</white>', '', '<aqua>Left click</aqua> <gray>Open admin menu</gray>']
+    recovery-lore: ['<#e6fff3>An unfinished recovery is available.</#e6fff3>', '<#e6fff3>It will be applied after player data</#e6fff3>', '<#e6fff3>has finished loading.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Start recovery</#e6fff3>']
+    admin: '<gold>Administrators only · Manage duels</gold>'
+    admin-lore: ['<#e6fff3>Arenas, locations, bounds,</#e6fff3>', '<#e6fff3>and player recovery.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open management</#e6fff3>']
   targets:
     title: '<dark_gray>Opponent · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
-    player-lore: ['<gray>Server:</gray> <white><server></white>', '<dark_gray>✖</dark_gray> <white>This player is available.</white>', '', '<aqua>Left click</aqua> <gray>Choose an objective</gray>']
+    player-lore: ['<gray>Server:</gray> <white><server></white>', '<#e6fff3>This player is available.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Choose an objective</#e6fff3>']
     empty: '<red>No available players</red>'
   objectives:
     title: '<dark_gray>Objective · <player></dark_gray>'
   loadouts:
     title: '<dark_gray>Loadout</dark_gray>'
     own: '<gold>Own inventory</gold>'
-    own-lore: ['<dark_gray>✖</dark_gray> <white>Each player uses their own items.</white>', '<gray>Your state is protected before teleport</gray>', '<gray>and restored after the match.</gray>', '', '<aqua>Left click</aqua> <gray>Select</gray>']
+    own-lore: ['<#e6fff3>Each player uses their own items.</#e6fff3>', '<#e6fff3>Your state is protected before teleport</#e6fff3>', '<#e6fff3>and restored after the match.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select</#e6fff3>']
     controlled-missing: '<red>The required <kit> kit is not configured</red>'
-    kit-hint: ['', '<aqua>Left click</aqua> <gray>Select this kit</gray>']
+    kit-hint: ['', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select this kit</#e6fff3>']
   rules:
     title: '<dark_gray>Rules · <player></dark_gray>'
     ranked: '<gold>Ranked match</gold>'
-    ranked-lore: ['<gray>State:</gray> <state>', '<gray>Available only with an identical kit.</gray>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
+    ranked-lore: ['<gray>State:</gray> <state>', '<gray>Available only with an identical kit.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Toggle</#e6fff3>']
     best-of: '<gold>Format: BO<value></gold>'
-    best-of-lore: ['<gray>First to one, two, or three round wins.</gray>', '', '<aqua>Left click</aqua> <gray>BO1 → BO3 → BO5</gray>']
+    best-of-lore: ['<gray>First to one, two, or three round wins.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — BO1 → BO3 → BO5</#e6fff3>']
     sudden-death: '<gold>Sudden death: <seconds>s</gold>'
-    sudden-death-lore: ['<gray>Both players receive Wither after the timer.</gray>', '', '<aqua>Left click</aqua> <gray>Change the timer</gray>']
+    sudden-death-lore: ['<gray>Both players receive Wither after the timer.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Change the timer</#e6fff3>']
     projectiles: '<gold>Projectiles</gold>'
-    projectiles-lore: ['<gray>State:</gray> <state>', '<gray>Bows, crossbows, and tridents.</gray>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
+    projectiles-lore: ['<gray>State:</gray> <state>', '<gray>Bows, crossbows, and tridents.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Toggle</#e6fff3>']
     consumables: '<gold>Consumables</gold>'
-    consumables-lore: ['<gray>State:</gray> <state>', '<gray>Food, potions, and golden apples.</gray>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
+    consumables-lore: ['<gray>State:</gray> <state>', '<gray>Food, potions, and golden apples.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Toggle</#e6fff3>']
     pearls: '<gold>Ender pearls</gold>'
-    pearls-lore: ['<gray>State:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
+    pearls-lore: ['<gray>State:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Toggle</#e6fff3>']
     regeneration: '<gold>Natural regeneration</gold>'
-    regeneration-lore: ['<gray>State:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
+    regeneration-lore: ['<gray>State:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Toggle</#e6fff3>']
     capture: '<gold>Hill capture: <seconds>s</gold>'
-    capture-lore: ['<gray>Required uncontested hold time.</gray>', '<gray>Progress pauses while contested.</gray>', '', '<aqua>Left click</aqua> <gray>Change the timer</gray>']
+    capture-lore: ['<gray>Required uncontested hold time.</gray>', '<gray>Progress pauses while contested.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Change the timer</#e6fff3>']
     hit-target: '<gold>Target: <hits> hits</gold>'
-    hit-target-lore: ['<gray>The round ends when a player is first</gray>', '<gray>to reach the selected hit target.</gray>', '', '<aqua>Left click</aqua> <gray>Change target</gray>']
+    hit-target-lore: ['<gray>The round ends when a player is first</gray>', '<gray>to reach the selected hit target.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Change target</#e6fff3>']
     arena-auto: '<gold>Arena: automatic</gold>'
-    arena-auto-lore: ['<gray>Choose a compatible arena with</gray>', '<gray>the shortest queue across the network.</gray>', '', '<aqua>Left click</aqua> <gray>Choose manually</gray>']
+    arena-auto-lore: ['<gray>Choose a compatible arena with</gray>', '<gray>the shortest queue across the network.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Choose manually</#e6fff3>']
     arena-selected: '<gold>Arena: <arena></gold>'
-    arena-selected-lore: ['<gray>Server:</gray> <server>', '<gray>This challenge is pinned to the arena.</gray>', '', '<aqua>Left click</aqua> <gray>Change selection</gray>']
+    arena-selected-lore: ['<gray>Server:</gray> <server>', '<gray>This challenge is pinned to the arena.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Change selection</#e6fff3>']
     presets: '<gold>Saved setups</gold>'
-    presets-lore: ['<gray>Optional shortcuts for rules you use often.</gray>', '<gray>The normal setup flow stays unchanged.</gray>', '', '<aqua>Left click</aqua> <gray>Open saved setups</gray>']
+    presets-lore: ['<gray>Optional shortcuts for rules you use often.</gray>', '<gray>The normal setup flow stays unchanged.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open saved setups</#e6fff3>']
     confirm: '<green>Send challenge</green>'
-    confirm-lore: ['<dark_gray>✖</dark_gray> <white>All match options are ready.</white>', '', '<aqua>Left click</aqua> <gray>Confirm</gray>']
+    confirm-lore: ['<#e6fff3>All match options are ready.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Confirm</#e6fff3>']
   arenas:
     title: '<dark_gray>Choose arena</dark_gray>'
     auto: '<gold>Automatic selection</gold>'
-    auto-lore: ['<gray>Prefer an available arena</gray>', '<gray>with the shortest queue.</gray>', '', '<aqua>Left click</aqua> <gray>Select</gray>']
+    auto-lore: ['<gray>Prefer an available arena</gray>', '<gray>with the shortest queue.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select</#e6fff3>']
     entry: '<gold><arena></gold>'
-    entry-lore: ['<gray>Server:</gray> <server>', '<gray>Status:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Pin this arena</gray>']
+    entry-lore: ['<gray>Server:</gray> <server>', '<gray>Status:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Pin this arena</#e6fff3>']
     available: '<green>available</green>'
     busy: '<yellow>busy — the fight will queue</yellow>'
     empty: '<red>No compatible arenas are live</red>'
@@ -99,7 +99,7 @@ menu:
     empty-lore: ['<gray>Your duel results will appear here.</gray>']
     win: '<green>Victory</green> <dark_gray>·</dark_gray> <white><player></white>'
     loss: '<red>Defeat</red> <dark_gray>·</dark_gray> <white><player></white>'
-    entry-lore: ['<gray>Score:</gray> <white><score></white>  <gray>Format:</gray> <white>BO<bestof></white>', '<gray>Mode:</gray> <objective>', '<gray>Loadout:</gray> <loadout>  <ranked>', '<gray>Arena:</gray> <white><arena></white>', '<gray>Server:</gray> <server>', '<gray>Finished:</gray> <white><time></white>', '<gray>Result:</gray> <reason>', '<gray>Rating after:</gray> <aqua><rating></aqua>', '', '<aqua>Left click</aqua> <gray>Open head-to-head record</gray>']
+    entry-lore: ['<gray>Score:</gray> <white><score></white>  <gray>Format:</gray> <white>BO<bestof></white>', '<gray>Mode:</gray> <objective>', '<gray>Loadout:</gray> <loadout>  <ranked>', '<gray>Arena:</gray> <white><arena></white>', '<gray>Server:</gray> <server>', '<gray>Finished:</gray> <white><time></white>', '<gray>Result:</gray> <reason>', '<gray>Rating after:</gray> <aqua><rating></aqua>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open head-to-head record</#e6fff3>']
     legacy-arena: 'legacy arena'
     reason:
       elimination: '<white>elimination</white>'
@@ -116,21 +116,21 @@ menu:
     offline: '<gray>Opponent is offline</gray>'
     offline-lore: ['<gray>You can challenge them when they return.</gray>']
     challenge: '<green>Challenge <player></green>'
-    challenge-lore: ['<gray>Open the usual duel setup.</gray>', '', '<aqua>Left click</aqua> <gray>Choose rules</gray>']
+    challenge-lore: ['<gray>Open the usual duel setup.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Choose rules</#e6fff3>']
   presets:
     loading: '<gray>Loading saved setups…</gray>'
     title: '<dark_gray>Saved setups</dark_gray>'
     empty: '<gold>Slot <slot> · Empty</gold>'
-    empty-lore: ['<gray>Save the current rules here.</gray>', '', '<aqua>Left click</aqua> <gray>Save</gray>']
+    empty-lore: ['<gray>Save the current rules here.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Save</#e6fff3>']
     auto-arena: 'automatic selection'
     entry: '<gold>Setup <slot></gold>'
     entry-lore: ['<gray>Mode:</gray> <objective>', '<gray>Loadout:</gray> <loadout>', '<gray>Format:</gray> <white>BO<bestof></white>', '<gray>Arena:</gray> <white><arena></white>', '<gray>Status:</gray> <state>', '']
     ready: '<green>Ready</green>'
     arena-missing: '<yellow>Saved arena is unavailable</yellow>'
     kit-missing: '<red>Saved kit is unavailable</red>'
-    ready-actions: ['<aqua>Left click</aqua> <gray>Apply</gray>', '<aqua>Shift + left click</aqua> <gray>Overwrite</gray>', '<red>Shift + right click</red> <gray>Delete</gray>']
-    arena-missing-actions: ['<aqua>Right click</aqua> <gray>Apply with automatic arena</gray>', '<aqua>Shift + left click</aqua> <gray>Overwrite</gray>', '<red>Shift + right click</red> <gray>Delete</gray>']
-    kit-missing-actions: ['<aqua>Shift + left click</aqua> <gray>Overwrite</gray>', '<red>Shift + right click</red> <gray>Delete</gray>']
+    ready-actions: ['<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Apply</#e6fff3>', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Shift + left click</#2bba43><#e6fff3> — Overwrite</#e6fff3>', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Shift + right click</#c42323><#e6fff3> — Delete</#e6fff3>']
+    arena-missing-actions: ['<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Right click</#2bba43><#e6fff3> — Apply with automatic arena</#e6fff3>', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Shift + left click</#2bba43><#e6fff3> — Overwrite</#e6fff3>', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Shift + right click</#c42323><#e6fff3> — Delete</#e6fff3>']
+    kit-missing-actions: ['<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Shift + left click</#2bba43><#e6fff3> — Overwrite</#e6fff3>', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Shift + right click</#c42323><#e6fff3> — Delete</#e6fff3>']
     kit-unavailable: '<red>This setup references a kit that is no longer available.</red>'
     arena-unavailable: '<yellow>This setup references an unavailable arena. Right click to use automatic selection.</yellow>'
     saved: '<green>Setup <slot> saved.</green>'
@@ -150,22 +150,22 @@ menu:
   admin:
     title: '<dark_gray>Manage duels</dark_gray>'
     arenas: '<gold>Arenas</gold>'
-    arenas-lore: ['<gray>Created:</gray> <yellow><arenas></yellow>', '', '<aqua>Left click</aqua> <gray>Open arena list</gray>']
+    arenas-lore: ['<gray>Created:</gray> <yellow><arenas></yellow>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open arena list</#e6fff3>']
     status: '<gold>Status</gold>'
     status-lore: ['<gray>Server:</gray> <server>', '<gray>Enabled arenas:</gray> <yellow><arenas></yellow>', '<gray>Active matches:</gray> <yellow><active></yellow>', '<gray>Waiting pairs:</gray> <yellow><waiting></yellow>', '<gray>Pending recoveries:</gray> <#ffb347><recoveries></#ffb347>']
     recovery: '<gold>Player recovery</gold>'
-    recovery-lore: ['<gray>Online players:</gray> <yellow><players></yellow>', '<gray>Check for a retained snapshot</gray>', '<gray>and restore the player safely.</gray>', '', '<aqua>Left click</aqua> <gray>Choose a player</gray>']
+    recovery-lore: ['<gray>Online players:</gray> <yellow><players></yellow>', '<gray>Check for a retained snapshot</gray>', '<gray>and restore the player safely.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Choose a player</#e6fff3>']
     create: '<gold>Create arena</gold>'
-    create-lore: ['<dark_gray>✖</dark_gray> <white>Enter the arena id in chat.</white>', '', '<aqua>Left click</aqua> <gray>Start creation</gray>']
+    create-lore: ['<#e6fff3>Enter the arena id in chat.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Start creation</#e6fff3>']
     reload: '<gold>Reload configuration</gold>'
-    reload-lore: ['<dark_gray>✖</dark_gray> <white>Validate and apply every arena.</white>', '', '<aqua>Left click</aqua> <gray>Reload</gray>']
+    reload-lore: ['<#e6fff3>Validate and apply every arena.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Reload</#e6fff3>']
     create-prompt: '<gray>Type the new arena id in chat.</gray> <yellow>Use letters, numbers, _ or -.</yellow> <gray>Type</gray> <white>cancel</white> <gray>to stop.</gray>'
     create-cancelled: '<gray>Arena creation cancelled.</gray>'
     create-timeout: '<gray>Arena id input timed out.</gray>'
   admin-arenas:
     title: '<dark_gray>Arenas · <page>/<pages></dark_gray>'
     entry: '<gold><arena></gold>'
-    entry-lore: ['<gray>State:</gray> <state>', '<gray>Spawn 1:</gray> <spawn1>  <gray>Spawn 2:</gray> <spawn2>', '<gray>Corner 1:</gray> <corner1>  <gray>Corner 2:</gray> <corner2>', '<gray>Hill:</gray> <hill>', '', '<aqua>Left click</aqua> <gray>Open editor</gray>']
+    entry-lore: ['<gray>State:</gray> <state>', '<gray>Spawn 1:</gray> <spawn1>  <gray>Spawn 2:</gray> <spawn2>', '<gray>Corner 1:</gray> <corner1>  <gray>Corner 2:</gray> <corner2>', '<gray>Hill:</gray> <hill>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open editor</#e6fff3>']
     empty: '<gold>No arenas created</gold>'
     empty-lore: ['<gray>Go back and create the first arena.</gray>']
   admin-arena:
@@ -177,46 +177,46 @@ menu:
     lobby: '<gold>Post-match lobby</gold>'
     corner1: '<gold>Bounds corner 1</gold>'
     corner2: '<gold>Bounds corner 2</gold>'
-    point-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '', '<aqua>Left click</aqua> <gray>Save current position</gray>']
+    point-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Save current position</#e6fff3>']
     hill: '<gold>Hill objective</gold>'
-    hill-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '<gray>Radius 3.5, height 3 blocks.</gray>', '', '<aqua>Left click</aqua> <gray>Save current position</gray>']
+    hill-lore: ['<gray>Current:</gray> <yellow><value></yellow>', '<gray>Radius 3.5, height 3 blocks.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Save current position</#e6fff3>']
     loadouts: '<gold>Arena loadouts</gold>'
-    loadouts-lore: ['<gray>Allowed:</gray> <loadout>', '', '<aqua>Left click</aqua> <gray>Cycle policy</gray>']
+    loadouts-lore: ['<gray>Allowed:</gray> <loadout>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Cycle policy</#e6fff3>']
     loadouts-all: '<white>own inventory and kits</white>'
     loadouts-own_inventory: '<white>own inventory only</white>'
     loadouts-kit: '<white>kits only</white>'
     objectives: '<gold>Combat modes</gold>'
-    objectives-lore: ['<gray>Allow only modes that fit this</gray>', '<gray>arena’s geometry and purpose.</gray>', '', '<aqua>Left click</aqua> <gray>Configure modes</gray>']
+    objectives-lore: ['<gray>Allow only modes that fit this</gray>', '<gray>arena’s geometry and purpose.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Configure modes</#e6fff3>']
     enable: '<green>Validate and enable</green>'
-    enable-lore: ['<gray>Validate the world, points, bounds, hill,</gray>', '<gray>and separation from every other arena.</gray>', '', '<aqua>Left click</aqua> <gray>Enable arena</gray>']
+    enable-lore: ['<gray>Validate the world, points, bounds, hill,</gray>', '<gray>and separation from every other arena.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Enable arena</#e6fff3>']
     disable: '<red>Disable arena</red>'
-    disable-lore: ['<gray>New matches will no longer use this arena.</gray>', '', '<aqua>Left click</aqua> <gray>Disable</gray>']
+    disable-lore: ['<gray>New matches will no longer use this arena.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Disable</#e6fff3>']
   admin-objectives:
     title: '<dark_gray>Modes · <arena></dark_gray>'
     entry: '<objective>'
-    entry-lore: ['<gray>State:</gray> <state>', '', '<aqua>Left click</aqua> <gray>Toggle</gray>']
+    entry-lore: ['<gray>State:</gray> <state>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Toggle</#e6fff3>']
     required: '<red>An arena must keep at least one combat mode enabled.</red>'
   admin-recovery:
     title: '<dark_gray>Player recovery · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
-    player-lore: ['<gray>Check this player for a pending snapshot.</gray>', '', '<aqua>Left click</aqua> <gray>Start safe recovery</gray>']
+    player-lore: ['<gray>Check this player for a pending snapshot.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Start safe recovery</#e6fff3>']
 
 objective:
   elimination:
     name: '<gold>Elimination</gold>'
-    description: ['<gray>Defeat your opponent in direct combat.</gray>', '<gray>Leaving arena bounds is a loss.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
+    description: ['<gray>Defeat your opponent in direct combat.</gray>', '<gray>Leaving arena bounds is a loss.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
   koth:
     name: '<gold>King of the hill</gold>'
-    description: ['<gray>Hold the marked arena objective.</gray>', '<gray>Capture pauses while both players contest it.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
+    description: ['<gray>Hold the marked arena objective.</gray>', '<gray>Capture pauses while both players contest it.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
   sumo:
     name: '<gold>Sumo</gold>'
-    description: ['<gray>Damage is disabled: knock your opponent</gray>', '<gray>outside the safe arena bounds.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
+    description: ['<gray>Damage is disabled: knock your opponent</gray>', '<gray>outside the safe arena bounds.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
   boxing:
     name: '<gold>Boxing</gold>'
-    description: ['<gray>Be first to land the selected number of hits.</gray>', '<gray>Damage is disabled and only direct</gray>', '<gray>melee hits count.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
+    description: ['<gray>Be first to land the selected number of hits.</gray>', '<gray>Damage is disabled and only direct</gray>', '<gray>melee hits count.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
   combo:
     name: '<gold>Combo</gold>'
-    description: ['<gray>Build an unanswered hit streak.</gray>', '<gray>An opponent’s return hit resets</gray>', '<gray>your current streak.</gray>', '', '<aqua>Left click</aqua> <gray>Select objective</gray>']
+    description: ['<gray>Build an unanswered hit streak.</gray>', '<gray>An opponent’s return hit resets</gray>', '<gray>your current streak.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
 
 kit:
   classic:
@@ -262,6 +262,7 @@ kit:
 multiplayer:
   busy: '<red>Finish your current match or recovery first.</red>'
   no-kits: '<red>A group match requires at least one configured kit.</red>'
+  network-unavailable: '<red>Network group matches are currently unavailable.</red>'
   invalid-size: '<red>Select 3 to 12 participants and keep every team non-empty.</red>'
   player-left: '<red>A participant left or became busy.</red>'
   invited: '<#fff4d6><player> invited you to a group match.</#fff4d6>'
@@ -296,33 +297,33 @@ multiplayer:
     lobby-title: '<dark_gray>Group match · ready check</dark_gray>'
     no-players: '<red>No available players</red>'
     player: '<gold><player></gold>'
-    player-lore: ['<gray>Status:</gray> <state>', '<gray>Team:</gray> <white><team></white>', '', '<aqua>Left click</aqua> <gray>Select or remove</gray>']
-    player-status-lore: ['<gray>Status:</gray> <state>', '<gray>Team:</gray> <white><team></white>']
+    player-lore: ['<gray>Server:</gray> <server>', '<gray>Status:</gray> <state>', '<gray>Team:</gray> <white><team></white>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select or remove</#e6fff3>']
+    player-status-lore: ['<gray>Server:</gray> <server>', '<gray>Status:</gray> <state>', '<gray>Team:</gray> <white><team></white>']
     selected: '<green>selected / ready</green>'
     not-selected: '<gray>not selected / waiting</gray>'
     layout: '<gold>Format: <value></gold>'
-    layout-lore: ['<gray>Free-for-all, two teams, or three</gray>', '<gray>automatically balanced teams.</gray>', '', '<aqua>Left click</aqua> <gray>Cycle</gray>']
+    layout-lore: ['<gray>Free-for-all, two teams, or three</gray>', '<gray>automatically balanced teams.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Cycle</#e6fff3>']
     kit-policy: '<gold>Kits: <value></gold>'
-    kit-policy-lore: ['<gray>One kit for everyone or an individual</gray>', '<gray>choice for every participant.</gray>', '', '<aqua>Left click</aqua> <gray>Cycle</gray>']
+    kit-policy-lore: ['<gray>One kit for everyone or an individual</gray>', '<gray>choice for every participant.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Cycle</#e6fff3>']
     readonly-lore: ['<gray>Selected by the host:</gray> <value>']
-    shared-kit-lore: ['<gray>Every participant receives this kit.</gray>', '', '<aqua>Left click</aqua> <gray>Next kit</gray>']
-    personal-kit-lore: ['<gray>This is your kit for the upcoming match.</gray>', '', '<aqua>Left click</aqua> <gray>Next kit</gray>']
+    shared-kit-lore: ['<gray>Every participant receives this kit.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Next kit</#e6fff3>']
+    personal-kit-lore: ['<gray>This is your kit for the upcoming match.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Next kit</#e6fff3>']
     shared-kit-readonly-lore: ['<gray>Every participant receives this kit.</gray>', '<dark_gray>Selected by the host.</dark_gray>']
     personal-kit-readonly-lore: ['<gray>This is your confirmed kit.</gray>', '<dark_gray>It can be changed before accepting.</dark_gray>']
-    back-lore: ['', '<aqua>Left click</aqua> <gray>Return to the main menu</gray>']
+    back-lore: ['', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Return to the main menu</#e6fff3>']
     invite: '<green>Send invitations</green>'
-    invite-lore: ['<gray>Participants:</gray> <white><players></white>', '<gray>The match starts after everyone accepts.</gray>', '', '<aqua>Left click</aqua> <gray>Create lobby</gray>']
+    invite-lore: ['<gray>Participants:</gray> <white><players></white>', '<gray>The match starts after everyone accepts.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Create lobby</#e6fff3>']
     invite-disabled: '<gray>Match is not ready</gray>'
     invite-disabled-lore: ['<gray>Current participants:</gray> <white><players></white>', '<gray>Need 3 to 12 and every team non-empty.</gray>']
     waiting: '<gold>Waiting for players</gold>'
     waiting-lore: ['<gray>Ready:</gray> <white><ready>/<players></white>', '<gray>The match starts automatically.</gray>']
     accept: '<green>Accept invitation</green>'
-    accept-lore: ['<gray>Review the format and your kit.</gray>', '', '<aqua>Left click</aqua> <gray>I am ready</gray>']
+    accept-lore: ['<gray>Review the format and your kit.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — I am ready</#e6fff3>']
     accepted: '<green>You are ready</green>'
     accepted-lore: ['<gray>Waiting for the other participants.</gray>']
     cancel: '<red>Cancel match</red>'
     decline: '<red>Decline invitation</red>'
-    cancel-lore: ['', '<red>Left click</red> <gray>Close the lobby for everyone</gray>']
+    cancel-lore: ['', '<#8c8c8c>[<#c42323>▶</#c42323>]</#8c8c8c> <#c42323>Left click</#c42323><#e6fff3> — Close the lobby for everyone</#e6fff3>']
     left-player: '<red>Player left</red>'
 
 player-link:
