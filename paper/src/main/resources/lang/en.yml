@@ -158,7 +158,7 @@ menu:
     create: '<gold>Create arena</gold>'
     create-lore: ['<#e6fff3>Enter the arena id in chat.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Start creation</#e6fff3>']
     reload: '<gold>Reload configuration</gold>'
-    reload-lore: ['<#e6fff3>Validate and apply every arena.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Reload</#e6fff3>']
+    reload-lore: ['<#e6fff3>Validate and apply settings, text,</#e6fff3>', '<#e6fff3>menus, arenas, and kits.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Reload</#e6fff3>']
     create-prompt: '<gray>Type the new arena id in chat.</gray> <yellow>Use letters, numbers, _ or -.</yellow> <gray>Type</gray> <white>cancel</white> <gray>to stop.</gray>'
     create-cancelled: '<gray>Arena creation cancelled.</gray>'
     create-timeout: '<gray>Arena id input timed out.</gray>'
@@ -538,8 +538,10 @@ admin:
   arena-invalid: '<red>Arena was not applied: <reason></red>'
   arena-enabled: '<green>Arena <white><arena></white> was validated and enabled. Active arenas: <count>.</green>'
   arena-disabled: '<yellow>Arena <white><arena></white> was disabled. Active arenas: <count>.</yellow>'
-  reloaded: '<green>Configuration reloaded; active arenas: <count>.</green>'
-  reload-failed: '<red>Arena configuration error: <reason></red>'
+  reloaded: '<green>Configuration v<version> was applied.</green> <gray>Active arenas: <count>.</gray>'
+  reload-deferred: '<yellow>Arenas and kits will apply automatically after active matches and invitations finish.</yellow>'
+  reload-restart-required: '<yellow>Server restart required for: <white><fields></white>.</yellow>'
+  reload-failed: '<red>Configuration was not applied; version v<version> remains active: <reason></red>'
   no-arenas: '<gray>No arenas have been created.</gray>'
   arena-list: '<aqua>Arenas:</aqua>'
   arena-list-entry: '<dark_gray>•</dark_gray> <white><arena></white> <state>'
@@ -571,7 +573,8 @@ admin:
     - '<white>/duels admin arena setloadouts (id) (all|own|kit)</white>'
     - '<white>/duels admin arena setobjectives (id) (all|elimination|koth|sumo|boxing|combo...)</white>'
     - '<white>/duels admin arena enable|disable (id)</white>'
-    - '<white>/duels admin arena list|info (id)|reload</white>'
+    - '<white>/duels admin reload</white>'
+    - '<white>/duels admin arena list|info (id)|reload</white> <gray>— reload remains a compatibility alias</gray>'
     - '<white>/duels admin status</white>'
     - '<white>/duels admin debug server|player [player]|arena (id)</white>'
     - '<white>/duels admin recover (online-player)</white>'

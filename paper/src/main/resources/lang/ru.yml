@@ -158,7 +158,7 @@ menu:
     create: '<gold>Создать арену</gold>'
     create-lore: ['<#e6fff3>Ввести идентификатор арены в чат.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Начать создание</#e6fff3>']
     reload: '<gold>Перечитать конфигурацию</gold>'
-    reload-lore: ['<#e6fff3>Проверить и применить все арены.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Перечитать</#e6fff3>']
+    reload-lore: ['<#e6fff3>Проверить и применить настройки,</#e6fff3>', '<#e6fff3>тексты, меню, арены и наборы.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Перечитать</#e6fff3>']
     create-prompt: '<gray>Напиши идентификатор новой арены в чат.</gray> <yellow>Допустимы латинские буквы, цифры, _ и -.</yellow> <gray>Для отмены напиши</gray> <white>отмена</white><gray>.</gray>'
     create-cancelled: '<gray>Создание арены отменено.</gray>'
     create-timeout: '<gray>Время ввода идентификатора истекло.</gray>'
@@ -537,8 +537,10 @@ admin:
   arena-invalid: '<red>Арена не применена: <reason></red>'
   arena-enabled: '<green>Арена <white><arena></white> проверена и включена. Активных арен: <count>.</green>'
   arena-disabled: '<yellow>Арена <white><arena></white> выключена. Активных арен: <count>.</yellow>'
-  reloaded: '<green>Конфигурация перечитана; активных арен: <count>.</green>'
-  reload-failed: '<red>Ошибка конфигурации арен: <reason></red>'
+  reloaded: '<green>Конфигурация v<version> применена.</green> <gray>Активных арен: <count>.</gray>'
+  reload-deferred: '<yellow>Арены и наборы применятся автоматически после завершения активных боёв и приглашений.</yellow>'
+  reload-restart-required: '<yellow>Для настроек <white><fields></white> нужен рестарт сервера.</yellow>'
+  reload-failed: '<red>Конфигурация не применена; версия v<version> осталась активной: <reason></red>'
   no-arenas: '<gray>Арены ещё не созданы.</gray>'
   arena-list: '<aqua>Арены:</aqua>'
   arena-list-entry: '<dark_gray>•</dark_gray> <white><arena></white> <state>'
@@ -570,7 +572,8 @@ admin:
     - '<white>/duels admin arena setloadouts (id) (all|own|kit)</white>'
     - '<white>/duels admin arena setobjectives (id) (all|elimination|koth|sumo|boxing|combo...)</white>'
     - '<white>/duels admin arena enable|disable (id)</white>'
-    - '<white>/duels admin arena list|info (id)|reload</white>'
+    - '<white>/duels admin reload</white>'
+    - '<white>/duels admin arena list|info (id)|reload</white> <gray>— reload оставлен как совместимый алиас</gray>'
     - '<white>/duels admin status</white>'
     - '<white>/duels admin debug server|player [игрок]|arena (id)</white>'
     - '<white>/duels admin recover (онлайн-игрок)</white>'

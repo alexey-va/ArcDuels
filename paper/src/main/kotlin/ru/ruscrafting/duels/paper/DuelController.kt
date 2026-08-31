@@ -6,6 +6,7 @@ import net.kyori.adventure.text.event.HoverEvent
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
+import ru.arc.paper.network.BackendTransferResult
 import ru.ruscrafting.duels.domain.ChallengeId
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaSelection
@@ -14,6 +15,7 @@ import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
@@ -46,9 +48,16 @@ class DuelController(
     private val clock: Clock = Clock.systemUTC(),
     private val transferTimeout: Duration = Duration.ofSeconds(30),
     private val returnPolicy: PostMatchReturnPolicy = PostMatchReturnPolicy.PROMPT,
+    private val automaticReturnTimeout: Duration = Duration.ofMinutes(2),
     private val arenaReturnPolicy: (ArenaId) -> PostMatchReturnPolicy? = { null },
     private val rematchWindow: Duration = Duration.ofMinutes(3),
-    private val arenaChoices: ((DuelRules) -> List<ArenaChoice>)? = arenaDirectory?.let { directory -> directory::choices },
+    private val kitAvailable: (KitId) -> Boolean = { true },
+    private val kitFingerprint: (KitId) -> String? = { null },
+    private val arenaChoices: ((DuelRules) -> List<ArenaChoice>)? =
+        arenaDirectory?.let { directory ->
+            { rules -> directory.choices(rules, rules.kitId?.let(kitFingerprint)) }
+        },
+    private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
 ) : AutoCloseable {
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
     private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
@@ -56,20 +65,28 @@ class DuelController(
     private val challengeExpiryTasks = ConcurrentHashMap<ChallengeId, BukkitTask>()
     private val expiredNotificationPlayers = ConcurrentHashMap.newKeySet<Pair<ChallengeId, UUID>>()
     private val transferRequests = ConcurrentHashMap.newKeySet<Pair<ChallengeId, PlayerId>>()
+    private val transferFailureNotifications = ConcurrentHashMap.newKeySet<Pair<ChallengeId, PlayerId>>()
     private val originSnapshots = ConcurrentHashMap<Pair<ChallengeId, PlayerId>, java.util.concurrent.CompletableFuture<Unit>>()
     private val networkPendingPlayers = ConcurrentHashMap.newKeySet<PlayerId>()
     private val returnRoutes = ConcurrentHashMap<MatchId, ReturnRoutes>()
     private val returnTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val returnRequests = ConcurrentHashMap.newKeySet<Pair<MatchId, PlayerId>>()
+    private val returnFailureNotifications = ConcurrentHashMap.newKeySet<Pair<MatchId, PlayerId>>()
     private val returnOffers = ConcurrentHashMap<PlayerId, ReturnOffer>()
     private val networkSubscription = challengeBus?.subscribe(::onNetworkMessage)
     private val completionSubscription = sessions.onCompleted(::onMatchCompleted)
     private val playerComponents = DuelPlayerComponents(statistics, locales)
 
+    /** Accepted challenges retain their original kit and arena ids until routing completes. */
+    internal fun activeAcceptedMatchCount(): Int = acceptedMatches.size
+
     init {
         require(!transferTimeout.isNegative && !transferTimeout.isZero) { "Network transfer timeout must be positive" }
         require(!rematchWindow.isNegative && !rematchWindow.isZero && rematchWindow <= Duration.ofMinutes(15)) {
             "Rematch window must be between 1 millisecond and 15 minutes"
+        }
+        require(automaticReturnTimeout in Duration.ofSeconds(30)..Duration.ofMinutes(10)) {
+            "Automatic return timeout must be between 30 seconds and 10 minutes"
         }
         require(challengeBus == null || (arenaDirectory != null && transfer != null)) {
             "Cross-server challenges require arena discovery and a player transfer gateway"
@@ -116,6 +133,11 @@ class DuelController(
             challenger.sendMessage(locales.notice(challenger, "controller.busy"))
             return
         }
+        val capturedKitFingerprint = rules.kitId?.let(kitFingerprint)
+        if ((challengeBus != null || arenaDirectory != null) && rules.kitId != null && capturedKitFingerprint == null) {
+            challenger.sendMessage(locales.notice(challenger, "controller.failed"))
+            return
+        }
         runCatching { challenges.create(PlayerId(challenger.uniqueId), PlayerId(target.uniqueId), rules, arenaSelection) }
             .onSuccess { challenge ->
                 DuelLog.info(
@@ -136,6 +158,7 @@ class DuelController(
                         targetRoute = participantRoute(target.server, returnOffers[challenge.target]?.destination),
                         expiresAtMillis = challenge.expiresAt.toEpochMilli(),
                         recoveryMatchId = recoveryMatchId,
+                        kitFingerprint = capturedKitFingerprint,
                     )
                 rememberContext(challenge.id, context)
                 if (localTarget != null) {
@@ -153,6 +176,7 @@ class DuelController(
                             sourceServer = localServer,
                             type = ChallengeMessageType.OFFER,
                             challenge = challenge,
+                            kitFingerprint = context.kitFingerprint,
                             challengerName = context.challengerName,
                             targetName = context.targetName,
                             challengerServer = context.challengerRoute.originServer,
@@ -196,8 +220,9 @@ class DuelController(
             player.sendMessage(locales.notice(player, "controller.network-unavailable"))
             return
         }
+        val requiredKitFingerprint = contexts[challenge.id]?.kitFingerprint
         val matchServer =
-            arenaDirectory?.select(challenge.rules, challenge.arenaSelection)
+            arenaDirectory?.select(challenge.rules, requiredKitFingerprint, challenge.arenaSelection)
                 ?: challenge.arenaSelection?.serverId?.takeIf { arenaDirectory == null && it == localServer }
         if ((arenaDirectory != null || challenge.arenaSelection != null) && matchServer == null) {
             player.sendMessage(locales.notice(player, "controller.no-network-arena"))
@@ -309,7 +334,9 @@ class DuelController(
         )?.let {
             player.sendMessage(it)
         }
-        transfer?.connect(player, offer.destination)
+        if (isSuccessfulBackendTransfer(transferPlayer(player, offer.destination, offer.matchId, "return-transfer-failed"))) {
+            returnOffers.remove(playerId, offer)
+        }
     }
 
     fun handleQuit(player: Player) {
@@ -368,8 +395,20 @@ class DuelController(
                     player.sendMessage(locales.notice(player, "controller.rematch-unavailable"))
                     return@runSync
                 }
-                if (clock.instant().isAfter(outcome.completedAt.plus(rematchWindow))) {
+                val effectiveRematchWindow = runtimeSettings()?.rematchWindow ?: rematchWindow
+                if (clock.instant().isAfter(outcome.completedAt.plus(effectiveRematchWindow))) {
                     player.sendMessage(locales.notice(player, "controller.rematch-expired"))
+                    return@runSync
+                }
+                if (outcome.rules.kitId?.let { !kitAvailable(it) } == true) {
+                    DuelLog.warn(
+                        "rematch-kit-unavailable",
+                        outcome.matchId,
+                        player,
+                        "kit={}",
+                        outcome.rules.kitId?.value,
+                    )
+                    player.sendMessage(locales.notice(player, "controller.rematch-unavailable"))
                     return@runSync
                 }
                 val opponentId = recorded.opponentOf(playerId)
@@ -458,9 +497,11 @@ class DuelController(
         returnTasks.clear()
         acceptedMatches.clear()
         transferRequests.clear()
+        transferFailureNotifications.clear()
         originSnapshots.clear()
         networkPendingPlayers.clear()
         returnRequests.clear()
+        returnFailureNotifications.clear()
         returnOffers.clear()
         returnRoutes.clear()
         contexts.clear()
@@ -496,6 +537,7 @@ class DuelController(
                 targetRoute = participantRoute(localServer, returnOffers[message.challenge.target]?.destination ?: message.targetServer),
                 expiresAtMillis = message.challenge.expiresAt.toEpochMilli(),
                 recoveryMatchId = message.recoveryMatchId,
+                kitFingerprint = message.kitFingerprint,
             ),
         )
         if (sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
@@ -541,6 +583,7 @@ class DuelController(
                 targetRoute = ParticipantRoute(message.targetCurrentServer, message.targetServer),
                 expiresAtMillis = message.challenge.expiresAt.toEpochMilli(),
                 recoveryMatchId = message.recoveryMatchId,
+                kitFingerprint = message.kitFingerprint,
             ),
         )
         when (message.challenge.status) {
@@ -575,6 +618,7 @@ class DuelController(
                     ),
                 expiresAtMillis = challenge.expiresAt.toEpochMilli(),
                 recoveryMatchId = existing?.recoveryMatchId,
+                kitFingerprint = existing?.kitFingerprint ?: challenge.rules.kitId?.let(kitFingerprint),
             )
         return publishMessage(
             bus,
@@ -583,6 +627,7 @@ class DuelController(
                 sourceServer = localServer,
                 type = ChallengeMessageType.RESOLUTION,
                 challenge = challenge,
+                kitFingerprint = context.kitFingerprint,
                 challengerName = context.challengerName,
                 targetName = context.targetName,
                 challengerServer = context.challengerRoute.originServer,
@@ -612,7 +657,7 @@ class DuelController(
     private fun acceptNetworkMatch(message: CrossServerChallengeMessage) {
         val host = requireNotNull(message.matchServer)
         if (message.recoveryMatchId == null) {
-            returnLobbyPlayersForNewMatch(message.challenge)
+            if (!returnLobbyPlayersForNewMatch(message.challenge)) return
         } else if (localServer == host) {
             participants(message.challenge).forEach { player ->
                 player.sendMessage(locales.notice(player, "controller.rematch-return"))
@@ -621,7 +666,8 @@ class DuelController(
         scheduleAcceptedMatch(message.challenge, host, message)
     }
 
-    private fun returnLobbyPlayersForNewMatch(challenge: DuelChallenge) {
+    private fun returnLobbyPlayersForNewMatch(challenge: DuelChallenge): Boolean {
+        var returned = true
         participants(challenge).forEach { player ->
             val playerId = PlayerId(player.uniqueId)
             val offer = returnOffers[playerId] ?: return@forEach
@@ -635,9 +681,11 @@ class DuelController(
             if (offer.destination == localServer) {
                 if (sessions.requestRecovery(player)) returnOffers.remove(playerId, offer)
             } else {
-                transfer?.connect(player, offer.destination)
+                val result = transferPlayer(player, offer.destination, offer.matchId, "rematch-return-transfer-failed")
+                if (!isSuccessfulBackendTransfer(result)) returned = false
             }
         }
+        return returned
     }
 
     private fun scheduleAcceptedMatch(
@@ -651,7 +699,8 @@ class DuelController(
         ) {
             return
         }
-        val accepted = AcceptedMatch(challenge, host, networkMessage, clock.millis() + transferTimeout.toMillis())
+        val effectiveTransferTimeout = runtimeSettings()?.transferTimeout ?: transferTimeout
+        val accepted = AcceptedMatch(challenge, host, networkMessage, clock.millis() + effectiveTransferTimeout.toMillis())
         DuelLog.info(
             "match-routing-start",
             MatchId(challenge.id.value),
@@ -659,7 +708,7 @@ class DuelController(
             localServer.value,
             host.value,
             networkMessage != null,
-            transferTimeout.toMillis(),
+            effectiveTransferTimeout.toMillis(),
         )
         acceptedMatches.putIfAbsent(challenge.id, accepted)
         // Only the arena host must suppress join-time recovery while transferred
@@ -706,23 +755,35 @@ class DuelController(
             localParticipants.forEach { player ->
                 val request = challengeId to PlayerId(player.uniqueId)
                 if (transferRequests.add(request)) {
-                    DuelLog.info(
-                        "player-transfer-request",
-                        MatchId(challenge.id.value),
-                        player,
-                        "player={} from={} to={}",
-                        player.name,
-                        localServer.value,
-                        accepted.host.value,
-                    )
-                    player.sendMessage(
-                        locales.notice(
+                    val reportFailure = request !in transferFailureNotifications
+                    if (reportFailure) {
+                        DuelLog.info(
+                            "player-transfer-request",
+                            MatchId(challenge.id.value),
                             player,
-                            "controller.network-transfer",
-                            LocaleService.component("server", serverNames.display(accepted.host)),
-                        ),
+                            "player={} from={} to={}",
+                            player.name,
+                            localServer.value,
+                            accepted.host.value,
+                        )
+                        player.sendMessage(
+                            locales.notice(
+                                player,
+                                "controller.network-transfer",
+                                LocaleService.component("server", serverNames.display(accepted.host)),
+                            ),
+                        )
+                    }
+                    val result = transferPlayer(
+                        player,
+                        accepted.host,
+                        MatchId(challenge.id.value),
+                        "match-transfer-failed",
+                        reportFailure,
                     )
-                    transfer?.connect(player, accepted.host)
+                    if (!retainSuccessfulTransferRequest(transferRequests, request, result)) {
+                        transferFailureNotifications += request
+                    }
                 }
             }
             return
@@ -762,6 +823,7 @@ class DuelController(
         }
         acceptedTasks.remove(challengeId)?.cancel()
         transferRequests.removeIf { it.first == challengeId }
+        transferFailureNotifications.removeIf { it.first == challengeId }
         originSnapshots.keys.removeIf { it.first == challengeId }
     }
 
@@ -769,6 +831,11 @@ class DuelController(
         challenge: DuelChallenge,
         networkMessage: CrossServerChallengeMessage? = null,
     ) {
+        // Capture alongside DuelSessionManager.start/startNetwork. Completion may wait on durable
+        // storage, player transfer, or teleports while a newer config generation is published.
+        val capturedSettings = runtimeSettings()
+        val capturedReturnPolicy = capturedSettings?.defaultPostMatchReturnPolicy ?: returnPolicy
+        val capturedAutomaticReturnTimeout = capturedSettings?.automaticReturnTimeout ?: automaticReturnTimeout
         DuelLog.info(
             "match-start-request",
             MatchId(challenge.id.value),
@@ -783,6 +850,11 @@ class DuelController(
                 runCatching { sessions.start(challenge) }
             } else {
                 runCatching {
+                    challenge.rules.kitId?.let { kitId ->
+                        check(kitFingerprint(kitId) == networkMessage.kitFingerprint) {
+                            "The selected arena host no longer has the captured kit generation"
+                        }
+                    }
                     sessions.startNetwork(
                         challenge,
                         mapOf(
@@ -825,6 +897,8 @@ class DuelController(
                                         networkMessage.challenge.target to networkMessage.targetServer,
                                     ),
                                 recoveryMatchId = networkMessage.recoveryMatchId ?: requireNotNull(match).id,
+                                returnPolicy = capturedReturnPolicy,
+                                automaticReturnTimeout = capturedAutomaticReturnTimeout,
                             )
                         listOf(challenge.challenger, challenge.target).forEach { playerId ->
                             returnOffers[playerId]?.takeIf { it.recoveryMatchId == networkMessage.recoveryMatchId }
@@ -886,9 +960,40 @@ class DuelController(
             if (destination == localServer) {
                 sessions.requestRecovery(player)
             } else {
-                transfer?.connect(player, destination)
+                val result =
+                    transferPlayer(
+                        player,
+                        destination,
+                        MatchId(accepted.challenge.id.value),
+                        "cancel-return-transfer-failed",
+                    )
+                if (!isSuccessfulBackendTransfer(result)) sessions.requestRecovery(player)
             }
         }
+    }
+
+    private fun transferPlayer(
+        player: Player,
+        destination: ServerId,
+        matchId: MatchId,
+        action: String,
+        reportFailure: Boolean = true,
+    ): BackendTransferResult? {
+        val result = transfer?.connect(player, destination)
+        if (result == BackendTransferResult.SENT) return result
+        if (reportFailure) {
+            DuelLog.warn(
+                action,
+                matchId,
+                player,
+                "player={} destination={} result={}",
+                player.name,
+                destination.value,
+                result?.name ?: "UNAVAILABLE",
+            )
+            player.sendMessage(locales.notice(player, "controller.network-unavailable"))
+        }
+        return result
     }
 
     private fun originFor(
@@ -904,7 +1009,8 @@ class DuelController(
     private fun onMatchCompleted(match: DuelMatch) {
         val routes = returnRoutes.remove(match.id)
         val effectiveReturnPolicy =
-            arenaReturnPolicy(match.arenaId) ?: returnPolicy
+            arenaReturnPolicy(match.arenaId) ?: routes?.returnPolicy
+                ?: runtimeSettings()?.defaultPostMatchReturnPolicy ?: returnPolicy
         val promptedRoutes = routes?.takeIf { effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT }
         promptedRoutes?.byPlayer?.forEach { (playerId, destination) ->
             returnOffers[playerId] = ReturnOffer(match.id, destination, promptedRoutes.recoveryMatchId)
@@ -914,7 +1020,7 @@ class DuelController(
         if (effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT) {
             return
         }
-        val deadline = clock.millis() + RETURN_TIMEOUT.toMillis()
+        val deadline = clock.millis() + routes.automaticReturnTimeout.toMillis()
         val task =
             plugin.server.scheduler.runTaskTimer(
                 plugin,
@@ -926,6 +1032,7 @@ class DuelController(
     }
 
     private fun offerMatchSummary(match: DuelMatch, routes: ReturnRoutes?) {
+        val effectiveRematchWindow = runtimeSettings()?.rematchWindow ?: rematchWindow
         listOf(match.firstPlayer, match.secondPlayer).forEach { playerId ->
             val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
             val opponentId = match.opponentOf(playerId)
@@ -941,7 +1048,7 @@ class DuelController(
                                     locales.component(
                                         player,
                                         "controller.rematch-hover",
-                                        LocaleService.text("seconds", rematchWindow.seconds.coerceAtLeast(1L)),
+                                        LocaleService.text("seconds", effectiveRematchWindow.seconds.coerceAtLeast(1L)),
                                     ),
                                 ),
                             )
@@ -970,7 +1077,7 @@ class DuelController(
                             ),
                             LocaleService.text("score", viewerScore(match, playerId)),
                             LocaleService.component("actions", actions),
-                            LocaleService.text("seconds", rematchWindow.seconds.coerceAtLeast(1L)),
+                            LocaleService.text("seconds", effectiveRematchWindow.seconds.coerceAtLeast(1L)),
                         ),
                     )
                 }
@@ -997,12 +1104,25 @@ class DuelController(
             if (sessions.isStateLocked(player)) return@forEach
             val request = match.id to playerId
             if (returnRequests.add(request)) {
-                locales.optionalNotice(
-                    player,
-                    "controller.network-return",
-                    LocaleService.component("server", serverNames.display(destination)),
-                )?.let { player.sendMessage(it) }
-                transfer?.connect(player, destination)
+                val reportFailure = request !in returnFailureNotifications
+                if (reportFailure) {
+                    locales.optionalNotice(
+                        player,
+                        "controller.network-return",
+                        LocaleService.component("server", serverNames.display(destination)),
+                    )?.let { player.sendMessage(it) }
+                }
+                val result =
+                    transferPlayer(
+                        player,
+                        destination,
+                        match.id,
+                        "automatic-return-transfer-failed",
+                        reportFailure,
+                    )
+                if (!retainSuccessfulTransferRequest(returnRequests, request, result)) {
+                    returnFailureNotifications += request
+                }
             }
         }
         if (destinations.keys.all { (match.id to it) in returnRequests }) stopReturn(match.id)
@@ -1011,6 +1131,7 @@ class DuelController(
     private fun stopReturn(matchId: MatchId) {
         returnTasks.remove(matchId)?.cancel()
         returnRequests.removeIf { it.first == matchId }
+        returnFailureNotifications.removeIf { it.first == matchId }
     }
 
     private fun resolveCandidate(player: Player, challengeId: ChallengeId?, incoming: Boolean): DuelChallenge? {
@@ -1156,7 +1277,7 @@ class DuelController(
         val arena =
             challenge.arenaSelection?.let { selection ->
                 val displayName =
-                    arenaDirectory?.choices(challenge.rules)
+                    arenaDirectory?.choices(challenge.rules, contexts[challenge.id]?.kitFingerprint)
                         ?.firstOrNull { it.selection == selection }
                         ?.displayName
                         ?: selection.arenaId.value
@@ -1286,6 +1407,7 @@ class DuelController(
         val targetRoute: ParticipantRoute,
         val expiresAtMillis: Long,
         val recoveryMatchId: MatchId?,
+        val kitFingerprint: String?,
     )
 
     private data class AcceptedMatch(
@@ -1298,6 +1420,8 @@ class DuelController(
     private data class ReturnRoutes(
         val byPlayer: Map<PlayerId, ServerId>,
         val recoveryMatchId: MatchId,
+        val returnPolicy: PostMatchReturnPolicy,
+        val automaticReturnTimeout: Duration,
     ) {
         init {
             require(byPlayer.size == 2) { "Return routes require exactly two players" }
@@ -1322,7 +1446,6 @@ class DuelController(
         const val NETWORK_MATCH_POLL_TICKS = 10L
         const val RETURN_DELAY_TICKS = 1L
         const val MAX_CONTEXTS = 4_096
-        val RETURN_TIMEOUT: Duration = Duration.ofMinutes(2)
         val CONTEXT_RETENTION: Duration = Duration.ofMinutes(10)
     }
 }
@@ -1391,4 +1514,14 @@ internal fun acceptedMatchDecision(participants: List<AcceptedParticipantReadine
     if (participants.any(AcceptedParticipantReadiness::stateLocked)) return AcceptedMatchDecision.WAIT
     if (participants.any { !it.playerDataReady }) return AcceptedMatchDecision.WAIT
     return AcceptedMatchDecision.START
+}
+
+internal fun <T> retainSuccessfulTransferRequest(
+    requests: MutableSet<T>,
+    request: T,
+    result: BackendTransferResult?,
+): Boolean {
+    if (isSuccessfulBackendTransfer(result)) return true
+    requests.remove(request)
+    return false
 }

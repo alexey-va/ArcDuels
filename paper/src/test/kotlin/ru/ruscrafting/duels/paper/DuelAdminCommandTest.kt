@@ -83,6 +83,25 @@ class DuelAdminCommandTest : StringSpec({
         verify(atLeast = 1) { catalog.disable(any()) }
     }
 
+    "arena edits fail closed while a multiplayer or accepted-match flow is active" {
+        val player = server.addPlayer("BusyArenaAdmin")
+        player.isOp = true
+        val catalog = mockk<PaperArenaCatalog>(relaxed = true)
+        val sessions = mockk<DuelSessionManager>()
+        every { sessions.activeArenaCount() } returns 0
+        every { sessions.queueSize() } returns 0
+        plugin.config.set("arenas.busy_gate.enabled", true)
+        val admin = DuelAdminCommand(plugin, catalog, sessions, configurationBusy = { true })
+
+        admin.execute(player, listOf("arena", "disable", "busy_gate"))
+
+        plugin.config.getBoolean("arenas.busy_gate.enabled") shouldBe true
+        verify(exactly = 0) { catalog.disable(any()) }
+        val denial = PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.nextComponentMessage()))
+        denial.isNotBlank() shouldBe true
+        plugin.config.set("arenas.busy_gate", null)
+    }
+
     "admin debug commands expose stable read-only server player and arena state for QA bots" {
         val world = server.addSimpleWorld("debug-world")
         val player = server.addPlayer("QaBot")

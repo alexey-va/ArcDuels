@@ -6,11 +6,31 @@ import java.util.concurrent.ConcurrentHashMap
 
 class ChallengeRegistry(
     private val clock: Clock,
-    private val ttl: Duration = Duration.ofSeconds(45),
+    ttl: Duration = Duration.ofSeconds(45),
 ) {
     private val lock = Any()
+    private var ttlForNewChallenges = DuelChallenge.validateTtl(ttl)
     private val challenges = ConcurrentHashMap<ChallengeId, DuelChallenge>()
     private val pendingByPlayer = ConcurrentHashMap<PlayerId, ChallengeId>()
+
+    /**
+     * Atomically changes the expiry used by challenges created after this call.
+     * Existing challenges keep the deadline captured in their [DuelChallenge.expiresAt].
+     */
+    fun updateTtl(ttl: Duration) {
+        val validatedTtl = DuelChallenge.validateTtl(ttl)
+        synchronized(lock) {
+            ttlForNewChallenges = validatedTtl
+        }
+    }
+
+    /** Number of currently pending challenges after applying due expirations. */
+    val pendingCount: Int
+        get() =
+            synchronized(lock) {
+                expirePending()
+                challenges.values.count { it.status == ChallengeStatus.PENDING }
+            }
 
     fun create(
         challenger: PlayerId,
@@ -22,7 +42,7 @@ class ChallengeRegistry(
             expirePending()
             check(pendingByPlayer[challenger] == null) { "The challenger already has a pending challenge" }
             check(pendingByPlayer[target] == null) { "The target already has a pending challenge" }
-            DuelChallenge.create(challenger, target, rules, clock.instant(), ttl, arenaSelection).also { challenge ->
+            DuelChallenge.create(challenger, target, rules, clock.instant(), ttlForNewChallenges, arenaSelection).also { challenge ->
                 challenges[challenge.id] = challenge
                 claimPendingPlayers(challenge)
             }

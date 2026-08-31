@@ -15,9 +15,14 @@ import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 class CrossServerGroupBusTest : StringSpec({
+    val nowEpochMillis = 1_800_000_000_000L
+    val clock = Clock.fixed(Instant.ofEpochMilli(nowEpochMillis), ZoneOffset.UTC)
     val host = NetworkGroupParticipant(PlayerId(UUID.randomUUID()), "Host", ServerId("spawn"))
     val local = NetworkGroupParticipant(PlayerId(UUID.randomUUID()), "Local", ServerId("spawn"))
     val remote = NetworkGroupParticipant(PlayerId(UUID.randomUUID()), "Remote", ServerId("parkour"))
@@ -33,7 +38,7 @@ class CrossServerGroupBusTest : StringSpec({
             layout = MultiplayerLayout.TWO_TEAMS,
             kitPolicy = MultiplayerKitPolicy.SHARED,
             sharedKitId = KitId("classic"),
-            expiresAtEpochMillis = 1_800_000_000_000L,
+            expiresAtEpochMillis = nowEpochMillis + 30_000L,
             targetId = remote.playerId,
         )
 
@@ -69,7 +74,7 @@ class CrossServerGroupBusTest : StringSpec({
 
     "bus authenticates embedded origins and deduplicates group messages" {
         val redis = InMemoryRedis(ServerIdentity { "parkour" })
-        val bus = CrossServerGroupBus(redis, ServerId("parkour"))
+        val bus = CrossServerGroupBus(redis, ServerId("parkour"), clock = clock)
         val received = mutableListOf<CrossServerGroupMessage>()
         bus.subscribe(received::add)
         val payload = GroupMessageCodec().encode(offer)
@@ -85,7 +90,7 @@ class CrossServerGroupBusTest : StringSpec({
     "local Redis echo is ignored without a false rejection warning" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
         val logger = mockk<Logger>(relaxed = true)
-        val bus = CrossServerGroupBus(redis, ServerId("spawn"), logger)
+        val bus = CrossServerGroupBus(redis, ServerId("spawn"), logger, clock)
         val received = mutableListOf<CrossServerGroupMessage>()
         bus.subscribe(received::add)
 
@@ -93,6 +98,38 @@ class CrossServerGroupBusTest : StringSpec({
 
         received shouldContainExactly listOf(offer)
         verify(exactly = 0) { logger.warn("Rejected ArcDuels group message: {}", any<Any>()) }
+        bus.close()
+    }
+
+    "bus wire codec accepts the skew boundary and rejects one millisecond beyond it" {
+        val redis = InMemoryRedis(ServerIdentity { "parkour" })
+        val bus = CrossServerGroupBus(redis, ServerId("parkour"), clock = clock)
+        val received = mutableListOf<CrossServerGroupMessage>()
+        bus.subscribe(received::add)
+        val acceptedWindow =
+            CrossServerGroupMessage.MAX_FUTURE_TTL_MILLIS +
+                CrossServerGroupMessage.CLOCK_SKEW_ALLOWANCE_MILLIS
+        val boundary =
+            offer.copy(
+                messageId = "group:offer:deadline-boundary",
+                expiresAtEpochMillis = nowEpochMillis + acceptedWindow,
+            )
+        val overLimit =
+            boundary.copy(
+                messageId = "group:offer:deadline-over-limit",
+                expiresAtEpochMillis = boundary.expiresAtEpochMillis + 1L,
+            )
+        val rawCodec = GroupMessageCodec()
+
+        redis.simulateExternalMessage(CrossServerGroupBus.CHANNEL, rawCodec.encode(boundary), "spawn")
+        redis.simulateExternalMessage(CrossServerGroupBus.CHANNEL, rawCodec.encode(overLimit), "spawn")
+
+        received shouldContainExactly listOf(boundary)
+        val senderRedis = InMemoryRedis(ServerIdentity { "spawn" })
+        val senderBus = CrossServerGroupBus(senderRedis, ServerId("spawn"), clock = clock)
+        shouldThrow<IllegalArgumentException> { senderBus.publish(overLimit) }
+        senderRedis.getPublishedMessages().size shouldBe 0
+        senderBus.close()
         bus.close()
     }
 

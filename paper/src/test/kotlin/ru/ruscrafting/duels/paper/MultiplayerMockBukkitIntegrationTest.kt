@@ -18,6 +18,7 @@ import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.mockbukkit.mockbukkit.entity.PlayerMock
 import org.mockbukkit.mockbukkit.simulate.entity.LivingEntitySimulation
+import ru.arc.paper.network.BackendTransferResult
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -34,6 +35,7 @@ import ru.ruscrafting.duels.redis.GroupLobbyMessageType
 import ru.ruscrafting.duels.redis.CrossServerGroupMessage
 import ru.ruscrafting.duels.redis.NetworkGroupParticipant
 import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
+import java.time.Clock
 import java.util.Locale
 import java.util.concurrent.CompletableFuture
 
@@ -91,9 +93,9 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     match.roster.rules.kitPolicy shouldBe MultiplayerKitPolicy.PER_PLAYER
                     match.roster.participants.map { it.team } shouldContainExactly listOf(1, 2, 3, 1, 2, 3)
                     match.roster.participants.map { it.kitId.value } shouldContainExactly
-                        listOf("axe", "axe", "berserker", "archer", "archer", "archer")
+                        listOf("crossbow", "axe", "berserker", "archer", "archer", "archer")
 
-                    host.inventory.getItem(0)?.type shouldBe Material.DIAMOND_AXE
+                    host.inventory.getItem(0)?.type shouldBe Material.CROSSBOW
                     members[0].inventory.getItem(0)?.type shouldBe Material.DIAMOND_AXE
                     members[1].inventory.getItem(0)?.type shouldBe Material.NETHERITE_AXE
                     members[2].inventory.getItem(0)?.type shouldBe Material.BOW
@@ -153,7 +155,7 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     val gui = harness.registerGui(
                         targets = DuelTargetDirectory(harness.plugin, ServerId("group-test"), networkPlayers),
                         groupBus = bus,
-                        transfer = PlayerTransfer { _, _ -> },
+                        transfer = PlayerTransfer { _, _ -> BackendTransferResult.SENT },
                     )
                     val host = harness.players.first()
 
@@ -206,7 +208,10 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                         expiresAtEpochMillis = System.currentTimeMillis() + 30_000L,
                         targetId = target.playerId,
                     )
-                    val gui = harness.registerGui(groupBus = victimBus, transfer = PlayerTransfer { _, _ -> })
+                    val gui = harness.registerGui(
+                        groupBus = victimBus,
+                        transfer = PlayerTransfer { _, _ -> BackendTransferResult.SENT },
+                    )
 
                     attackerBus.publish(offer)
                     val payload = attackerRedis.getPublishedMessages().single { it.channel == CrossServerGroupBus.CHANNEL }.message
@@ -260,7 +265,7 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     val gui = harness.registerGui(
                         targets = DuelTargetDirectory(harness.plugin, localServer, networkPlayers),
                         groupBus = bus,
-                        transfer = PlayerTransfer { _, _ -> },
+                        transfer = PlayerTransfer { _, _ -> BackendTransferResult.SENT },
                         duelSessions = duelSessions,
                         playerDataReady = { player -> player.uniqueId != host.uniqueId || hostDataReady },
                     )
@@ -343,7 +348,10 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     )
                     val gui = harness.registerGui(
                         groupBus = victimBus,
-                        transfer = PlayerTransfer { player, destination -> transfers += player.uniqueId to destination },
+                        transfer = PlayerTransfer { player, destination ->
+                            transfers += player.uniqueId to destination
+                            BackendTransferResult.SENT
+                        },
                         duelSessions = duelSessions,
                     )
 
@@ -366,7 +374,10 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
         MockBukkitTestRuntime.open().use { paper ->
             failOnUnsupportedMockBukkitOperation {
                 multiplayerHarness(paper, listOf("GroupHost", "Alpha", "Bravo")).use { harness ->
-                    val gui = harness.registerGui()
+                    var clockMillis = 1_000_000L
+                    val clock = mockk<Clock>(relaxed = true)
+                    every { clock.millis() } answers { clockMillis }
+                    val gui = harness.registerGui(clock = clock)
                     val host = harness.players.first()
 
                     gui.open(host)
@@ -379,6 +390,7 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
 
                     paper.performTicks(899)
                     host.openInventory.topInventory.getItem(34)?.type shouldBe Material.CLOCK
+                    clockMillis += 45_000L
                     paper.performTicks(1)
                     val topAfterTimeout: Inventory? = host.openInventory.topInventory
                     topAfterTimeout shouldBe null

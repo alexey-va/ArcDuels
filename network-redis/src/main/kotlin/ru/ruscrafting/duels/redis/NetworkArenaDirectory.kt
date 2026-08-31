@@ -17,6 +17,7 @@ import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Duration
@@ -47,6 +48,7 @@ data class ArenaAdvertisement(
 data class ArenaNodeStatus(
     val server: ServerId,
     val arenas: List<ArenaAdvertisement>,
+    val kitFingerprints: Map<KitId, String>,
     val queuedPairs: Int,
 ) {
     init {
@@ -54,17 +56,38 @@ data class ArenaNodeStatus(
         require(arenas.map(ArenaAdvertisement::id).distinct().size == arenas.size) {
             "Advertised arena ids must be unique per server"
         }
+        require(kitFingerprints.size <= MAX_KITS) { "Too many advertised kits" }
+        kitFingerprints.values.forEach(::requireKitCatalogFingerprint)
         require(queuedPairs in 0..MAX_QUEUE) { "Invalid arena queue size" }
     }
 
-    fun matching(rules: DuelRules): List<ArenaAdvertisement> = arenas.filter { it.supports(rules) }
+    fun matching(
+        rules: DuelRules,
+        requiredKitFingerprint: String?,
+    ): List<ArenaAdvertisement> {
+        requireKitFingerprintForMode(rules.mode, requiredKitFingerprint)
+        if (
+            rules.mode == DuelMode.KIT &&
+            kitFingerprints[requireNotNull(rules.kitId)] != requiredKitFingerprint
+        ) {
+            return emptyList()
+        }
+        return arenas.filter { it.supports(rules) }
+    }
 
-    fun total(rules: DuelRules): Int = matching(rules).size
+    fun total(
+        rules: DuelRules,
+        requiredKitFingerprint: String?,
+    ): Int = matching(rules, requiredKitFingerprint).size
 
-    fun free(rules: DuelRules): Int = matching(rules).count(ArenaAdvertisement::available)
+    fun free(
+        rules: DuelRules,
+        requiredKitFingerprint: String?,
+    ): Int = matching(rules, requiredKitFingerprint).count(ArenaAdvertisement::available)
 
     companion object {
         private const val MAX_ARENAS = 1_000
+        private const val MAX_KITS = 1_000
         private const val MAX_QUEUE = 100_000
     }
 }
@@ -116,33 +139,52 @@ class NetworkArenaDirectory(
 
     fun select(
         rules: DuelRules,
+        requiredKitFingerprint: String?,
         selected: ArenaSelection? = null,
     ): ServerId? {
+        requireKitFingerprintForMode(rules.mode, requiredKitFingerprint)
         val active = activeNodes()
         if (selected != null) {
             return active.firstOrNull { status ->
                 status.server == selected.serverId &&
-                    status.arenas.any { it.id == selected.arenaId && it.supports(rules) }
+                    status.matching(rules, requiredKitFingerprint).any { it.id == selected.arenaId }
             }?.server
         }
         return active
             .asSequence()
-            .filter { it.total(rules) > 0 }
+            .filter { it.total(rules, requiredKitFingerprint) > 0 }
             .sortedWith(
-                compareByDescending<ArenaNodeStatus> { it.free(rules) > 0 }
+                compareByDescending<ArenaNodeStatus> { it.free(rules, requiredKitFingerprint) > 0 }
                     .thenBy(ArenaNodeStatus::queuedPairs)
-                    .thenBy { status -> status.total(rules) - status.free(rules) }
-                    .thenByDescending { it.free(rules) }
+                    .thenBy { status ->
+                        status.total(rules, requiredKitFingerprint) - status.free(rules, requiredKitFingerprint)
+                    }
+                    .thenByDescending { it.free(rules, requiredKitFingerprint) }
                     .thenBy { it.server.value },
             )
             .firstOrNull()
             ?.server
     }
 
-    fun choices(rules: DuelRules): List<ArenaChoice> =
-        activeNodes()
+    fun supports(
+        server: ServerId,
+        rules: DuelRules,
+        requiredKitFingerprint: String?,
+    ): Boolean {
+        requireKitFingerprintForMode(rules.mode, requiredKitFingerprint)
+        return activeNodes().any { status ->
+            status.server == server && status.total(rules, requiredKitFingerprint) > 0
+        }
+    }
+
+    fun choices(
+        rules: DuelRules,
+        requiredKitFingerprint: String?,
+    ): List<ArenaChoice> {
+        requireKitFingerprintForMode(rules.mode, requiredKitFingerprint)
+        return activeNodes()
             .flatMap { status ->
-                status.matching(rules).map { arena ->
+                status.matching(rules, requiredKitFingerprint).map { arena ->
                     ArenaChoice(
                         selection = ArenaSelection(status.server, arena.id),
                         displayName = arena.displayName,
@@ -157,6 +199,7 @@ class NetworkArenaDirectory(
                     .thenBy { it.selection.serverId.value }
                     .thenBy { it.selection.arenaId.value },
             )
+    }
 
     fun activeNodes(): List<ArenaNodeStatus> {
         return nodes.snapshot()
@@ -209,8 +252,8 @@ private class ArenaStatusCodec(
             type = WireStatus::class.java,
             rootContract =
                 JsonObjectContract(
-                    allowedFields = setOf("version", "server", "arenas", "queuedPairs"),
-                    requiredFields = setOf("version", "server", "arenas", "queuedPairs"),
+                    allowedFields = setOf("version", "server", "arenas", "kitFingerprints", "queuedPairs"),
+                    requiredFields = setOf("version", "server", "arenas", "kitFingerprints", "queuedPairs"),
                     fieldContracts =
                         mapOf(
                             "arenas" to
@@ -219,6 +262,14 @@ private class ArenaStatusCodec(
                                     elementContract =
                                         JsonObjectContract(
                                             allowedFields = setOf("id", "displayName", "loadouts", "objectives", "available"),
+                                        ),
+                                ),
+                            "kitFingerprints" to
+                                JsonArrayContract(
+                                    maxEntries = MAX_KITS_PER_NODE,
+                                    elementContract =
+                                        JsonObjectContract(
+                                            allowedFields = setOf("kitId", "fingerprint"),
                                         ),
                                 ),
                         ),
@@ -236,6 +287,11 @@ private class ArenaStatusCodec(
                 ServerId(wire.server)
                 requireNotNull(wire.arenas) { "Current arena status is missing arenas" }
                 require(wire.arenas.size <= MAX_ARENAS_PER_NODE) { "Too many wire arenas" }
+                val kitFingerprints = requireNotNull(wire.kitFingerprints) { "Current arena status is missing kit fingerprints" }
+                require(kitFingerprints.size <= MAX_KITS_PER_NODE) { "Too many wire kit fingerprints" }
+                require(kitFingerprints.map(WireKitFingerprint::kitId).distinct().size == kitFingerprints.size) {
+                    "Advertised kit ids must be unique per server"
+                }
             },
         )
 
@@ -255,12 +311,17 @@ private class ArenaStatusCodec(
         val version: Int = ARENA_WIRE_VERSION,
         val server: String,
         val arenas: List<WireArena>? = null,
+        val kitFingerprints: List<WireKitFingerprint>? = null,
         val queuedPairs: Int,
     ) {
         fun toStatus(): ArenaNodeStatus =
             ArenaNodeStatus(
                 server = ServerId(server),
                 arenas = requireNotNull(arenas).map(WireArena::toAdvertisement),
+                kitFingerprints =
+                    requireNotNull(kitFingerprints).associate { advertised ->
+                        KitId(advertised.kitId) to requireKitCatalogFingerprint(advertised.fingerprint)
+                    },
                 queuedPairs = queuedPairs,
             )
 
@@ -269,10 +330,19 @@ private class ArenaStatusCodec(
                 WireStatus(
                     server = status.server.value,
                     arenas = status.arenas.map(WireArena::from),
+                    kitFingerprints =
+                        status.kitFingerprints.entries
+                            .sortedBy { it.key.value }
+                            .map { WireKitFingerprint(it.key.value, it.value) },
                     queuedPairs = status.queuedPairs,
                 )
         }
     }
+
+    private data class WireKitFingerprint(
+        val kitId: String,
+        val fingerprint: String,
+    )
 
     private data class WireArena(
         val id: String,
@@ -303,6 +373,7 @@ private class ArenaStatusCodec(
     }
 }
 
-private const val ARENA_WIRE_VERSION = 4
+private const val ARENA_WIRE_VERSION = 5
 private const val MAX_ARENAS_PER_NODE = 1_000
+private const val MAX_KITS_PER_NODE = 1_000
 private const val MAX_ARENA_MESSAGE_CHARACTERS = 65_536

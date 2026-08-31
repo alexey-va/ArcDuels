@@ -1,5 +1,6 @@
 package ru.ruscrafting.duels.paper
 
+import com.google.gson.JsonParser
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
@@ -14,9 +15,11 @@ import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.inventory.Inventory
 import org.mockbukkit.mockbukkit.entity.PlayerMock
+import ru.arc.paper.network.BackendTransferResult
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
 import ru.arc.redis.InMemoryRedis
+import ru.arc.redis.RedisOperations
 import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
@@ -29,7 +32,9 @@ import ru.ruscrafting.duels.redis.GroupLobbyMessageType
 import ru.ruscrafting.duels.redis.GroupLobbyResponse
 import ru.ruscrafting.duels.redis.NetworkGroupParticipant
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.Locale
 import java.util.UUID
@@ -118,6 +123,40 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
                     gui.openInvitation(alpha, lobbyId)
                     alpha.openInventory.topInventory.getItem(34)?.type shouldBe Material.LIME_CONCRETE
                     alpha.assertOpenInventoryItemsNonItalic()
+                    gui.close()
+                }
+            }
+        }
+    }
+
+    "local invitation cannot be accepted after its wall-clock deadline when ticks stall" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                var settings = defaultRuntimeSettingsForInvitation().copy(multiplayerInvitationTimeout = Duration.ofSeconds(5))
+                val clock = MutableInvitationClock(Instant.parse("2026-08-31T12:00:00Z"))
+                multiplayerHarness(
+                    paper,
+                    listOf("DeadlineHost", "DeadlineAlpha", "DeadlineBravo"),
+                    runtimeSettings = { settings },
+                ).use { harness ->
+                    val gui = harness.registerGui(clock = clock)
+                    val host = harness.players[0].apply { setLocale(Locale.ENGLISH) }
+                    val alpha = harness.players[1].apply { setLocale(Locale.ENGLISH) }
+
+                    gui.open(host)
+                    host.click(10)
+                    host.click(11)
+                    host.click(34)
+                    val lobbyId = alpha.nextInvitationLobbyId()
+                    gui.openInvitation(alpha, lobbyId)
+                    alpha.openInventory.topInventory.getItem(34)?.type shouldBe Material.LIME_CONCRETE
+
+                    clock.advance(Duration.ofSeconds(6))
+                    alpha.click(34)
+
+                    harness.manager.activeCount() shouldBe 0
+                    gui.activeFlowCount() shouldBe 0
+                    alpha.nextPlainMessage().contains("expired") shouldBe true
                     gui.close()
                 }
             }
@@ -239,6 +278,128 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
         }
     }
 
+    "remote acceptance stays retryable when the response cannot be published" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
+                    RemoteFixture(harness).use { fixture ->
+                        val player = harness.players.single().apply { setLocale(Locale.ENGLISH) }
+                        val offer = fixture.offer(player)
+                        fixture.deliver(offer)
+                        requireNotNull(player.nextComponentMessage())
+                        fixture.gui.openInvitation(player, offer.lobbyId)
+                        fixture.failLocalPublishes()
+
+                        player.click(34)
+
+                        player.openInventory.topInventory.getItem(34)?.type shouldBe Material.LIME_CONCRETE
+                        fixture.responses(GroupLobbyResponse.ACCEPTED) shouldHaveSize 0
+                        fixture.gui.activeFlowCount() shouldBe 1
+                        player.nextPlainMessage().contains("unavailable") shouldBe true
+                    }
+                }
+            }
+        }
+    }
+
+    "unknown shared kit offer fails closed before invitation state is retained" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
+                    RemoteFixture(harness).use { fixture ->
+                        val player = harness.players.single().apply { setLocale(Locale.ENGLISH) }
+                        val offer = fixture.offer(player, sharedKitId = KitId("not-a-real-kit"))
+
+                        fixture.deliver(offer)
+
+                        fixture.responses(GroupLobbyResponse.FAILED).map { it.lobbyId } shouldContainExactly
+                            listOf(offer.lobbyId)
+                        player.nextPlainMessage().contains("no longer available") shouldBe true
+                        fixture.gui.activeFlowCount() shouldBe 0
+
+                        fixture.gui.openInvitation(player, offer.lobbyId)
+
+                        (player.openInventory.topInventory as Inventory?) shouldBe null
+                        player.nextPlainMessage().contains("no longer available") shouldBe true
+                        fixture.gui.activeFlowCount() shouldBe 0
+                    }
+                }
+            }
+        }
+    }
+
+    "over-limit remote offer is rejected before chat or invitation state" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
+                    val now = Instant.parse("2026-08-31T00:00:00Z")
+                    val clock = MutableInvitationClock(now)
+                    RemoteFixture(harness, clock = clock).use { fixture ->
+                        val player = harness.players.single()
+                        val acceptedWindow =
+                            CrossServerGroupMessage.MAX_FUTURE_TTL_MILLIS +
+                                CrossServerGroupMessage.CLOCK_SKEW_ALLOWANCE_MILLIS
+                        val offer = fixture.offer(player, expiresAt = now.toEpochMilli() + acceptedWindow + 1L)
+
+                        fixture.deliverWithWireExpiry(offer, offer.expiresAtEpochMillis)
+
+                        player.nextComponentMessage() shouldBe null
+                        fixture.gui.activeFlowCount() shouldBe 0
+                    }
+                }
+            }
+        }
+    }
+
+    "over-limit preparation cannot snapshot or transfer and does not poison a valid retry" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
+                    val duelSessions = mockk<DuelSessionManager>(relaxed = true)
+                    every { duelSessions.storeOriginSnapshot(any(), any(), true) } returns
+                        CompletableFuture.completedFuture(mockk())
+                    val transfers = mutableListOf<Pair<UUID, ServerId>>()
+                    val now = Instant.parse("2026-08-31T00:00:00Z")
+                    val clock = MutableInvitationClock(now)
+                    RemoteFixture(
+                        harness,
+                        duelSessions = duelSessions,
+                        transfer = PlayerTransfer { player, server ->
+                            transfers += player.uniqueId to server
+                            BackendTransferResult.SENT
+                        },
+                        clock = clock,
+                    ).use { fixture ->
+                        val player = harness.players.single()
+                        val offer = fixture.offer(player, expiresAt = now.plusSeconds(30).toEpochMilli())
+                        fixture.deliver(offer)
+                        requireNotNull(player.nextComponentMessage())
+                        fixture.gui.openInvitation(player, offer.lobbyId)
+                        player.click(34)
+                        val acceptedWindow =
+                            CrossServerGroupMessage.MAX_FUTURE_TTL_MILLIS +
+                                CrossServerGroupMessage.CLOCK_SKEW_ALLOWANCE_MILLIS
+                        val prepare = fixture.prepare(offer)
+                        val overLimit =
+                            prepare.copy(
+                                messageId = "${prepare.messageId}:over-limit",
+                                expiresAtEpochMillis = now.toEpochMilli() + acceptedWindow + 1L,
+                            )
+
+                        fixture.deliverWithWireExpiry(overLimit, overLimit.expiresAtEpochMillis)
+
+                        verify(exactly = 0) { duelSessions.storeOriginSnapshot(any(), player, true) }
+                        transfers shouldBe emptyList()
+                        fixture.deliver(prepare)
+
+                        verify(exactly = 1) { duelSessions.storeOriginSnapshot(any(), player, true) }
+                        transfers shouldContainExactly listOf(player.uniqueId to fixture.hostServer)
+                    }
+                }
+            }
+        }
+    }
+
     "remote chat decline is idempotent and removes the invitation without opening a GUI" {
         MockBukkitTestRuntime.open().use { paper ->
             failOnUnsupportedMockBukkitOperation {
@@ -267,7 +428,7 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
             failOnUnsupportedMockBukkitOperation {
                 multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
                     val now = Instant.parse("2026-08-31T00:00:00Z")
-                    val clock = Clock.fixed(now, ZoneOffset.UTC)
+                    val clock = MutableInvitationClock(now)
                     RemoteFixture(harness, clock = clock).use { fixture ->
                         val player = harness.players.single().apply { setLocale(Locale.ENGLISH) }
                         val first = fixture.offer(player, expiresAt = now.plusMillis(100).toEpochMilli())
@@ -275,6 +436,11 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
                         requireNotNull(player.nextComponentMessage())
                         fixture.gui.openInvitation(player, first.lobbyId)
 
+                        paper.performTicks(2)
+
+                        player.openInventory.topInventory.getItem(34)?.type shouldBe Material.LIME_CONCRETE
+                        fixture.responses(GroupLobbyResponse.FAILED) shouldHaveSize 0
+                        clock.advance(Duration.ofMillis(101))
                         paper.performTicks(2)
 
                         (player.openInventory.topInventory as Inventory?) shouldBe null
@@ -326,7 +492,10 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
                     RemoteFixture(
                         harness,
                         duelSessions = duelSessions,
-                        transfer = PlayerTransfer { player, server -> transfers += player.uniqueId to server },
+                        transfer = PlayerTransfer { player, server ->
+                            transfers += player.uniqueId to server
+                            BackendTransferResult.SENT
+                        },
                     ).use { fixture ->
                         val player = harness.players.single()
                         val offer = fixture.offer(player)
@@ -358,7 +527,10 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
                     RemoteFixture(
                         harness,
                         duelSessions = duelSessions,
-                        transfer = PlayerTransfer { player, server -> transfers += player.uniqueId to server },
+                        transfer = PlayerTransfer { player, server ->
+                            transfers += player.uniqueId to server
+                            BackendTransferResult.SENT
+                        },
                     ).use { fixture ->
                         val player = harness.players.single()
                         val offer = fixture.offer(player)
@@ -383,14 +555,78 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
         }
     }
 
+    listOf(
+        BackendTransferResult.PLAYER_OFFLINE,
+        BackendTransferResult.TRANSFER_CLOSED,
+        BackendTransferResult.SEND_FAILED,
+    ).forEach { transferResult ->
+        "group preparation fails closed when backend transfer returns $transferResult" {
+            MockBukkitTestRuntime.open().use { paper ->
+                failOnUnsupportedMockBukkitOperation {
+                    multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
+                        val duelSessions = mockk<DuelSessionManager>(relaxed = true)
+                        every { duelSessions.storeOriginSnapshot(any(), any(), true) } returns
+                            CompletableFuture.completedFuture(mockk())
+                        every { duelSessions.requestRecovery(any()) } returns true
+                        var transferCalls = 0
+                        RemoteFixture(
+                            harness,
+                            duelSessions = duelSessions,
+                            transfer = PlayerTransfer { _, _ ->
+                                transferCalls += 1
+                                transferResult
+                            },
+                        ).use { fixture ->
+                            val player = harness.players.single().apply { setLocale(Locale.ENGLISH) }
+                            val offer = fixture.offer(player)
+                            fixture.deliver(offer)
+                            requireNotNull(player.nextComponentMessage())
+                            fixture.gui.openInvitation(player, offer.lobbyId)
+                            player.click(34)
+
+                            val prepare = fixture.prepare(offer)
+                            fixture.deliver(prepare)
+                            paper.performTicks(2)
+
+                            transferCalls shouldBe 1
+                            fixture.observed.filter {
+                                it.type == GroupLobbyMessageType.READY && it.sourceServer == fixture.localServer
+                            } shouldHaveSize 1
+                            fixture.responses(GroupLobbyResponse.FAILED) shouldHaveSize 1
+                            fixture.gui.activeFlowCount() shouldBe 0
+                            verify(exactly = 1) { duelSessions.requestRecovery(player) }
+                            player.nextPlainMessage().contains("Everyone is ready") shouldBe true
+                            player.nextPlainMessage().contains("unavailable") shouldBe true
+
+                            fixture.deliver(prepare.copy(messageId = "${prepare.messageId}:retry"))
+
+                            transferCalls shouldBe 1
+                            verify(exactly = 1) { duelSessions.storeOriginSnapshot(any(), player, true) }
+                            verify(exactly = 1) { duelSessions.requestRecovery(player) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     "network cancellation during preparation recovers the participant and preserves a new inventory" {
         MockBukkitTestRuntime.open().use { paper ->
             failOnUnsupportedMockBukkitOperation {
                 multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
                     val duelSessions = mockk<DuelSessionManager>(relaxed = true)
-                    every { duelSessions.storeOriginSnapshot(any(), any(), true) } returns CompletableFuture.completedFuture(mockk())
-                    every { duelSessions.requestRecovery(any()) } returns false
-                    RemoteFixture(harness, duelSessions = duelSessions).use { fixture ->
+                    val snapshot = CompletableFuture<StoredPlayerSnapshot>()
+                    every { duelSessions.storeOriginSnapshot(any(), any(), true) } returns snapshot
+                    every { duelSessions.requestRecovery(any()) } returnsMany listOf(false, true)
+                    val transfers = mutableListOf<Pair<UUID, ServerId>>()
+                    RemoteFixture(
+                        harness,
+                        duelSessions = duelSessions,
+                        transfer = PlayerTransfer { player, server ->
+                            transfers += player.uniqueId to server
+                            BackendTransferResult.SENT
+                        },
+                    ).use { fixture ->
                         val player = harness.players.single()
                         val offer = fixture.offer(player)
                         fixture.deliver(offer)
@@ -407,6 +643,65 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
                         player.openInventory.topInventory shouldBe unrelated
                         verify(exactly = 1) { duelSessions.requestRecovery(player) }
                         verify(exactly = 1) { duelSessions.handleJoin(player) }
+
+                        snapshot.complete(mockk())
+                        paper.performTicks(2)
+
+                        fixture.observed.none {
+                            it.type == GroupLobbyMessageType.READY && it.sourceServer == fixture.localServer
+                        } shouldBe true
+                        transfers shouldBe emptyList()
+                        fixture.gui.activeFlowCount() shouldBe 0
+                        verify(exactly = 2) { duelSessions.requestRecovery(player) }
+                        verify(exactly = 1) { duelSessions.handleJoin(player) }
+                    }
+                }
+            }
+        }
+    }
+
+    "snapshot completion after the wall deadline recovers without ready or transfer" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("RemoteInvitee")).use { harness ->
+                    val duelSessions = mockk<DuelSessionManager>(relaxed = true)
+                    val snapshot = CompletableFuture<StoredPlayerSnapshot>()
+                    every { duelSessions.storeOriginSnapshot(any(), any(), true) } returns snapshot
+                    every { duelSessions.requestRecovery(any()) } returns true
+                    val transfers = mutableListOf<Pair<UUID, ServerId>>()
+                    val now = Instant.parse("2026-08-31T00:00:00Z")
+                    val clock = MutableInvitationClock(now)
+                    RemoteFixture(
+                        harness,
+                        duelSessions = duelSessions,
+                        transfer = PlayerTransfer { player, server ->
+                            transfers += player.uniqueId to server
+                            BackendTransferResult.SENT
+                        },
+                        clock = clock,
+                    ).use { fixture ->
+                        val player = harness.players.single()
+                        val offer = fixture.offer(player, expiresAt = now.plusSeconds(30).toEpochMilli())
+                        fixture.deliver(offer)
+                        requireNotNull(player.nextComponentMessage())
+                        fixture.gui.openInvitation(player, offer.lobbyId)
+                        player.click(34)
+                        fixture.deliver(fixture.prepare(offer))
+                        verify(exactly = 1) { duelSessions.storeOriginSnapshot(any(), player, true) }
+
+                        clock.advance(Duration.ofSeconds(31))
+                        snapshot.complete(mockk())
+                        paper.performTicks(2)
+
+                        fixture.responses(GroupLobbyResponse.FAILED).map { it.lobbyId } shouldContainExactly
+                            listOf(offer.lobbyId)
+                        fixture.observed.none {
+                            it.type == GroupLobbyMessageType.READY && it.sourceServer == fixture.localServer
+                        } shouldBe true
+                        transfers shouldBe emptyList()
+                        fixture.gui.activeFlowCount() shouldBe 0
+                        verify(exactly = 1) { duelSessions.requestRecovery(player) }
+                        verify(exactly = 0) { duelSessions.handleJoin(player) }
                     }
                 }
             }
@@ -414,21 +709,44 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
     }
 })
 
+private fun defaultRuntimeSettingsForInvitation(): ArcDuelsRuntimeSettings =
+    ArcDuelsRuntimeSettings.parse(org.bukkit.configuration.MemoryConfiguration()).settings
+
+private class MutableInvitationClock(
+    private var current: Instant,
+    private val zone: ZoneId = ZoneOffset.UTC,
+) : Clock() {
+    override fun getZone(): ZoneId = zone
+
+    override fun withZone(zone: ZoneId): Clock = MutableInvitationClock(current, zone)
+
+    override fun instant(): Instant = current
+
+    fun advance(duration: Duration) {
+        current = current.plus(duration)
+    }
+}
+
 private class RemoteFixture(
     private val harness: MultiplayerHarness,
     duelSessions: DuelSessionManager = mockk(relaxed = true),
-    transfer: PlayerTransfer = PlayerTransfer { _, _ -> },
-    clock: Clock = Clock.systemUTC(),
+    transfer: PlayerTransfer = PlayerTransfer { _, _ -> BackendTransferResult.SENT },
+    private val clock: Clock = Clock.systemUTC(),
 ) : AutoCloseable {
     val hostServer = ServerId("parkour")
     val localServer = ServerId("group-test")
     private val hostRedis = InMemoryRedis(ServerIdentity { hostServer.value })
-    private val localRedis = InMemoryRedis(ServerIdentity { localServer.value })
-    private val hostBus = CrossServerGroupBus(hostRedis, hostServer)
-    private val localBus = CrossServerGroupBus(localRedis, localServer)
+    private val localStorage = InMemoryRedis(ServerIdentity { localServer.value })
+    private val localRedis = ControllablePublishRedis(localStorage)
+    private val hostBus = CrossServerGroupBus(hostRedis, hostServer, clock = clock)
+    private val localBus = CrossServerGroupBus(localRedis, localServer, clock = clock)
     val observed = mutableListOf<CrossServerGroupMessage>()
     private val observation = localBus.subscribe(observed::add)
     val gui = harness.registerGui(groupBus = localBus, transfer = transfer, duelSessions = duelSessions, clock = clock)
+
+    fun failLocalPublishes() {
+        localRedis.failPublish = true
+    }
 
     fun offer(
         player: Player,
@@ -473,7 +791,20 @@ private class RemoteFixture(
     fun deliver(message: CrossServerGroupMessage) {
         hostBus.publish(message)
         val payload = hostRedis.getPublishedMessages().last { it.channel == CrossServerGroupBus.CHANNEL }.message
-        localRedis.simulateExternalMessage(CrossServerGroupBus.CHANNEL, payload, hostServer.value)
+        localStorage.simulateExternalMessage(CrossServerGroupBus.CHANNEL, payload, hostServer.value)
+        harness.paper.performTicks(2)
+    }
+
+    fun deliverWithWireExpiry(message: CrossServerGroupMessage, expiresAtEpochMillis: Long) {
+        val encodable = message.copy(expiresAtEpochMillis = clock.millis() + 30_000L)
+        hostBus.publish(encodable)
+        val payload =
+            JsonParser.parseString(
+                hostRedis.getPublishedMessages().last { it.channel == CrossServerGroupBus.CHANNEL }.message,
+            ).asJsonObject.apply {
+                addProperty("expiresAtEpochMillis", expiresAtEpochMillis)
+            }
+        localStorage.simulateExternalMessage(CrossServerGroupBus.CHANNEL, payload.toString(), hostServer.value)
         harness.paper.performTicks(2)
     }
 
@@ -487,6 +818,17 @@ private class RemoteFixture(
         observation.close()
         localBus.close()
         hostBus.close()
+    }
+}
+
+private class ControllablePublishRedis(
+    private val delegate: InMemoryRedis,
+) : RedisOperations by delegate {
+    var failPublish: Boolean = false
+
+    override fun publish(channel: String, message: String) {
+        check(!failPublish) { "planned publish failure" }
+        delegate.publish(channel, message)
     }
 }
 

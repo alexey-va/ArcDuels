@@ -60,9 +60,11 @@ class DuelSessionManager internal constructor(
     private val playerDataSaver: (Player) -> Unit = Player::saveData,
     private val syncProvider: PlayerDataSyncProvider = PlayerDataSyncProvider.NONE,
     private val celebrationDurationTicks: Long = 80L,
+    private val seriesRoundIntermissionTicks: Long = 30L,
     private val externalCombatTagClear: (Player, MatchId, String) -> Unit = { _, _, _ -> },
     private val shutdownRecoveryTimeoutMillis: Long = 5_000L,
     private val defaultPostMatchReturnPolicy: PostMatchReturnPolicy = PostMatchReturnPolicy.PROMPT,
+    private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
 ) {
     private val sessions = ConcurrentHashMap<MatchId, PaperSession>()
     private val sessionByPlayer = ConcurrentHashMap<UUID, MatchId>()
@@ -90,6 +92,7 @@ class DuelSessionManager internal constructor(
         require(recoveryApplyDelayTicks in 0L..1_200L) { "Player data settle delay must be between 0 and 1200 ticks" }
         require(teleportStabilizationTicks in 0L..20L) { "Arena teleport stabilization must be between 0 and 20 ticks" }
         require(celebrationDurationTicks in 0L..200L) { "Celebration duration must be between 0 and 200 ticks" }
+        require(seriesRoundIntermissionTicks in 0L..200L) { "Series round intermission must be between 0 and 200 ticks" }
         require(shutdownRecoveryTimeoutMillis in 100L..30_000L) { "Shutdown recovery timeout must be between 100 and 30000 ms" }
     }
 
@@ -100,6 +103,7 @@ class DuelSessionManager internal constructor(
 
     fun start(challenge: DuelChallenge): CompletableFuture<DuelMatch> {
         check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
+        val policy = sessionPolicy()
         val first = plugin.server.getPlayer(challenge.challenger.value)
             ?: return CompletableFuture.failedFuture(IllegalStateException("The first player left the server"))
         val second = plugin.server.getPlayer(challenge.target.value)
@@ -223,7 +227,7 @@ class DuelSessionManager internal constructor(
                                 result.completeExceptionally(IllegalStateException("A player left before the match started"))
                                 return@runSync
                             }
-                            runCatching { prepareNewSession(reservedMatch, requireNotNull(stored)) }
+                            runCatching { prepareNewSession(reservedMatch, requireNotNull(stored), policy = policy) }
                                 .onSuccess(result::complete)
                                 .onFailure { setupFailure ->
                                     requireNotNull(stored).values.forEach { saved ->
@@ -311,6 +315,7 @@ class DuelSessionManager internal constructor(
         recoveryMatchId: MatchId? = null,
     ): CompletableFuture<DuelMatch> {
         check(challenge.status == ChallengeStatus.ACCEPTED) { "Only an accepted challenge can start" }
+        val policy = sessionPolicy()
         val first = plugin.server.getPlayer(challenge.challenger.value)
             ?: return CompletableFuture.failedFuture(IllegalStateException("The first player left the arena server"))
         val second = plugin.server.getPlayer(challenge.target.value)
@@ -375,6 +380,7 @@ class DuelSessionManager internal constructor(
                             stored,
                             recoveryOwner = RecoveryOwner.ORIGIN_SERVERS,
                             arenaBaselines = arenaBaselines,
+                            policy = policy,
                         )
                     }.onSuccess {
                         stopExpectingNetworkMatch(challenge)
@@ -627,7 +633,7 @@ class DuelSessionManager internal constructor(
                 if (!player.isOnline || !recoveryTokens.remove(player.uniqueId, token)) return@Runnable
                 action()
             },
-            recoveryApplyDelayTicks,
+            runtimeSettings()?.playerDataSettleDelayTicks ?: recoveryApplyDelayTicks,
         )
     }
 
@@ -1035,7 +1041,8 @@ class DuelSessionManager internal constructor(
                 runCatching { coordinator.releaseCompleted(matchId) }
             }
         }
-        val retention = playerStates.awaitRetentions(Duration.ofMillis(shutdownRecoveryTimeoutMillis))
+        val shutdownTimeout = runtimeSettings()?.shutdownRecoveryTimeout ?: Duration.ofMillis(shutdownRecoveryTimeoutMillis)
+        val retention = playerStates.awaitRetentions(shutdownTimeout)
         DuelLog.info(
             "shutdown-recovery-drain",
             "local_snapshots_applied={} network_players_normalized={} retentions_observed={} acknowledged={} failed={} timed_out={}",
@@ -1068,6 +1075,7 @@ class DuelSessionManager internal constructor(
         snapshots: Map<UUID, StoredPlayerSnapshot>,
         recoveryOwner: RecoveryOwner = RecoveryOwner.ARENA_SERVER,
         arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
+        policy: SessionRuntimePolicy,
     ): DuelMatch {
         check(plugin.server.isPrimaryThread) { "Paper duel setup must run on the main thread" }
         DuelLog.info(
@@ -1086,6 +1094,7 @@ class DuelSessionManager internal constructor(
                 snapshots = snapshots,
                 recoveryOwner = recoveryOwner,
                 arenaBaselines = arenaBaselines,
+                policy = policy,
             )
         sessions[match.id] = session
         session.snapshots.keys.forEach { sessionByPlayer[it] = match.id }
@@ -1186,7 +1195,7 @@ class DuelSessionManager internal constructor(
         scheduleTeleportStabilization(match, session)
         first.sendActionBar(scoreLine(match, first))
         second.sendActionBar(scoreLine(match, second))
-        showCountdownDisplay(match, countdownSeconds)
+        showCountdownDisplay(match, session.policy.countdownSeconds)
         session.roundsPrepared++
     }
 
@@ -1230,7 +1239,7 @@ class DuelSessionManager internal constructor(
         countdownTasks.remove(matchId)?.cancel()
         val task =
             object : BukkitRunnable() {
-                var seconds = countdownSeconds
+                var seconds = sessions[matchId]?.policy?.countdownSeconds ?: countdownSeconds
 
                 override fun run() {
                     val match = coordinator.find(matchId)
@@ -1281,7 +1290,7 @@ class DuelSessionManager internal constructor(
                     countdownTasks.remove(matchId)
                     cancel()
                 }
-            }.runTaskTimer(plugin, teleportStabilizationTicks, 20L)
+            }.runTaskTimer(plugin, sessions[matchId]?.policy?.teleportStabilizationTicks ?: teleportStabilizationTicks, 20L)
         countdownTasks[matchId] = task
     }
 
@@ -1313,10 +1322,11 @@ class DuelSessionManager internal constructor(
         session: PaperSession,
     ) {
         teleportStabilizationTasks.remove(match.id)?.cancel()
-        if (teleportStabilizationTicks == 0L) return
+        val stabilizationTicks = session.policy.teleportStabilizationTicks
+        if (stabilizationTicks == 0L) return
         val task =
             object : BukkitRunnable() {
-                var ticksRemaining = teleportStabilizationTicks
+                var ticksRemaining = stabilizationTicks
 
                 override fun run() {
                     val current = coordinator.find(match.id)
@@ -1338,7 +1348,7 @@ class DuelSessionManager internal constructor(
                                 player,
                                 "player={} stabilization_tick={} from_world={} to_world={}",
                                 player.name,
-                                teleportStabilizationTicks - ticksRemaining,
+                                stabilizationTicks - ticksRemaining,
                                 currentLocation.world?.name,
                                 anchor.world?.name,
                             )
@@ -1439,7 +1449,8 @@ class DuelSessionManager internal constructor(
                 ),
             )
             bar.color(BossBar.Color.BLUE)
-            bar.progress(if (countdownSeconds == 0) 1f else (seconds.toFloat() / countdownSeconds).coerceIn(0f, 1f))
+            val totalSeconds = session.policy.countdownSeconds
+            bar.progress(if (totalSeconds == 0) 1f else (seconds.toFloat() / totalSeconds).coerceIn(0f, 1f))
         }
     }
 
@@ -1576,7 +1587,8 @@ class DuelSessionManager internal constructor(
         updated: DuelMatch?,
         failure: Throwable?,
     ) {
-        sessions[matchId]?.let(::restoreArenaBlocks)
+        val session = sessions[matchId]
+        session?.let(::restoreArenaBlocks)
         objectiveTasks.remove(matchId)?.cancel()
         matchDisplayTasks.remove(matchId)?.cancel()
         if (failure != null) {
@@ -1605,7 +1617,7 @@ class DuelSessionManager internal constructor(
                     prepareRound(current)
                     scheduleCountdown(current.id)
                 }
-            }, 30L)
+            }, session?.policy?.seriesRoundIntermissionTicks ?: seriesRoundIntermissionTicks)
         } else if (updated != null) {
             finish(updated)
         }
@@ -1643,7 +1655,7 @@ class DuelSessionManager internal constructor(
             match.score.first,
             match.score.second,
             match.endReason,
-            celebrationDurationTicks,
+            session.policy.celebrationDurationTicks,
         )
         clearExternalCombatTags(match, "match-complete")
         countdownTasks.remove(match.id)?.cancel()
@@ -1669,8 +1681,8 @@ class DuelSessionManager internal constructor(
             )
         }
         showFinaleDisplay(match, session, winnerId)
-        plugin.server.getPlayer(winnerId.value)?.let(::celebrate)
-        scheduleFinalization(match, session, celebrationDurationTicks)
+        plugin.server.getPlayer(winnerId.value)?.let { celebrate(it, session) }
+        scheduleFinalization(match, session, session.policy.celebrationDurationTicks)
     }
 
     private fun scheduleFinalization(match: DuelMatch, session: PaperSession, delayTicks: Long) {
@@ -1709,7 +1721,7 @@ class DuelSessionManager internal constructor(
                 return
             }
             val arena = arenas.get(match.arenaId)
-            if ((arena.postMatchAction?.asReturnPolicy() ?: defaultPostMatchReturnPolicy) == PostMatchReturnPolicy.PROMPT &&
+            if ((arena.postMatchAction?.asReturnPolicy() ?: session.policy.defaultPostMatchReturnPolicy) == PostMatchReturnPolicy.PROMPT &&
                 !moveLocalPlayersToLobby(match, session, arena)
             ) {
                 scheduleFinalization(match, session, 20L)
@@ -1766,8 +1778,23 @@ class DuelSessionManager internal constructor(
         plugin.server.scheduler.runTaskLater(plugin, Runnable { retryCompletion(matchId) }, 60L)
     }
 
-    private fun celebrate(player: Player) {
-        celebrationEffects.play(player)
+    private fun celebrate(
+        player: Player,
+        session: PaperSession,
+    ) {
+        celebrationEffects.play(player, session.policy.runtimeSettings)
+    }
+
+    private fun sessionPolicy(): SessionRuntimePolicy {
+        val settings = runtimeSettings()
+        return SessionRuntimePolicy(
+            countdownSeconds = settings?.countdownSeconds ?: countdownSeconds,
+            teleportStabilizationTicks = settings?.teleportStabilizationTicks ?: teleportStabilizationTicks,
+            celebrationDurationTicks = settings?.celebrationDurationTicks ?: celebrationDurationTicks,
+            seriesRoundIntermissionTicks = settings?.seriesRoundIntermissionTicks ?: seriesRoundIntermissionTicks,
+            defaultPostMatchReturnPolicy = settings?.defaultPostMatchReturnPolicy ?: defaultPostMatchReturnPolicy,
+            runtimeSettings = settings,
+        )
     }
 
     private fun moveNetworkPlayersToLobby(
@@ -2024,6 +2051,7 @@ class DuelSessionManager internal constructor(
         val snapshots: Map<UUID, StoredPlayerSnapshot>,
         val recoveryOwner: RecoveryOwner,
         val arenaBaselines: Map<UUID, PlayerSnapshot>,
+        val policy: SessionRuntimePolicy,
         val arenaAnchors: MutableMap<UUID, org.bukkit.Location> = ConcurrentHashMap(),
         val restoredPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val hillCapture: HillCaptureTracker = HillCaptureTracker(),
@@ -2044,6 +2072,15 @@ class DuelSessionManager internal constructor(
             return true
         }
     }
+
+    private data class SessionRuntimePolicy(
+        val countdownSeconds: Int,
+        val teleportStabilizationTicks: Long,
+        val celebrationDurationTicks: Long,
+        val seriesRoundIntermissionTicks: Long,
+        val defaultPostMatchReturnPolicy: PostMatchReturnPolicy,
+        val runtimeSettings: ArcDuelsRuntimeSettings?,
+    )
 
     private enum class RecoveryOwner {
         ARENA_SERVER,

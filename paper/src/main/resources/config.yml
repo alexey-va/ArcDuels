@@ -8,6 +8,19 @@ server-display-names:
   survival: '<#55ff8a>Выживание</#55ff8a>'
   parkour: '<#32d6ff>Паркур</#32d6ff>'
 challenge-timeout-seconds: 45
+
+multiplayer:
+  # Time available to accept a group invitation. Existing invitations retain
+  # the deadline captured when their lobby was created.
+  invitation-timeout-seconds: 45
+  # Victory screen duration before every participant is safely restored.
+  finish-delay-ticks: 60
+  # Defaults are captured when a new group-match draft is opened.
+  defaults:
+    layout: FREE_FOR_ALL
+    kit-policy: SHARED
+    kit: classic
+
 # Starts only after both players are safely prepared and teleported.
 countdown-seconds: 3
 # For a few ticks after an arena teleport, keep the server-authoritative spawn
@@ -31,6 +44,12 @@ post-match:
   # PROMPT leaves the player in the arena lobby and offers a safe return button.
   # AUTOMATIC keeps the legacy delayed proxy return.
   return-policy: PROMPT
+  # Maximum retry window for AUTOMATIC cross-server returns.
+  automatic-return-timeout-seconds: 120
+
+series:
+  # Pause between completed rounds in BO3/BO5/etc. Existing matches retain it.
+  round-intermission-ticks: 30
 
 shutdown:
   # Wait briefly for already-applied snapshots to be archived before closing
@@ -93,6 +112,11 @@ redis:
 # A production overlay may add custom-model-data only together with its matching
 # ItemsAdder base material.
 gui:
+  # Maximum time an administrator may keep the create-arena chat prompt open.
+  arena-name-input-timeout-seconds: 60
+  # Upper bounds for asynchronous menu queries. Changes affect the next render.
+  leaderboard-limit: 100
+  history-limit: 100
   items:
     background:
       material: GRAY_STAINED_GLASS_PANE

@@ -1,10 +1,10 @@
 package ru.ruscrafting.duels.paper
 
 import org.bukkit.plugin.java.JavaPlugin
-import org.bukkit.configuration.file.YamlConfiguration
 import ru.arc.core.PaperArcRuntime
 import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
+import ru.arc.paper.network.BackendTransferResult
 import ru.arc.paper.runtime.PaperPluginRuntime
 import ru.arc.paper.chunk.PaperChunkTicketRegistry
 import ru.arc.redis.RedisConnection
@@ -46,6 +46,8 @@ import java.util.concurrent.TimeUnit
 open class ArcDuelsPlugin : JavaPlugin() {
     private var pluginRuntime: PaperPluginRuntime? = null
     private var sessions: DuelSessionManager? = null
+    private var runtimeSettingsState: ArcDuelsRuntimeSettingsState? = null
+    private var configReloader: ArcDuelsConfigReloader? = null
 
     override fun onEnable() {
         PaperArcRuntime.installScheduling(this)
@@ -60,7 +62,9 @@ open class ArcDuelsPlugin : JavaPlugin() {
             bootstrap(lifecycle)
         }
             .onFailure { failure ->
-                logger.severe("ArcDuels could not start: ${failure.javaClass.simpleName}: ${failure.message}")
+                logger.severe(
+                    "ArcDuels could not start: ${failure.javaClass.simpleName}: ${configReloadFailureSummary(failure)}",
+                )
                 runCatching { lifecycle.health.markDown(); lifecycle.emitHealth() }
                 server.pluginManager.disablePlugin(this)
             }
@@ -72,19 +76,31 @@ open class ArcDuelsPlugin : JavaPlugin() {
             .onFailure { failure -> logger.severe("ArcDuels runtime shutdown failed: ${failure.javaClass.simpleName}: ${failure.message}") }
         pluginRuntime = null
         sessions = null
+        configReloader = null
+        runtimeSettingsState = null
     }
 
     private fun bootstrap(lifecycle: PaperPluginRuntime) {
+        val restartOnlyEnvironment = ArcDuelsRestartOnlySettingsValidator.validateReloadEnvironment(this, config)
+        val initialRuntime =
+            ArcDuelsRuntimeSettingsParser.parse(
+                config,
+                restartOnlyEnvironment.effectiveRedis,
+                restartOnlyEnvironment.playerDataProvider,
+            )
+        val liveRuntime = ArcDuelsRuntimeSettingsState(initialRuntime).also { runtimeSettingsState = it }
+        val settings = initialRuntime.settings
         val serverId = ServerId(config.getString("server-id", server.name)!!)
         DuelLog.info("plugin-bootstrap", "server={} version={}", serverId.value, pluginMeta.version)
         val locales = LocaleService.load(this)
         val serverNames = ServerDisplayNames.load(config, logger::warning)
         serverNames.display(serverId)
+        val guiItems = GuiItemCatalog.load(config)
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
         val persistence = createPersistence(lifecycle)
         val statistics = persistence.statistics
-        val network = createNetwork(serverId, statistics, locales, lifecycle)
+        val network = createNetwork(serverId, statistics, locales, lifecycle, restartOnlyEnvironment.effectiveRedis)
         val transfer = if (network.challenges != null || network.groups != null) ProxyPlayerTransfer(this) else null
         if (transfer != null) lifecycle.own(transfer)
         val battlePass = BattlePassIntegration(this)
@@ -110,11 +126,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 retention = Duration.ofDays(retentionDays),
             )
         val huskSyncEnabled = server.pluginManager.isPluginEnabled("HuskSync")
-        val syncProvider =
-            PlayerDataSyncProvider.resolve(
-                config.getString("player-data-sync.provider", "AUTO")!!,
-                huskSyncEnabled,
-            )
+        val syncProvider = restartOnlyEnvironment.playerDataProvider
         val playerDataSync = PlayerDataSyncGate(explicitSyncRequired = syncProvider.requiresReadinessEvent)
         server.pluginManager.registerEvents(playerDataSync, this)
         if (syncProvider == PlayerDataSyncProvider.HUSKSYNC) {
@@ -143,27 +155,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
         } else {
             logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
         }
-        val countdownSeconds = config.getInt("countdown-seconds", 3)
-        require(countdownSeconds in 0..10) { "countdown-seconds must be between 0 and 10" }
-        val teleportStabilizationTicks = config.getLong("teleport-stabilization-ticks", 3L)
-        require(teleportStabilizationTicks in 0L..20L) { "teleport-stabilization-ticks must be between 0 and 20" }
-        val celebrationDurationTicks = config.getLong("celebration.duration-ticks", 80L)
-        require(celebrationDurationTicks in 0L..200L) { "celebration.duration-ticks must be between 0 and 200" }
-        val shutdownRecoveryTimeoutMillis = config.getLong("shutdown.recovery-timeout-ms", 5_000L)
-        require(shutdownRecoveryTimeoutMillis in 100L..30_000L) {
-            "shutdown.recovery-timeout-ms must be between 100 and 30000"
-        }
         val cmiCombatTags = CmiCombatTagIntegration(this)
         lifecycle.own(cmiCombatTags)
-        val recoveryApplyDelayTicks =
-            if (config.contains("player-data-sync.settle-delay-ticks")) {
-                config.getLong("player-data-sync.settle-delay-ticks")
-            } else {
-                config.getLong("recovery.apply-delay-ticks", 40L)
-            }
-        require(recoveryApplyDelayTicks in 0L..1_200L) { "player-data-sync.settle-delay-ticks must be between 0 and 1200" }
-        val defaultPostMatchReturnPolicy =
-            PostMatchReturnPolicy.parse(config.getString("post-match.return-policy", "PROMPT")!!)
         val sessionManager =
             DuelSessionManager(
                 this,
@@ -172,17 +165,23 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 kits,
                 playerStates,
                 locales,
-                countdownSeconds,
-                teleportStabilizationTicks = teleportStabilizationTicks,
+                settings.countdownSeconds,
+                teleportStabilizationTicks = settings.teleportStabilizationTicks,
                 serverNames = serverNames,
-                remoteRecoveryTransfer = transfer?.let { gateway -> { player, destination -> gateway.connect(player, destination) } },
+                remoteRecoveryTransfer = transfer?.let { gateway ->
+                    { player, destination ->
+                        requireBackendTransferSent(gateway.connect(player, destination), destination)
+                    }
+                },
                 playerDataReady = playerDataSync::isReady,
-                recoveryApplyDelayTicks = recoveryApplyDelayTicks,
+                recoveryApplyDelayTicks = settings.playerDataSettleDelayTicks,
                 syncProvider = syncProvider,
-                celebrationDurationTicks = celebrationDurationTicks,
+                celebrationDurationTicks = settings.celebrationDurationTicks,
+                seriesRoundIntermissionTicks = settings.seriesRoundIntermissionTicks,
                 externalCombatTagClear = cmiCombatTags::clear,
-                shutdownRecoveryTimeoutMillis = shutdownRecoveryTimeoutMillis,
-                defaultPostMatchReturnPolicy = defaultPostMatchReturnPolicy,
+                shutdownRecoveryTimeoutMillis = settings.shutdownRecoveryTimeout.toMillis(),
+                defaultPostMatchReturnPolicy = settings.defaultPostMatchReturnPolicy,
+                runtimeSettings = { liveRuntime.snapshot().settings },
             )
         sessions = sessionManager
         lifecycle.own(AutoCloseable { sessionManager.shutdown() })
@@ -197,16 +196,19 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 locales = locales,
                 tasks = lifecycle.tasks,
                 chunkTickets = multiplayerChunkTickets,
-                countdownSeconds = countdownSeconds,
+                countdownSeconds = settings.countdownSeconds,
+                runtimeSettings = { liveRuntime.snapshot().settings },
                 externalCombatTagClear = cmiCombatTags::clear,
-                networkReturn = { player, destination -> transfer?.connect(player, destination) },
+                networkReturn = { player, destination ->
+                    requireBackendTransferSent(transfer?.connect(player, destination), destination)
+                },
             )
         sessionManager.attachExternalEngagement(multiplayerSessions::isEngaged)
         lifecycle.own(multiplayerSessions)
         val challenges =
             ChallengeRegistry(
                 Clock.systemUTC(),
-                Duration.ofSeconds(config.getLong("challenge-timeout-seconds", 45L).coerceIn(5L, 600L)),
+                settings.challengeTimeout,
             )
         val targets = DuelTargetDirectory(this, serverId, network.players)
         val controller =
@@ -223,14 +225,19 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 arenaDirectory = network.arenas,
                 transfer = transfer,
                 playerDataReady = playerDataSync::isReady,
-                transferTimeout = Duration.ofSeconds(config.getLong("redis.transfer-timeout-seconds", 30L).coerceIn(10L, 120L)),
-                returnPolicy = defaultPostMatchReturnPolicy,
+                transferTimeout = settings.transferTimeout,
+                returnPolicy = settings.defaultPostMatchReturnPolicy,
+                automaticReturnTimeout = settings.automaticReturnTimeout,
                 arenaReturnPolicy = { arenaId -> arenas.get(arenaId).postMatchAction?.asReturnPolicy() },
-                rematchWindow = Duration.ofSeconds(config.getLong("rematch-window-seconds", 180L).coerceIn(30L, 900L)),
-                arenaChoices = { rules -> network.arenas?.choices(rules) ?: arenas.choices(serverId, rules) },
+                rematchWindow = settings.rematchWindow,
+                kitAvailable = kits::contains,
+                kitFingerprint = kits::fingerprint,
+                arenaChoices = { rules ->
+                    network.arenas?.choices(rules, rules.kitId?.let(kits::fingerprint)) ?: arenas.choices(serverId, rules)
+                },
+                runtimeSettings = { liveRuntime.snapshot().settings },
             )
         lifecycle.own(controller)
-        val admin = DuelAdminCommand(this, arenas, sessionManager, locales, serverNames, controller::hasReturnOffer)
         lateinit var gui: DuelGuiService
         val multiplayerGui =
             MultiplayerGuiService(
@@ -246,10 +253,57 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 groupBus = network.groups,
                 transfer = transfer,
                 playerDataReady = playerDataSync::isReady,
+                runtimeSettings = { liveRuntime.snapshot().settings },
+                guiItems = guiItems,
             ) { player ->
                 gui.openMain(player)
             }
         lifecycle.own(multiplayerGui)
+        var publishArenaStatus: () -> Unit = {}
+        val reloader =
+            ArcDuelsConfigReloader(
+                plugin = this,
+                runtime = liveRuntime,
+                arenas = arenas,
+                kits = kits,
+                locales = locales,
+                serverNames = serverNames,
+                guiItems = guiItems,
+                challenges = challenges,
+                afterCatalogReplacement = { publishArenaStatus() },
+                activity = {
+                    ArcDuelsReloadActivity(
+                        reservedArenas = arenas.reservedCount(),
+                        queuedMatches = arenas.queueSize(),
+                        pendingChallenges = challenges.pendingCount,
+                        multiplayerSessions = multiplayerSessions.activeCount(),
+                        multiplayerFlows = multiplayerGui.activeFlowCount(),
+                        duelGuiFlows = gui.activeConfigurationFlowCount(),
+                        acceptedMatches = controller.activeAcceptedMatchCount(),
+                    )
+                },
+            ).also { configReloader = it }
+        lifecycle.tasks.runTimer(CONFIG_DEFERRED_APPLY_TICKS, CONFIG_DEFERRED_APPLY_TICKS) {
+            reloader.applyDeferredIfIdle()
+        }
+        val admin =
+            DuelAdminCommand(
+                this,
+                arenas,
+                sessionManager,
+                locales,
+                serverNames,
+                controller::hasReturnOffer,
+                reloadAction = reloader::reload,
+                configGeneration = { liveRuntime.snapshot().generation },
+                startupServerId = serverId,
+                configurationBusy = {
+                    challenges.pendingCount > 0 ||
+                        multiplayerSessions.activeCount() > 0 ||
+                        multiplayerGui.activeFlowCount() > 0 ||
+                        controller.activeAcceptedMatchCount() > 0
+                },
+            )
         gui =
             DuelGuiService(
                 this,
@@ -264,9 +318,12 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 controller::showStatistics,
                 serverNames,
                 arenaChoices = { rules ->
-                    network.arenas?.choices(rules) ?: arenas.choices(serverId, rules)
+                    network.arenas?.choices(rules, rules.kitId?.let(kits::fingerprint)) ?: arenas.choices(serverId, rules)
                 },
                 multiplayerAction = multiplayerGui::open,
+                guiItems = guiItems,
+                runtimeSettings = { liveRuntime.snapshot().settings },
+                startupServerId = serverId,
             )
         val command = DuelCommand(controller, gui, admin, targets, locales, multiplayerGui)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
@@ -275,14 +332,13 @@ open class ArcDuelsPlugin : JavaPlugin() {
         server.pluginManager.registerEvents(gui, this)
         server.pluginManager.registerEvents(multiplayerGui, this)
         server.pluginManager.registerEvents(MultiplayerGameplayListener(multiplayerSessions, locales), this)
-        val boundaryWarningDistance = config.getDouble("boundary-warning-distance", 12.0)
-        require(boundaryWarningDistance in 1.0..16.0) { "boundary-warning-distance must be between 1 and 16" }
         server.pluginManager.registerEvents(
             DuelGameplayListener(
                 sessionManager,
                 locales,
                 controller = controller,
-                boundaryWarningDistance = boundaryWarningDistance,
+                boundaryWarningDistance = settings.boundaryWarningDistance,
+                runtimeSettings = { liveRuntime.snapshot().settings },
             ),
             this,
         )
@@ -297,17 +353,18 @@ open class ArcDuelsPlugin : JavaPlugin() {
         server.onlinePlayers.forEach(identities::remember)
         server.onlinePlayers.forEach(sessionManager::handleJoin)
         network.arenas?.let { directory ->
-            val publishArenaStatus = Runnable {
+            publishArenaStatus = {
                 directory.publish(
                     ArenaNodeStatus(
                         server = serverId,
                         arenas = arenas.advertisements(syncProvider.sharesInventoryBetweenServers),
+                        kitFingerprints = kits.fingerprints(),
                         queuedPairs = arenas.queueSize(),
                     ),
                 )
             }
-            publishArenaStatus.run()
-            lifecycle.tasks.runTimer(ARENA_HEARTBEAT_TICKS, ARENA_HEARTBEAT_TICKS, publishArenaStatus::run)
+            publishArenaStatus()
+            lifecycle.tasks.runTimer(ARENA_HEARTBEAT_TICKS, ARENA_HEARTBEAT_TICKS, publishArenaStatus)
         }
         lifecycle.registerHealth("runtime") {
             val mysqlReady = persistence.durable
@@ -393,9 +450,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
         statistics: StatisticsRepository,
         locales: LocaleService,
         lifecycle: PaperPluginRuntime,
+        effectiveRedis: ArcDuelsEffectiveRedisSettings?,
     ): NetworkRuntime {
         if (!config.getBoolean("redis.enabled", false)) return NetworkRuntime(NoOpDuelEventPublisher, redisReady = true)
-        val redis = redisSettings()
+        val redis = requireNotNull(effectiveRedis) { "Redis is enabled but its effective connection was not prepared" }
         val manager =
             RedisManager(
                 RedisConnection(
@@ -417,10 +475,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
             )
         val arenas = NetworkArenaDirectory(manager, serverId)
         val playerComponents = DuelPlayerComponents(statistics, locales)
-        if (config.getBoolean("redis.broadcast-wins", true)) {
-            bus.subscribe { event ->
-                if (!isEnabled) return@subscribe
-                if (event is MatchCompletedEvent) {
+        bus.subscribe { event ->
+            if (!currentRuntimeSettings().broadcastWins) return@subscribe
+            if (!isEnabled) return@subscribe
+            if (event is MatchCompletedEvent) {
                     val names = statistics.findPlayerName(event.winner).thenCombine(statistics.findPlayerName(event.loser), ::Pair)
                     val playerStats = statistics.find(event.winner).thenCombine(statistics.find(event.loser), ::Pair)
                     names.thenCombine(playerStats) { resolvedNames, resolvedStats -> resolvedNames to resolvedStats }
@@ -460,7 +518,6 @@ open class ArcDuelsPlugin : JavaPlugin() {
                                 }
                             })
                         }
-                }
             }
         }
         try {
@@ -488,32 +545,16 @@ open class ArcDuelsPlugin : JavaPlugin() {
         return NetworkRuntime(bus, players, arenas, challengeBus, groupBus, redisReady = true)
     }
 
-    private fun redisSettings(): RedisSettings {
-        val configured =
-            RedisSettings(
-                host = config.getString("redis.host", "127.0.0.1")!!,
-                port = config.getInt("redis.port", 6379),
-                username = config.getString("redis.username")?.takeIf(String::isNotBlank),
-                password = config.getString("redis.password")?.takeIf(String::isNotBlank),
-            )
-        if (!config.getBoolean("redis.import-arc-credentials", false)) return configured
-        val arcFolder = dataFolder.parentFile.resolve("ARC")
-        val source =
-            listOf(arcFolder.resolve("modules/redis.yml"), arcFolder.resolve("config.yml"))
-                .firstOrNull(java.io.File::isFile)
-                ?: error("redis.import-arc-credentials is enabled but ARC Redis configuration was not found")
-        val imported = YamlConfiguration.loadConfiguration(source)
-        val prefix = if (imported.isConfigurationSection("redis")) "redis." else ""
-        val host = imported.getString("${prefix}host") ?: imported.getString("${prefix}ip") ?: configured.host
-        val port = imported.getInt("${prefix}port", configured.port)
-        require(host.isNotBlank() && port in 1..65_535) { "Imported ARC Redis endpoint is invalid" }
-        return RedisSettings(
-            host = host,
-            port = port,
-            username = imported.getString("${prefix}username")?.takeIf(String::isNotBlank) ?: configured.username,
-            password = imported.getString("${prefix}password")?.takeIf(String::isNotBlank) ?: configured.password,
-        )
-    }
+    internal fun currentRuntimeSettings(): ArcDuelsRuntimeSettings =
+        requireNotNull(runtimeSettingsState) { "ArcDuels runtime settings are unavailable" }.snapshot().settings
+
+    internal fun currentConfigGeneration(): Long =
+        requireNotNull(runtimeSettingsState) { "ArcDuels runtime settings are unavailable" }.snapshot().generation
+
+    internal fun reloadConfiguration(): Result<ArcDuelsReloadReport> =
+        requireNotNull(configReloader) { "ArcDuels configuration reloader is unavailable" }.reload()
+
+    internal fun hasDeferredConfigurationCatalogs(): Boolean = configReloader?.hasDeferredCatalogs() == true
 
     private data class Persistence(
         val statistics: StatisticsRepository,
@@ -533,13 +574,6 @@ open class ArcDuelsPlugin : JavaPlugin() {
     ) {
         fun activeLeaseCount(): Int = (players?.activeLeaseCount() ?: 0) + (arenas?.activeLeaseCount() ?: 0)
     }
-
-    private data class RedisSettings(
-        val host: String,
-        val port: Int,
-        val username: String?,
-        val password: String?,
-    )
 
     private object UnavailablePlayerStateEscrowRepository : PlayerStateEscrowRepository {
         private fun <T> unavailable(): CompletableFuture<T> =
@@ -575,6 +609,18 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private companion object {
         const val ARENA_HEARTBEAT_TICKS = 40L
         const val HEALTH_REPORT_TICKS = 1_200L
+        const val CONFIG_DEFERRED_APPLY_TICKS = 20L
+    }
+}
+
+internal fun requireBackendTransferSent(
+    result: BackendTransferResult?,
+    destination: ServerId,
+) {
+    if (!isSuccessfulBackendTransfer(result)) {
+        throw IllegalStateException(
+            "Backend transfer failed: destination=${destination.value} result=${result?.name ?: "UNAVAILABLE"}",
+        )
     }
 }
 

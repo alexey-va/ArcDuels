@@ -54,6 +54,9 @@ internal data class MultiplayerHarness(
     val audience: RecordingPaperAudienceEffects,
     val tasks: LifecycleTaskScope,
     val tickets: PaperChunkTicketRegistry,
+    val arenas: PaperArenaCatalog,
+    val playerStates: DurablePlayerStateService,
+    val runtimeSettings: () -> ArcDuelsRuntimeSettings?,
 ) : AutoCloseable {
     override fun close() {
         manager.close()
@@ -66,11 +69,19 @@ internal fun multiplayerHarness(
     paper: MockBukkitTestRuntime,
     playerNames: List<String> = List(4) { "GroupPlayer$it" },
     countdownSeconds: Int = 0,
+    escrowRepository: PlayerStateEscrowRepository = InMemoryEscrowRepository(),
+    teleports: ControlledTeleports = ControlledTeleports(),
+    results: ControlledMultiplayerResults = ControlledMultiplayerResults(),
+    chunkTickets: PaperChunkTicketBackend = AlwaysAvailableChunkTickets,
+    playerData: PaperPlayerDataPersistence = PaperPlayerDataPersistence { },
+    networkReturn: (Player, ServerId) -> Unit = { _, _ -> },
+    enableArena: Boolean = true,
+    runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
 ): MultiplayerHarness {
     val plugin = paper.loadPlugin<ArcDuelsPlugin>()
     HandlerList.unregisterAll(plugin)
     val world = paper.server.getWorld("world") ?: paper.server.addSimpleWorld("world")
-    plugin.config.set("arenas.example.enabled", true)
+    plugin.config.set("arenas.example.enabled", enableArena)
     plugin.config.set("arenas.example.allowed-loadouts", listOf("KIT"))
     plugin.config.set("arenas.example.allowed-objectives", listOf("ELIMINATION"))
     val players: List<PlayerMock> = playerNames.mapIndexed { index, name ->
@@ -80,16 +91,15 @@ internal fun multiplayerHarness(
         }
     }
     val tasks = LifecycleTaskScope()
-    val tickets = PaperChunkTicketRegistry(AlwaysAvailableChunkTickets)
-    val teleports = ControlledTeleports()
-    val results = ControlledMultiplayerResults()
+    val tickets = PaperChunkTicketRegistry(chunkTickets)
     val audience = RecordingPaperAudienceEffects()
     val kits = KitRegistry.load(plugin)
     val locales = LocaleService.load(plugin)
-    val playerStates = DurablePlayerStateService(plugin, ServerId("group-test"), InMemoryEscrowRepository())
+    val playerStates = DurablePlayerStateService(plugin, ServerId("group-test"), escrowRepository)
+    val arenas = PaperArenaCatalog.load(plugin)
     val manager = MultiplayerSessionManager(
         serverId = ServerId("group-test"),
-        arenas = PaperArenaCatalog.load(plugin),
+        arenas = arenas,
         kits = kits,
         playerStates = playerStates,
         results = results,
@@ -98,10 +108,27 @@ internal fun multiplayerHarness(
         chunkTickets = tickets,
         audience = audience,
         teleports = teleports,
-        playerData = PaperPlayerDataPersistence { },
+        playerData = playerData,
+        networkReturn = networkReturn,
         countdownSeconds = countdownSeconds,
+        runtimeSettings = runtimeSettings,
     )
-    return MultiplayerHarness(paper, plugin, manager, players, kits, locales, teleports, results, audience, tasks, tickets)
+    return MultiplayerHarness(
+        paper,
+        plugin,
+        manager,
+        players,
+        kits,
+        locales,
+        teleports,
+        results,
+        audience,
+        tasks,
+        tickets,
+        arenas,
+        playerStates,
+        runtimeSettings,
+    )
 }
 
 internal fun ffaRoster(players: List<Player>): MultiplayerRoster =
@@ -141,6 +168,7 @@ internal fun MultiplayerHarness.registerGui(
         transfer = transfer,
         playerDataReady = playerDataReady,
         clock = clock,
+        runtimeSettings = runtimeSettings,
         backAction = backAction,
     ).also { plugin.server.pluginManager.registerEvents(it, plugin) }
 
@@ -175,7 +203,7 @@ internal fun MultiplayerHarness.startAndArrive(roster: MultiplayerRoster) {
     paper.performTicks(4)
 }
 
-private object AlwaysAvailableChunkTickets : PaperChunkTicketBackend {
+internal object AlwaysAvailableChunkTickets : PaperChunkTicketBackend {
     override fun add(key: PaperChunkKey): PaperChunkTicketAddResult = PaperChunkTicketAddResult.ADDED
     override fun remove(key: PaperChunkKey): Boolean = true
 }
@@ -190,6 +218,8 @@ internal class ControlledTeleports : PaperTeleportExecutor {
 
     private val pending = mutableListOf<Pending>()
 
+    val pendingCount: Int get() = pending.size
+
     override fun teleportAsync(
         entity: Entity,
         destination: Location,
@@ -198,28 +228,38 @@ internal class ControlledTeleports : PaperTeleportExecutor {
     ): CompletableFuture<Boolean> =
         CompletableFuture<Boolean>().also { pending += Pending(entity, destination.clone(), cause, it) }
 
-    fun completeAll() {
+    fun completeAll(arrived: Boolean = true) {
         val requests = pending.toList()
         pending.clear()
         requests.forEach { request ->
-            request.completion.complete(request.entity.teleport(request.destination, request.cause))
+            request.completion.complete(arrived && request.entity.teleport(request.destination, request.cause))
         }
     }
 }
 
-internal class ControlledMultiplayerResults : MultiplayerMatchRepository {
+internal class ControlledMultiplayerResults(
+    var failuresBeforeSuccess: Int = 0,
+) : MultiplayerMatchRepository {
     val writes = mutableListOf<MultiplayerMatchOutcome>()
     val completion = CompletableFuture<Boolean>()
 
     override fun record(outcome: MultiplayerMatchOutcome): CompletableFuture<Boolean> {
         writes += outcome
+        if (failuresBeforeSuccess > 0) {
+            failuresBeforeSuccess--
+            return CompletableFuture.failedFuture(IllegalStateException("planned result failure"))
+        }
         return completion
     }
 }
 
-private class InMemoryEscrowRepository : PlayerStateEscrowRepository {
+internal class InMemoryEscrowRepository(
+    var retainFailuresBeforeSuccess: Int = 0,
+) : PlayerStateEscrowRepository {
     private val pending = linkedMapOf<PlayerId, PlayerStateEscrow>()
     private val retained = linkedMapOf<PlayerId, PlayerStateEscrow>()
+    var retainCalls: Int = 0
+        private set
 
     override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> = saveAll(listOf(snapshot))
 
@@ -246,6 +286,11 @@ private class InMemoryEscrowRepository : PlayerStateEscrowRepository {
         restoredAt: Instant,
         purgeAfter: Instant,
     ): CompletableFuture<Boolean> = synchronized(this) {
+        retainCalls++
+        if (retainFailuresBeforeSuccess > 0) {
+            retainFailuresBeforeSuccess--
+            return@synchronized CompletableFuture.failedFuture(IllegalStateException("planned retain failure"))
+        }
         val current = pending[snapshot.playerId]
         if (current != null && current.sameContent(snapshot)) {
             pending.remove(snapshot.playerId)
@@ -257,4 +302,8 @@ private class InMemoryEscrowRepository : PlayerStateEscrowRepository {
     }
 
     override fun purgeRetained(cutoff: Instant): CompletableFuture<Int> = CompletableFuture.completedFuture(0)
+
+    fun pendingCount(): Int = synchronized(this) { pending.size }
+
+    fun retainedCount(): Int = synchronized(this) { retained.size }
 }

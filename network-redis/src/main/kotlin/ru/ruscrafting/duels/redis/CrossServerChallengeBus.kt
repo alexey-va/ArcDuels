@@ -24,6 +24,7 @@ data class CrossServerChallengeMessage(
     val sourceServer: ServerId,
     val type: ChallengeMessageType,
     val challenge: DuelChallenge,
+    val kitFingerprint: String?,
     val challengerName: String,
     val targetName: String,
     val challengerServer: ServerId,
@@ -36,6 +37,7 @@ data class CrossServerChallengeMessage(
     init {
         require(messageId.matches(Regex("[A-Za-z0-9:._-]{1,160}"))) { "Unsafe challenge message id" }
         require(isSafeNetworkPlayerName(challengerName) && isSafeNetworkPlayerName(targetName)) { "Unsafe challenge player name" }
+        requireKitFingerprintForMode(challenge.rules.mode, kitFingerprint)
         when (type) {
             ChallengeMessageType.OFFER -> {
                 require(sourceServer == challengerCurrentServer) { "A challenge offer must come from the current challenger server" }

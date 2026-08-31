@@ -14,8 +14,10 @@ import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.duels.domain.DuelChallenge
+import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.PlayerId
@@ -533,6 +535,109 @@ class DurablePlayerStateServiceTest : StringSpec({
         player.health = 17.9999995
 
         snapshot.nonInventoryStateMismatches(player) shouldNotContain "health"
+    }
+
+    "a 1v1 start pins its runtime policy before the durable snapshot commit finishes" {
+        val repository = GatedEscrowRepository()
+        val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
+        val first = server.addPlayer("PinnedFirst")
+        val second = server.addPlayer("PinnedSecond")
+        plugin.config.set("arenas.example.enabled", true)
+        val arenas = PaperArenaCatalog.load(plugin)
+        var settings =
+            ArcDuelsRuntimeSettings.parse(org.bukkit.configuration.MemoryConfiguration()).settings.copy(
+                countdownSeconds = 2,
+                teleportStabilizationTicks = 0L,
+            )
+        val manager =
+            DuelSessionManager(
+                plugin,
+                MatchCoordinator(ServerId("duels-1"), arenas, InMemoryStatisticsRepository()),
+                arenas,
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 2,
+                teleportStabilizationTicks = 0L,
+                playerDataSaver = {},
+                runtimeSettings = { settings },
+            )
+        val now = Instant.parse("2026-08-31T12:00:00Z")
+        val challenge =
+            DuelChallenge.create(
+                PlayerId(first.uniqueId),
+                PlayerId(second.uniqueId),
+                DuelRules(DuelMode.KIT, ru.ruscrafting.duels.domain.KitId("classic")),
+                now,
+                Duration.ofSeconds(30),
+            ).resolve(ChallengeStatus.ACCEPTED, now.plusSeconds(1))
+
+        try {
+            val started = manager.start(challenge)
+            settings = settings.copy(countdownSeconds = 0)
+            repository.commit.complete(Unit)
+            paper.performTicks(5)
+
+            started.isDone shouldBe true
+            requireNotNull(manager.matchFor(first)).state shouldBe ru.ruscrafting.duels.domain.MatchState.COUNTDOWN
+        } finally {
+            manager.shutdown()
+            plugin.config.set("arenas.example.enabled", false)
+        }
+    }
+
+    "a best of series keeps the intermission captured before durable preparation" {
+        val repository = GatedEscrowRepository()
+        val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
+        val first = server.addPlayer("SeriesFirst")
+        val second = server.addPlayer("SeriesSecond")
+        plugin.config.set("arenas.example.enabled", true)
+        val arenas = PaperArenaCatalog.load(plugin)
+        var settings =
+            ArcDuelsRuntimeSettings.parse(org.bukkit.configuration.MemoryConfiguration()).settings.copy(
+                countdownSeconds = 0,
+                teleportStabilizationTicks = 0L,
+                seriesRoundIntermissionTicks = 40L,
+            )
+        val manager =
+            DuelSessionManager(
+                plugin,
+                MatchCoordinator(ServerId("duels-1"), arenas, InMemoryStatisticsRepository()),
+                arenas,
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                teleportStabilizationTicks = 0L,
+                playerDataSaver = {},
+                runtimeSettings = { settings },
+            )
+        val now = Instant.parse("2026-08-31T12:10:00Z")
+        val challenge =
+            DuelChallenge.create(
+                PlayerId(first.uniqueId),
+                PlayerId(second.uniqueId),
+                DuelRules(DuelMode.KIT, ru.ruscrafting.duels.domain.KitId("classic"), bestOf = 3),
+                now,
+                Duration.ofSeconds(30),
+            ).resolve(ChallengeStatus.ACCEPTED, now.plusSeconds(1))
+
+        try {
+            manager.start(challenge)
+            settings = settings.copy(seriesRoundIntermissionTicks = 0L)
+            repository.commit.complete(Unit)
+            paper.performTicks(5)
+            requireNotNull(manager.matchFor(first)).state shouldBe ru.ruscrafting.duels.domain.MatchState.ACTIVE
+
+            manager.handleElimination(second)
+            paper.performTicks(39)
+            requireNotNull(manager.matchFor(first)).state shouldBe ru.ruscrafting.duels.domain.MatchState.COUNTDOWN
+            paper.performTicks(2)
+            requireNotNull(manager.matchFor(first)).state shouldBe ru.ruscrafting.duels.domain.MatchState.ACTIVE
+        } finally {
+            manager.shutdown()
+            plugin.config.set("arenas.example.enabled", false)
+        }
     }
 
     "overlapping archive cleanup runs are coalesced" {

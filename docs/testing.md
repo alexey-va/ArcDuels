@@ -33,7 +33,8 @@ The suite covers:
   isolation, publish-before-local fail-closed behavior, dedupe, source collisions,
   Floodgate-prefixed names, wall-clock rollback rejection, player-snapshot TTL expiry, blank
   backend handling, schema-version rejection, dynamic objective/loadout-compatible
-  arena-node selection, exact server/arena pinning, arena-lobby rematches with
+  arena-node selection, exact kit-fingerprint routing across catalog reloads,
+  host-side fingerprint revalidation, exact server/arena pinning, arena-lobby rematches with
   distinct current and recovery-origin servers, and no-fallback FIFO reservation;
 - Paper bootstrap metadata, admin arena editing, command parsing, safe command policy, versioned snapshots,
   finite snapshot encoding, queued network-reservation cleanup,
@@ -55,7 +56,15 @@ The suite covers:
   overrides, non-lethal particle-wall boundary warnings, 200x200 arena defaults, kit-only 20 HP isolation,
   combined result/rematch cards, contextual rule hover help,
   interactive player-name hover/click events, and strict
-  Russian / English locale-key and MiniMessage parity.
+  Russian / English locale-key and MiniMessage parity;
+- atomic live-configuration generations, immutable multi-file/ABA source
+  capture, strict nested section/list and MiniMessage locale validation,
+  last-known-good rollback, restart-only reporting without secret disclosure,
+  immediate locale/GUI refresh, listener-cardinality stability, deferred
+  arena/kit publication with immediate network re-advertisement, configurable group invitation and finish timing,
+  catalog-coherent group draft defaults, automatic-return and BO-series policy snapshots,
+  bounded network deadlines, cancel/expiry during durable group preparation,
+  and per-session policy snapshots across a runtime reload.
 
 The separate `scripts/player-bot` suite recognizes the BO1 opponent/time boss
 bar, BO3/BO5 score boss bar, and hit-race target boss bar. Production QA must

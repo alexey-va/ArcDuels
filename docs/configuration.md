@@ -26,10 +26,14 @@ live arena routing, win announcements, and leaderboard invalidation. ProxyARC's
 authenticated `arc.proxy_player_list` snapshot is the authoritative online
 directory; entries expire locally when the proxy heartbeat becomes stale.
 Every ArcDuels node also publishes each objective- and loadout-compatible arena,
-its player-facing name, availability, and queue depth. Challenge setup offers
+its player-facing name, availability, queue depth, and SHA-256 fingerprints for
+its current kit loadouts. Challenge setup offers
 either automatic load-aware routing or an exact server and arena. An exact busy
 arena remains pinned and queues the pair there; it never silently falls back to
-another backend. No fixed arena server is configured or assumed.
+another backend. A KIT challenge can route only to a node advertising the exact
+loadout generation captured when the challenge was created, and the selected
+host checks that fingerprint again before durable escrow or match startup. No
+fixed arena server is configured or assumed.
 After a network match, players are moved to the configured lobby on the arena
 backend and offered a clickable return. The origin row remains unclaimed until
 the player returns, the origin synchronizer settles, and the live inventory is
@@ -82,6 +86,71 @@ world. An exact rematch accepted by both players reuses the original durable
 snapshot and starts from that lobby without a round trip through the origin.
 An unrelated challenge still completes the normal recovery flow first.
 
+## Live reload
+
+`/duels admin reload` validates a complete candidate and publishes a new
+configuration generation without disabling the plugin. The admin GUI reload
+button uses the same path; `/duels admin arena reload` remains a compatibility
+alias. A rejected candidate changes neither the current generation nor the
+locale, menu, arena, or kit services.
+
+All operator-owned YAML sources are captured as one immutable byte snapshot
+before parsing. Their hashes are checked against disk immediately before the
+commit, so concurrent edits—including an A→B→A replacement—cannot mix values
+from different reads. Explicitly malformed section/scalar/list shapes and
+invalid strict MiniMessage locale values reject the whole candidate and keep
+the last-known-good generation.
+
+The following settings apply live: challenge timeout, countdown and teleport
+stabilization for newly created sessions, rematch and transfer windows,
+boundary warnings, player-data settle delay, post-match policy and automatic-return retry window,
+series round intermission, shutdown drain
+timeout, celebration duration/fireworks, win broadcasts, group-invitation
+timeout, group finish delay and new-draft layout/kit-policy defaults, GUI query limits and arena-name prompt timeout,
+locale files, server display names, and GUI item roles. Existing challenges,
+group invitations, and active sessions keep the
+deadlines and match policy captured when they started.
+
+Arena and kit files are parsed immediately but their validated replacement is
+deferred while an arena, queue entry, challenge, group lobby, invitation, or
+match is active. The latest candidate applies automatically when those flows
+become idle. This prevents a best-of series or an open lobby from resolving an
+id against a different catalog generation. A successful catalog replacement
+also republishes the local arena/kit advertisement immediately instead of
+waiting for the next Redis heartbeat.
+
+Connection- and identity-owned settings require a normal server restart:
+`server-id`, MySQL connection/pool/retention settings, Redis endpoint,
+credentials and player-directory settings, and `player-data-sync.provider`.
+Reload validates their types, ranges, provider availability, and effective
+imported ARC Redis endpoint without opening a new connection. The effective
+Redis credentials participate only in a one-way comparison fingerprint, so an
+external credential change is reported without exposing its value. Until the
+restart, active status commands and the admin GUI continue to identify the
+startup `server-id`; reload reports only restart-owned path groups and never
+their values or secrets.
+
+```yaml
+multiplayer:
+  invitation-timeout-seconds: 45 # 5..600; captured per lobby
+  finish-delay-ticks: 60         # 0..200; captured per match
+  defaults:
+    layout: FREE_FOR_ALL         # FREE_FOR_ALL, TWO_TEAMS, THREE_TEAMS
+    kit-policy: SHARED           # SHARED or PER_PLAYER
+    kit: classic                 # validated and published with the kit catalog
+
+post-match:
+  automatic-return-timeout-seconds: 120 # 30..600; captured per network match
+
+series:
+  round-intermission-ticks: 30           # 0..200; captured per BO series
+
+gui:
+  arena-name-input-timeout-seconds: 60 # 5..300; captured per prompt
+  leaderboard-limit: 100               # 1..100; next render
+  history-limit: 100                   # 1..100; next render
+```
+
 ## Localization
 
 ArcDuels ships `lang/ru.yml` and `lang/en.yml`. With
@@ -106,7 +175,7 @@ are optional and enabled by default:
 celebration:
   fireworks:
     enabled: true
-    count: 3
+    count: 4
 ```
 
 `count` is bounded to `1..5`. ArcDuels tags its rockets and cancels their entity
@@ -176,11 +245,20 @@ arena lease with 1v1, so the two runtimes cannot overlap. The in-game arena
 editor does not invent group coordinates: operators must survey and configure
 real safe points before enabling this path on a production arena.
 
-Group matchmaking is deliberately local to one Paper node. Its GUI covers
-participant selection, free-for-all/two-team/three-team format, automatic
-balanced teams, shared/per-player kit policy, per-player kit confirmation, and
-readiness. It is unranked BO1 elimination and does not advertise a cross-server
-group protocol. Existing cross-server 1v1 routing remains unchanged.
+The group GUI can invite players from the authenticated network directory, not
+only the current Paper node. Invite responses are sent through Redis, accepted
+participants are transferred to the host node, and the match starts only after
+the complete signed lobby contract is ready there. A publish or transfer
+failure cancels fail-closed instead of advancing a participant locally. Without
+Redis, the same GUI remains available for local players only. It covers
+free-for-all/two-team/three-team format, automatic balanced teams,
+shared/per-player kit policy, per-player kit confirmation, and readiness. Group
+matches are unranked BO1 elimination; existing cross-server 1v1 routing remains
+independent.
+
+Network group deadlines are bounded to the configured ten-minute maximum plus
+a five-second clock-skew allowance. Oversized remote OFFER/PREPARE messages are
+rejected before replay claiming, snapshot creation, or transfer.
 
 `allowed-loadouts` is an arena policy, not a server role. It accepts
 `OWN_INVENTORY`, `KIT`, or both; omitting it keeps both modes enabled for
@@ -221,8 +299,9 @@ Stale or spoofed heartbeats are ignored; a capacity race is still safe because
 the destination's normal exclusive FIFO allocator is the final authority.
 
 Operators can configure arenas in game. Any point edit disables the arena until
-the full definition validates again; edits and reloads are rejected while a
-match owns an arena or a pair is waiting.
+the full definition validates again. Direct arena edits remain blocked while a
+match owns an arena or a pair is waiting; full configuration reload instead
+validates the new catalog and defers its publication until the runtime is idle.
 
 ```text
 /duels admin arena create <id>
@@ -235,7 +314,8 @@ match owns an arena or a pair is waiting.
 /duels admin arena enable|disable <id>
 /duels admin arena list
 /duels admin arena info <id>
-/duels admin arena reload
+/duels admin reload
+/duels admin arena reload # compatibility alias
 ```
 
 `/duels admin` opens the graphical editor. The commands remain available for
@@ -376,6 +456,10 @@ Bundled GUI items are ordinary vanilla materials. Deployments can override
 plugin applies model data with Paper's modern data-component API and never
 hard-codes resource-pack numbers. Standard roles include `background`, `back`,
 `previous`, `next`, `info`, `refresh`, and `confirm`.
+
+`gui.leaderboard-limit` and `gui.history-limit` cap the records fetched for a
+new menu render. `gui.arena-name-input-timeout-seconds` controls newly opened
+administrator chat prompts; a prompt already open keeps its original deadline.
 
 ## Commands
 

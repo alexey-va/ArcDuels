@@ -24,8 +24,10 @@ import net.kyori.adventure.text.format.TextDecoration
 import io.papermc.paper.chat.ChatRenderer
 import io.papermc.paper.datacomponent.DataComponentTypes
 import io.papermc.paper.event.player.AsyncChatEvent
+import ru.arc.paper.network.BackendTransferResult
 import ru.ruscrafting.duels.domain.ChallengeId
 import ru.ruscrafting.duels.domain.ChallengeRegistry
+import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
@@ -39,9 +41,12 @@ import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.MatchScore
 import ru.ruscrafting.duels.domain.MatchState
 import ru.ruscrafting.duels.domain.DuelMatch
+import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.redis.CrossServerChallengeBus
+import ru.ruscrafting.duels.redis.CrossServerChallengeMessage
+import ru.ruscrafting.duels.redis.ChallengeMessageType
 import ru.ruscrafting.duels.redis.NetworkArenaDirectory
 import java.time.Clock
 import java.time.Duration
@@ -50,6 +55,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CompletableFuture
 import java.util.logging.Handler
 import java.util.logging.LogRecord
 import ru.arc.logging.ArcLogging
@@ -82,6 +88,18 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.getLong("teleport-stabilization-ticks") shouldBe 3L
         plugin.config.getLong("rematch-window-seconds") shouldBe 180L
         plugin.config.getLong("celebration.duration-ticks") shouldBe 80L
+        plugin.config.getBoolean("celebration.fireworks.enabled") shouldBe true
+        plugin.config.getInt("celebration.fireworks.count") shouldBe 4
+        plugin.config.getLong("multiplayer.invitation-timeout-seconds") shouldBe 45L
+        plugin.config.getLong("multiplayer.finish-delay-ticks") shouldBe 60L
+        plugin.config.getString("multiplayer.defaults.layout") shouldBe "FREE_FOR_ALL"
+        plugin.config.getString("multiplayer.defaults.kit-policy") shouldBe "SHARED"
+        plugin.config.getString("multiplayer.defaults.kit") shouldBe "classic"
+        plugin.config.getLong("post-match.automatic-return-timeout-seconds") shouldBe 120L
+        plugin.config.getLong("series.round-intermission-ticks") shouldBe 30L
+        plugin.config.getLong("gui.arena-name-input-timeout-seconds") shouldBe 60L
+        plugin.config.getInt("gui.leaderboard-limit") shouldBe 100
+        plugin.config.getInt("gui.history-limit") shouldBe 100
         plugin.config.getString("player-data-sync.provider") shouldBe "AUTO"
         plugin.config.getLong("player-data-sync.settle-delay-ticks") shouldBe 40L
         plugin.config.getString("post-match.return-policy") shouldBe "PROMPT"
@@ -278,6 +296,190 @@ class ArcDuelsPluginTest : StringSpec({
         PlainTextComponentSerializer.plainText().serialize(requireNotNull(challenger.nextComponentMessage()))
             .contains("Сетевые вызовы сейчас недоступны") shouldBe true
         verify(exactly = 1) { bus.publish(any()) }
+        controller.close()
+    }
+
+    "a network kit challenge publishes the exact captured loadout fingerprint" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val published = slot<CrossServerChallengeMessage>()
+        val bus = mockk<CrossServerChallengeBus>()
+        every { bus.subscribe(any()) } returns AutoCloseable { }
+        every { bus.publish(capture(published)) } returns Unit
+        val arenas = mockk<NetworkArenaDirectory>(relaxed = true)
+        val targets = mockk<DuelTargetDirectory>()
+        val challenger = server.addPlayer("KitOrigin")
+        val remote = DuelTarget(UUID.randomUUID(), "KitRemote", ServerId("parkour"), local = false)
+        every { targets.find(remote.uniqueId) } returns remote
+        val fingerprint = "a".repeat(64)
+        val controller =
+            DuelController(
+                plugin,
+                ChallengeRegistry(Clock.systemUTC()),
+                sessions,
+                InMemoryStatisticsRepository(),
+                LocaleService.load(plugin),
+                targets,
+                ServerId("spawn"),
+                challengeBus = bus,
+                arenaDirectory = arenas,
+                transfer = mockk(relaxed = true),
+                kitFingerprint = { fingerprint },
+            )
+
+        controller.challenge(challenger, remote, DuelRules(DuelMode.KIT, KitId("classic")))
+
+        published.captured.type shouldBe ChallengeMessageType.OFFER
+        published.captured.kitFingerprint shouldBe fingerprint
+        controller.close()
+    }
+
+    "an arena host rejects a changed kit generation before network escrow starts" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val listener = slot<(CrossServerChallengeMessage) -> Unit>()
+        val bus = mockk<CrossServerChallengeBus>()
+        every { bus.subscribe(capture(listener)) } returns AutoCloseable { }
+        val host = ServerId("duels-host")
+        val first = server.addPlayer("HostFirst")
+        val second = server.addPlayer("HostSecond")
+        val now = Instant.parse("2026-08-31T12:00:00Z")
+        val challenge =
+            DuelChallenge.create(
+                PlayerId(first.uniqueId),
+                PlayerId(second.uniqueId),
+                DuelRules(DuelMode.KIT, KitId("classic")),
+                now.minusSeconds(1),
+                Duration.ofSeconds(45),
+            ).resolve(ChallengeStatus.ACCEPTED, now)
+        val capturedFingerprint = "b".repeat(64)
+        val controller =
+            DuelController(
+                plugin,
+                ChallengeRegistry(Clock.fixed(now, ZoneOffset.UTC)),
+                sessions,
+                InMemoryStatisticsRepository(),
+                LocaleService.load(plugin),
+                DuelTargetDirectory(plugin, host, null),
+                host,
+                challengeBus = bus,
+                arenaDirectory = mockk(relaxed = true),
+                transfer = mockk(relaxed = true),
+                clock = Clock.fixed(now, ZoneOffset.UTC),
+                kitFingerprint = { "c".repeat(64) },
+            )
+        val resolution =
+            CrossServerChallengeMessage(
+                messageId = "${challenge.id}:accepted:${host.value}",
+                sourceServer = host,
+                type = ChallengeMessageType.RESOLUTION,
+                challenge = challenge,
+                kitFingerprint = capturedFingerprint,
+                challengerName = first.name,
+                targetName = second.name,
+                challengerServer = host,
+                targetServer = host,
+                matchServer = host,
+                recoveryMatchId = MatchId.random(),
+            )
+
+        listener.captured(resolution)
+        server.scheduler.performTicks(11)
+
+        verify(exactly = 0) { sessions.startNetwork(any(), any(), any()) }
+        controller.close()
+    }
+
+    "automatic return keeps the retry deadline captured when the network match starts" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        val completion = slot<(DuelMatch) -> Unit>()
+        every { sessions.onCompleted(capture(completion)) } returns AutoCloseable { }
+        val listener = slot<(CrossServerChallengeMessage) -> Unit>()
+        val bus = mockk<CrossServerChallengeBus>()
+        every { bus.subscribe(capture(listener)) } returns AutoCloseable { }
+        val host = ServerId("duels-host")
+        val first = server.addPlayer("AutoFirst")
+        val second = server.addPlayer("AutoSecond")
+        val clock = MutableControllerClock(Instant.parse("2026-08-31T13:00:00Z"))
+        val rules = DuelRules(DuelMode.KIT, KitId("classic"))
+        val challenge =
+            DuelChallenge.create(
+                PlayerId(first.uniqueId),
+                PlayerId(second.uniqueId),
+                rules,
+                clock.instant().minusSeconds(1),
+                Duration.ofSeconds(45),
+            ).resolve(ChallengeStatus.ACCEPTED, clock.instant())
+        val match =
+            DuelMatch(
+                id = MatchId(challenge.id.value),
+                firstPlayer = challenge.challenger,
+                secondPlayer = challenge.target,
+                arenaId = ArenaId("kit-test"),
+                serverId = host,
+                rules = rules,
+                state = MatchState.COMPLETED,
+                score = MatchScore(1, 0),
+                createdAt = clock.instant(),
+                completedAt = clock.instant(),
+                winner = challenge.challenger,
+                endReason = MatchEndReason.ELIMINATION,
+            )
+        every { sessions.startNetwork(any(), any(), any()) } returns CompletableFuture.completedFuture(match)
+        var settings =
+            ArcDuelsRuntimeSettings.parse(org.bukkit.configuration.MemoryConfiguration()).settings.copy(
+                defaultPostMatchReturnPolicy = PostMatchReturnPolicy.AUTOMATIC,
+                automaticReturnTimeout = Duration.ofSeconds(30),
+            )
+        var transferCalls = 0
+        val controller =
+            DuelController(
+                plugin,
+                ChallengeRegistry(clock),
+                sessions,
+                InMemoryStatisticsRepository(),
+                LocaleService.load(plugin),
+                DuelTargetDirectory(plugin, host, null),
+                host,
+                challengeBus = bus,
+                arenaDirectory = mockk(relaxed = true),
+                transfer = PlayerTransfer { _, _ ->
+                    transferCalls++
+                    BackendTransferResult.SEND_FAILED
+                },
+                clock = clock,
+                returnPolicy = PostMatchReturnPolicy.AUTOMATIC,
+                automaticReturnTimeout = Duration.ofSeconds(30),
+                kitFingerprint = { "d".repeat(64) },
+                runtimeSettings = { settings },
+            )
+        listener.captured(
+            CrossServerChallengeMessage(
+                messageId = "${challenge.id}:accepted:${host.value}",
+                sourceServer = host,
+                type = ChallengeMessageType.RESOLUTION,
+                challenge = challenge,
+                kitFingerprint = "d".repeat(64),
+                challengerName = first.name,
+                targetName = second.name,
+                challengerServer = ServerId("spawn"),
+                targetServer = ServerId("parkour"),
+                matchServer = host,
+                challengerCurrentServer = ServerId("spawn"),
+                targetCurrentServer = host,
+            ),
+        )
+        server.scheduler.performTicks(11)
+        settings = settings.copy(automaticReturnTimeout = Duration.ofSeconds(600))
+
+        completion.captured(match)
+        server.scheduler.performTicks(2)
+        (transferCalls > 0) shouldBe true
+        val callsBeforeCapturedDeadline = transferCalls
+        clock.advance(Duration.ofSeconds(31))
+        server.scheduler.performTicks(11)
+
+        transferCalls shouldBe callsBeforeCapturedDeadline
         controller.close()
     }
 
@@ -566,6 +768,23 @@ class ArcDuelsPluginTest : StringSpec({
         missingArenaController.rematch(first, outcome.matchId)
         missingRegistry.pendingFor(PlayerId(first.uniqueId)) shouldBe emptyList()
         missingArenaController.close()
+
+        val removedKitRegistry = ChallengeRegistry(clock)
+        val removedKitController =
+            DuelController(
+                plugin,
+                removedKitRegistry,
+                sessions,
+                statistics,
+                LocaleService.load(plugin),
+                DuelTargetDirectory(plugin, ServerId("spawn"), null),
+                ServerId("spawn"),
+                clock = clock,
+                kitAvailable = { false },
+            )
+        removedKitController.rematch(first, outcome.matchId)
+        removedKitRegistry.pendingFor(PlayerId(first.uniqueId)) shouldBe emptyList()
+        removedKitController.close()
     }
 
     "participant routing keeps the current server distinct from the recovery origin" {
@@ -686,6 +905,7 @@ class ArcDuelsPluginTest : StringSpec({
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 15)
         player.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
         requireNotNull(player.openInventory.topInventory.getItem(32)).plainLore().contains("Kit contents") shouldBe true
+        player.closeInventory()
     }
 
     "admin command opens a real arena editor and its actions use the current position" {
@@ -773,3 +993,17 @@ private fun Component.translationKeys(): List<String> =
         }
         children().forEach { addAll(it.translationKeys()) }
     }
+
+private class MutableControllerClock(
+    private var current: Instant,
+) : Clock() {
+    override fun getZone(): ZoneId = ZoneOffset.UTC
+
+    override fun withZone(zone: ZoneId): Clock = this
+
+    override fun instant(): Instant = current
+
+    fun advance(duration: Duration) {
+        current = current.plus(duration)
+    }
+}

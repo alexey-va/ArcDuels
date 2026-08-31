@@ -33,6 +33,8 @@ import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.redis.ArenaChoice
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -54,10 +56,31 @@ class DuelGuiService internal constructor(
     private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
     private val arenaChoices: (DuelRules) -> List<ArenaChoice> = { emptyList() },
     private val multiplayerAction: (Player) -> Unit = {},
+    private val guiItems: GuiItemCatalog = GuiItemCatalog.load(plugin),
+    private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
+    private val clock: Clock = Clock.systemUTC(),
+    private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
 ) : Listener {
-    private val pendingArenaNames = ConcurrentHashMap<UUID, Long>()
+    private val pendingArenaNames = ConcurrentHashMap<UUID, PendingArenaName>()
     private val asyncMenuRequests = LatestRequestTracker()
-    private val guiItems = GuiItemCatalog.load(plugin)
+
+    /** Visible menus that retain kit or arena ids from one catalog generation. */
+    internal fun activeConfigurationFlowCount(): Int =
+        plugin.server.onlinePlayers.count { player ->
+            // Paper always exposes a view; MockBukkit represents "no inventory" as null despite
+            // the API annotation. Treat that test-runtime sentinel exactly like no bound flow.
+            val holder = runCatching { player.openInventory.topInventory.holder }.getOrNull()
+            when (holder) {
+                is LoadoutMenuHolder,
+                is RulesMenuHolder,
+                is ArenaMenuHolder,
+                is PresetMenuHolder,
+                is AdminArenaListHolder,
+                is AdminArenaHolder,
+                is AdminArenaObjectivesHolder -> true
+                else -> false
+            }
+        }
 
     fun openChallenge(player: Player, target: DuelTarget) = openObjectives(player, target)
 
@@ -145,7 +168,7 @@ class DuelGuiService internal constructor(
                 LocaleService.text("recoveries", sessions.pendingRecoveryCount()),
                 LocaleService.component(
                     "server",
-                    serverNames.display(ServerId(plugin.config.getString("server-id", plugin.server.name)!!)),
+                    serverNames.display(startupServerId),
                 ),
             ),
         )
@@ -283,7 +306,8 @@ class DuelGuiService internal constructor(
     fun openLeaderboard(player: Player, requestedPage: Int = 0) {
         val request = asyncMenuRequests.begin(player.uniqueId)
         player.sendActionBar(locales.component(player, "menu.leaderboard.loading"))
-        statistics.leaderboard(MAX_LEADERBOARD_ENTRIES).whenComplete { entries, failure ->
+        val limit = runtimeSettings()?.guiLeaderboardLimit ?: MAX_LEADERBOARD_ENTRIES
+        statistics.leaderboard(limit).whenComplete { entries, failure ->
             runSync {
                 if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
@@ -324,7 +348,8 @@ class DuelGuiService internal constructor(
         val request = asyncMenuRequests.begin(player.uniqueId)
         player.sendActionBar(locales.component(player, "menu.history.loading"))
         val playerId = PlayerId(player.uniqueId)
-        statistics.recentMatches(playerId, MAX_HISTORY_ENTRIES).whenComplete { matches, failure ->
+        val limit = runtimeSettings()?.guiHistoryLimit ?: MAX_HISTORY_ENTRIES
+        statistics.recentMatches(playerId, limit).whenComplete { matches, failure ->
             runSync {
                 if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
@@ -728,7 +753,10 @@ class DuelGuiService internal constructor(
                 11 -> openAdminArenas(player)
                 15 -> openRecoveryPlayers(player)
                 29 -> promptArenaName(player)
-                33 -> { admin.execute(player, listOf("arena", "reload")); openAdmin(player) }
+                33 -> {
+                    admin.execute(player, listOf("reload"))
+                    if (player.hasPermission(ADMIN_PERMISSION)) openAdmin(player)
+                }
             }
             is AdminArenaListHolder -> when (slot) {
                 BACK_SLOT -> openAdmin(player)
@@ -770,11 +798,16 @@ class DuelGuiService internal constructor(
     @EventHandler
     fun onArenaName(event: AsyncChatEvent) {
         val player = event.player
-        pendingArenaNames.remove(player.uniqueId) ?: return
+        val pending = pendingArenaNames.remove(player.uniqueId) ?: return
         event.isCancelled = true
+        val expired = !clock.instant().isBefore(pending.expiresAt)
         val raw = PlainTextComponentSerializer.plainText().serialize(event.message()).trim()
         runSync {
             if (!player.isOnline) return@runSync
+            if (expired) {
+                player.sendMessage(locales.notice(player, "menu.admin.create-timeout"))
+                return@runSync
+            }
             if (raw.equals("cancel", true) || raw.equals("отмена", true)) {
                 player.sendMessage(locales.notice(player, "menu.admin.create-cancelled"))
                 openAdmin(player)
@@ -800,17 +833,21 @@ class DuelGuiService internal constructor(
 
     private fun promptArenaName(player: Player) {
         player.closeInventory()
-        val token = System.nanoTime()
-        pendingArenaNames[player.uniqueId] = token
+        val timeout = runtimeSettings()?.guiArenaNameInputTimeout ?: DEFAULT_ARENA_NAME_TIMEOUT
+        val pending = PendingArenaName(clock.instant().plus(timeout))
+        pendingArenaNames[player.uniqueId] = pending
         player.sendMessage(locales.notice(player, "menu.admin.create-prompt"))
         plugin.server.scheduler.runTaskLater(
             plugin,
             Runnable {
-                if (pendingArenaNames.remove(player.uniqueId, token) && player.isOnline) {
+                if (!clock.instant().isBefore(pending.expiresAt) &&
+                    pendingArenaNames.remove(player.uniqueId, pending) &&
+                    player.isOnline
+                ) {
                     player.sendMessage(locales.notice(player, "menu.admin.create-timeout"))
                 }
             },
-            ARENA_NAME_TIMEOUT_TICKS,
+            (timeout.toMillis() + MILLIS_PER_TICK - 1L) / MILLIS_PER_TICK,
         )
     }
 
@@ -1233,6 +1270,7 @@ class DuelGuiService internal constructor(
     private class AdminArenaHolder(val arenaId: String) : MenuHolder()
     private class AdminArenaObjectivesHolder(val arenaId: String) : MenuHolder() { val objectives = mutableMapOf<Int, DuelObjectiveType>() }
     private class RecoveryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val players = mutableMapOf<Int, UUID>() }
+    private class PendingArenaName(val expiresAt: Instant)
     private enum class CatalogType { MODES, KITS, QUEUE }
     private enum class MenuBack { MAIN }
     private enum class PresetAvailability { READY, ARENA_MISSING, KIT_MISSING }
@@ -1247,7 +1285,8 @@ class DuelGuiService internal constructor(
         const val NEXT_SLOT = 43
         const val ADMIN_PERMISSION = "arcduels.admin"
         const val ARENA_AUTO_SLOT = 10
-        const val ARENA_NAME_TIMEOUT_TICKS = 1_200L
+        const val MILLIS_PER_TICK = 50L
+        val DEFAULT_ARENA_NAME_TIMEOUT: Duration = Duration.ofSeconds(60)
         val COORDINATE_KEYS = listOf("x", "y", "z")
         val CONTENT_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34)
         val PRESET_GUI_SLOTS = (11 until 11 + MAX_DUEL_PRESETS).toList()

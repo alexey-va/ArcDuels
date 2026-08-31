@@ -2,7 +2,13 @@ package ru.ruscrafting.duels.paper
 
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.TextReplacementConfig
+import net.kyori.adventure.text.minimessage.MiniMessage
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver
+import net.kyori.adventure.text.minimessage.tag.standard.StandardTags
 import org.bukkit.command.CommandSender
+import org.bukkit.configuration.Configuration
+import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
@@ -18,29 +24,38 @@ data class LocaleValue(
 )
 
 class LocaleService private constructor(
-    private val defaultLanguage: String,
-    private val useClientLocale: Boolean,
-    private val bundles: Map<String, YamlConfiguration>,
-    private val renderer: LocalizedMiniMessage,
+    state: State,
 ) {
+    @Volatile
+    private var state: State = state
+
     fun component(
         audience: CommandSender?,
         key: String,
         vararg values: LocaleValue,
-    ): Component = renderer.render(key, language(audience), values.asMap())
+    ): Component {
+        val current = state
+        return current.renderer.render(key, current.language(audience), values.asMap())
+    }
 
     fun componentForLanguage(
         language: String,
         key: String,
         vararg values: LocaleValue,
-    ): Component = renderer.render(key, normalize(language), values.asMap())
+    ): Component {
+        val current = state
+        return current.renderer.render(key, normalize(language), values.asMap())
+    }
 
     /** A blank locale value deliberately disables this feedback surface. */
     fun optionalComponent(
         audience: CommandSender?,
         key: String,
         vararg values: LocaleValue,
-    ): Component? = renderer.renderOptional(key, language(audience), values.asMap())
+    ): Component? {
+        val current = state
+        return current.renderer.renderOptional(key, current.language(audience), values.asMap())
+    }
 
     fun notice(
         audience: CommandSender?,
@@ -77,14 +92,21 @@ class LocaleService private constructor(
         audience: CommandSender?,
         key: String,
         vararg values: LocaleValue,
-    ): List<Component> =
-        renderer.renderLines(key, language(audience), values.asMap())
-            .ifEmpty { listOf(component(audience, key, *values)) }
+    ): List<Component> {
+        val current = state
+        val placeholders = values.asMap()
+        val language = current.language(audience)
+        return current.renderer.renderLines(key, language, placeholders)
+            .ifEmpty { listOf(current.renderer.render(key, language, placeholders)) }
+    }
 
-    fun language(audience: CommandSender?): String =
-        if (useClientLocale && audience is Player) normalize(audience.locale().language) else defaultLanguage
+    fun language(audience: CommandSender?): String = state.language(audience)
 
-    fun hasKey(language: String, key: String): Boolean = bundles[normalize(language)]?.contains(key) == true
+    fun hasKey(language: String, key: String): Boolean = state.bundles[normalize(language)]?.contains(key) == true
+
+    internal fun replaceWith(replacement: LocaleService) {
+        state = replacement.state
+    }
 
     private fun Array<out LocaleValue>.asMap(): Map<String, Component> {
         require(map(LocaleValue::name).distinct().size == size) { "Duplicate locale placeholder" }
@@ -93,24 +115,89 @@ class LocaleService private constructor(
 
     private fun normalize(language: String): String = if (language.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
 
+    private data class State(
+        val defaultLanguage: String,
+        val useClientLocale: Boolean,
+        val bundles: Map<String, YamlConfiguration>,
+        val renderer: LocalizedMiniMessage,
+    ) {
+        fun language(audience: CommandSender?): String =
+            if (useClientLocale && audience is Player) normalizeLanguage(audience.locale().language) else defaultLanguage
+
+        private fun normalizeLanguage(language: String): String =
+            if (language.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
+    }
+
     companion object {
-        fun load(plugin: JavaPlugin): LocaleService {
+        fun load(plugin: JavaPlugin): LocaleService = load(plugin, plugin.config, prepareFiles = true)
+
+        internal fun loadCandidate(
+            plugin: JavaPlugin,
+            configuration: Configuration,
+            capturedBundles: Map<String, YamlConfiguration>? = null,
+        ): LocaleService =
+            load(
+                plugin,
+                configuration,
+                prepareFiles = false,
+                capturedBundles = capturedBundles,
+            )
+
+        private fun load(
+            plugin: JavaPlugin,
+            configuration: Configuration,
+            prepareFiles: Boolean,
+            capturedBundles: Map<String, YamlConfiguration>? = null,
+        ): LocaleService {
             val languages = listOf("ru", "en")
             languages.forEach { language ->
                 val localeFile = File(plugin.dataFolder, "lang/$language.yml")
-                if (!localeFile.isFile) plugin.saveResource("lang/$language.yml", false)
+                if (capturedBundles?.containsKey(language) != true && !localeFile.isFile) {
+                    require(prepareFiles) { "Missing ArcDuels locale $language" }
+                    plugin.saveResource("lang/$language.yml", false)
+                }
             }
-            val bundles =
+            val sources =
                 languages.associateWith { language ->
-                    val external = YamlConfiguration.loadConfiguration(File(plugin.dataFolder, "lang/$language.yml"))
+                    val external =
+                        capturedBundles?.get(language)
+                            ?: YamlConfiguration().apply { load(File(plugin.dataFolder, "lang/$language.yml")) }
                     val bundled =
                         requireNotNull(plugin.getResource("lang/$language.yml")) { "Missing bundled ArcDuels locale $language" }
                             .use { YamlConfiguration.loadConfiguration(InputStreamReader(it, Charsets.UTF_8)) }
                     external.setDefaults(bundled)
-                    external
+                    external to bundled
                 }
-            val configured = plugin.config.getString("locale.default", "ru").orEmpty().lowercase(Locale.ROOT)
-            val defaultLanguage = if (configured in bundles) configured else "ru"
+            val allowedPlaceholdersByPath =
+                buildMap<String, Set<String>> {
+                    putAll(OPTIONAL_PLACEHOLDERS_BY_PATH)
+                    sources.values.forEach { (_, bundled) ->
+                        bundled.getKeys(true).forEach { path ->
+                            val names = bundled.localeStrings(path).flatMap(::customTagNames).toSet()
+                            if (names.isNotEmpty()) put(path, get(path).orEmpty() + names)
+                        }
+                    }
+                }
+            val allowedPlaceholders = allowedPlaceholdersByPath.values.flatten().toSet() + PREFIX_PLACEHOLDER
+            val placeholderResolver =
+                TagResolver.builder().apply {
+                    allowedPlaceholders.sorted().forEach { name ->
+                        resolver(Placeholder.component(name, Component.empty()))
+                    }
+                }.build()
+            sources.forEach { (language, source) ->
+                validateLocaleBundle(
+                    language = language,
+                    effective = source.first,
+                    bundled = source.second,
+                    allowedPlaceholdersByPath = allowedPlaceholdersByPath,
+                    placeholderResolver = placeholderResolver,
+                )
+            }
+            val bundles = sources.mapValues { (_, source) -> source.first }
+            val defaultLanguage = configuration.strictString("locale.default", "ru").lowercase(Locale.ROOT)
+            require(defaultLanguage in bundles) { "locale.default must be ru or en" }
+            val useClientLocale = configuration.strictBoolean("locale.use-client-locale", true)
             val renderer =
                 LocalizedMiniMessage(
                     catalogs = bundles.mapValues { (_, bundle) -> YamlLocaleCatalog(bundle) },
@@ -121,12 +208,168 @@ class LocaleService private constructor(
                         "<red>[$key]</red>"
                     },
                 )
-            return LocaleService(defaultLanguage, plugin.config.getBoolean("locale.use-client-locale", true), bundles, renderer)
+            return LocaleService(
+                State(
+                    defaultLanguage,
+                    useClientLocale,
+                    bundles,
+                    renderer,
+                ),
+            )
         }
 
         fun text(key: String, value: Any): LocaleValue = LocaleValue(key, Component.text(value.toString()))
 
         fun component(key: String, value: Component): LocaleValue = LocaleValue(key, value)
+
+        private fun validateLocaleBundle(
+            language: String,
+            effective: YamlConfiguration,
+            bundled: YamlConfiguration,
+            allowedPlaceholdersByPath: Map<String, Set<String>>,
+            placeholderResolver: TagResolver,
+        ) {
+            val paths = (bundled.getKeys(true) + effective.getKeys(true)).sorted()
+            paths.forEach { path ->
+                val bundledValue = bundled.get(path)
+                val effectiveValue = effective.get(path)
+                when (bundledValue) {
+                    is ConfigurationSection ->
+                        require(effectiveValue is ConfigurationSection) {
+                            "Locale $language.$path must be a section"
+                        }
+
+                    is String -> {
+                        require(effectiveValue is String) {
+                            "Locale $language.$path must be a scalar string"
+                        }
+                        validateMiniMessage(
+                            language,
+                            path,
+                            path,
+                            effectiveValue,
+                            allowedPlaceholdersByPath,
+                            placeholderResolver,
+                        )
+                    }
+
+                    is List<*> -> {
+                        requireStringList("Bundled locale", language, path, bundledValue)
+                        requireStringList("Locale", language, path, effectiveValue).forEachIndexed { index, line ->
+                            validateMiniMessage(
+                                language,
+                                "$path[$index]",
+                                path,
+                                line,
+                                allowedPlaceholdersByPath,
+                                placeholderResolver,
+                            )
+                        }
+                    }
+
+                    null -> validateAdditionalLocaleValue(
+                        language,
+                        path,
+                        effectiveValue,
+                        allowedPlaceholdersByPath,
+                        placeholderResolver,
+                    )
+
+                    else -> error("Bundled locale $language.$path must be a string, string list, or section")
+                }
+            }
+        }
+
+        private fun validateAdditionalLocaleValue(
+            language: String,
+            path: String,
+            value: Any?,
+            allowedPlaceholdersByPath: Map<String, Set<String>>,
+            placeholderResolver: TagResolver,
+        ) {
+            when (value) {
+                is ConfigurationSection -> Unit
+                is String ->
+                    validateMiniMessage(
+                        language,
+                        path,
+                        path,
+                        value,
+                        allowedPlaceholdersByPath,
+                        placeholderResolver,
+                    )
+                is List<*> ->
+                    requireStringList("Locale", language, path, value).forEachIndexed { index, line ->
+                        validateMiniMessage(
+                            language,
+                            "$path[$index]",
+                            path,
+                            line,
+                            allowedPlaceholdersByPath,
+                            placeholderResolver,
+                        )
+                    }
+
+                else -> throw IllegalArgumentException("Locale $language.$path must be a string, string list, or section")
+            }
+        }
+
+        private fun requireStringList(
+            label: String,
+            language: String,
+            path: String,
+            value: Any?,
+        ): List<String> {
+            require(value is List<*>) { "$label $language.$path must be a list of strings" }
+            return value.mapIndexed { index, element ->
+                require(element is String) { "$label $language.$path[$index] must be a string" }
+                element
+            }
+        }
+
+        private fun validateMiniMessage(
+            language: String,
+            displayPath: String,
+            placeholderPath: String,
+            value: String,
+            allowedPlaceholdersByPath: Map<String, Set<String>>,
+            placeholderResolver: TagResolver,
+        ) {
+            val allowedPlaceholders = allowedPlaceholdersByPath[placeholderPath].orEmpty() + PREFIX_PLACEHOLDER
+            val undeclared = customTagNames(value).filterNot(allowedPlaceholders::contains).toSet()
+            require(undeclared.isEmpty()) {
+                "Locale $language.$displayPath uses undeclared placeholders: ${undeclared.sorted().joinToString()}"
+            }
+            try {
+                strictMiniMessage.deserialize(value, placeholderResolver)
+            } catch (exception: RuntimeException) {
+                throw IllegalArgumentException("Locale $language.$displayPath contains invalid MiniMessage", exception)
+            }
+        }
+
+        private fun YamlConfiguration.localeStrings(path: String): List<String> =
+            when (val value = get(path)) {
+                is String -> listOf(value)
+                is List<*> -> value.filterIsInstance<String>()
+                else -> emptyList()
+            }
+
+        private fun customTagNames(value: String): List<String> =
+            localeTag.findAll(value)
+                .map { match -> match.groupValues[1].lowercase(Locale.ROOT) }
+                .filterNot(standardTags::has)
+                .toList()
+
+        private val strictMiniMessage = MiniMessage.builder().strict(true).build()
+        private val standardTags = StandardTags.defaults()
+        private val localeTag = Regex("(?<!\\\\)</?([a-z0-9_-]{1,64})(?=[:>])", RegexOption.IGNORE_CASE)
+        // A blank bundled message is intentionally disabled, so its supported placeholders
+        // cannot be inferred from that template. Keep the optional extension surface explicit.
+        private val OPTIONAL_PLACEHOLDERS_BY_PATH =
+            mapOf(
+                "controller.network-return" to setOf("server"),
+            )
+        private const val PREFIX_PLACEHOLDER = "prefix"
     }
 
     private class YamlLocaleCatalog(

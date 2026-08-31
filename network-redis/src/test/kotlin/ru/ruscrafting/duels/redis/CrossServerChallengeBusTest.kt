@@ -57,6 +57,7 @@ class CrossServerChallengeBusTest : StringSpec({
                     Duration.ofSeconds(45),
                     ArenaSelection(ServerId("parkour"), ArenaId("kit-one")),
                 ),
+            kitFingerprint = KIT_FINGERPRINT,
             challengerName = "Alice",
             targetName = "Bob",
             challengerServer = ServerId("spawn"),
@@ -77,6 +78,7 @@ class CrossServerChallengeBusTest : StringSpec({
                 matchServer = ServerId("parkour"),
             )
         codec.decode(codec.encode(resolution)) shouldBe resolution
+        resolution.kitFingerprint shouldBe offer.kitFingerprint
     }
 
     "rematch resolution keeps current acceptance servers separate from inventory origins" {
@@ -124,8 +126,28 @@ class CrossServerChallengeBusTest : StringSpec({
         val continuation = boxing.copy(recoveryMatchId = ru.ruscrafting.duels.domain.MatchId.random())
         codec.decode(codec.encode(continuation)) shouldBe continuation
         io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
-            codec.decode(codec.encode(boxing).replace("\"version\":4", "\"version\":3"))
+            codec.decode(codec.encode(boxing).replace("\"version\":5", "\"version\":4"))
         }
+    }
+
+    "codec requires an exact kit fingerprint and permits null only for own inventory" {
+        val codec = ChallengeMessageCodec()
+        val missing = JsonParser.parseString(codec.encode(offer)).asJsonObject.apply { remove("kitFingerprint") }
+        val uppercase = JsonParser.parseString(codec.encode(offer)).asJsonObject.apply {
+            addProperty("kitFingerprint", "A".repeat(64))
+        }
+
+        shouldThrow<IllegalArgumentException> { codec.decode(missing.toString()) }
+        shouldThrow<IllegalArgumentException> { codec.decode(uppercase.toString()) }
+        shouldThrow<IllegalArgumentException> { offer.copy(kitFingerprint = null) }
+
+        val ownInventoryOffer =
+            offer.copy(
+                challenge = offer.challenge.copy(rules = DuelRules(DuelMode.OWN_INVENTORY)),
+                kitFingerprint = null,
+            )
+        codec.decode(codec.encode(ownInventoryOffer)) shouldBe ownInventoryOffer
+        shouldThrow<IllegalArgumentException> { ownInventoryOffer.copy(kitFingerprint = KIT_FINGERPRINT) }
     }
 
     "bus authenticates origin and deduplicates challenge messages" {
@@ -171,3 +193,5 @@ class CrossServerChallengeBusTest : StringSpec({
         bus.close()
     }
 })
+
+private val KIT_FINGERPRINT = "a".repeat(64)

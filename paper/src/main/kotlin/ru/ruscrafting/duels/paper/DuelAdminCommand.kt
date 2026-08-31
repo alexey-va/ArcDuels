@@ -19,6 +19,10 @@ internal class DuelAdminCommand(
     private val locales: LocaleService? = null,
     private val serverNames: ServerDisplayNames = ServerDisplayNames.load(plugin.config, plugin.logger::warning),
     private val hasReturnOffer: (Player) -> Boolean = { false },
+    private val reloadAction: (() -> Result<ArcDuelsReloadReport>)? = null,
+    private val configGeneration: () -> Long = { 1L },
+    private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
+    private val configurationBusy: () -> Boolean = { false },
 ) {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -39,7 +43,7 @@ internal class DuelAdminCommand(
                         "admin.status",
                         LocaleService.component(
                             "server",
-                            serverNames.display(ServerId(plugin.config.getString("server-id", plugin.server.name)!!)),
+                            serverNames.display(startupServerId),
                         ),
                         LocaleService.text("arenas", arenas.size()),
                         LocaleService.text("active", sessions.activeArenaCount()),
@@ -48,6 +52,7 @@ internal class DuelAdminCommand(
                     ),
                 )
             "recover" -> recover(sender, args)
+            "reload" -> reload(sender)
             "arena" -> arena(sender, args.drop(1))
             "debug" -> debug(sender, args.drop(1))
             else -> help(sender)
@@ -59,7 +64,7 @@ internal class DuelAdminCommand(
         args: List<String>,
     ): List<String> {
         if (!sender.hasPermission(ADMIN_PERMISSION)) return emptyList()
-        if (args.size <= 1) return filter(listOf("arena", "status", "recover", "debug", "help"), args.lastOrNull().orEmpty())
+        if (args.size <= 1) return filter(listOf("arena", "status", "recover", "reload", "debug", "help"), args.lastOrNull().orEmpty())
         if (args[0].equals("recover", true) && args.size == 2) {
             return filter(sender.server.onlinePlayers.map(Player::getName), args[1])
         }
@@ -257,13 +262,60 @@ internal class DuelAdminCommand(
     }
 
     private fun reload(sender: CommandSender) {
-        if (!requireIdle(sender)) return
-        val result = runCatching {
-            plugin.reloadConfig()
-            arenas.reload(plugin)
+        val action = reloadAction
+        if (action == null) {
+            if (!requireIdle(sender)) return
+            val legacy = runCatching { plugin.reloadConfig(); arenas.reload(plugin) }
+            legacy.onSuccess {
+                sender.sendMessage(
+                    message(
+                        sender,
+                        "admin.reloaded",
+                        LocaleService.text("version", configGeneration()),
+                        LocaleService.text("count", it),
+                    ),
+                )
+            }.onFailure {
+                sender.sendMessage(
+                    message(
+                        sender,
+                        "admin.reload-failed",
+                        LocaleService.text("version", configGeneration()),
+                        LocaleService.text("reason", it.message ?: "unknown"),
+                    ),
+                )
+            }
+            return
         }
-        result.onSuccess { sender.sendMessage(message(sender, "admin.reloaded", LocaleService.text("count", it))) }
-            .onFailure { sender.sendMessage(message(sender, "admin.reload-failed", LocaleService.text("reason", it.message ?: "unknown"))) }
+        action().onSuccess { report ->
+            sender.sendMessage(
+                message(
+                    sender,
+                    "admin.reloaded",
+                    LocaleService.text("version", report.generation),
+                    LocaleService.text("count", report.arenaCount),
+                ),
+            )
+            if (report.catalogsDeferred) sender.sendMessage(message(sender, "admin.reload-deferred"))
+            if (report.restartRequired.isNotEmpty()) {
+                sender.sendMessage(
+                    message(
+                        sender,
+                        "admin.reload-restart-required",
+                        LocaleService.text("fields", report.restartRequired.joinToString(", ") { it.reportKey }),
+                    ),
+                )
+            }
+        }.onFailure { failure ->
+            sender.sendMessage(
+                message(
+                    sender,
+                    "admin.reload-failed",
+                    LocaleService.text("version", configGeneration()),
+                    LocaleService.text("reason", configReloadFailureSummary(failure)),
+                ),
+            )
+        }
     }
 
     private fun list(sender: CommandSender) {
@@ -353,7 +405,7 @@ internal class DuelAdminCommand(
         sender.sendDebug(
             "server",
             "version" to plugin.pluginMeta.version,
-            "server" to plugin.config.getString("server-id", plugin.server.name),
+            "server" to startupServerId.value,
             "arenas" to arenas.size(),
             "active" to sessions.activeArenaCount(),
             "queue" to sessions.queueSize(),
@@ -485,7 +537,7 @@ internal class DuelAdminCommand(
     }
 
     private fun requireIdle(sender: CommandSender): Boolean {
-        if (sessions.activeArenaCount() == 0 && sessions.queueSize() == 0) return true
+        if (sessions.activeArenaCount() == 0 && sessions.queueSize() == 0 && !configurationBusy()) return true
         sender.sendMessage(message(sender, "admin.busy"))
         return false
     }

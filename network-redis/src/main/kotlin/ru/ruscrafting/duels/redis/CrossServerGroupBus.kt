@@ -7,6 +7,7 @@ import ru.arc.redis.safety.MessageClaimResult
 import ru.arc.redis.safety.OriginBoundRedisBus
 import ru.arc.redis.safety.RecentMessageDeduplicator
 import ru.arc.redis.safety.RedisMessageRejection
+import ru.arc.redis.safety.RedisWireCodec
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
 import ru.ruscrafting.duels.domain.MIN_MULTIPLAYER_PARTICIPANTS
@@ -116,8 +117,34 @@ data class CrossServerGroupMessage(
         participants.firstOrNull { it.playerId == playerId }
             ?: throw IllegalArgumentException("Player $playerId is not part of group lobby $lobbyId")
 
-    private companion object {
-        val MESSAGE_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
+    fun hasAcceptableFutureDeadline(nowEpochMillis: Long): Boolean {
+        val acceptedWindow = MAX_FUTURE_TTL_MILLIS + CLOCK_SKEW_ALLOWANCE_MILLIS
+        val latestAccepted =
+            if (nowEpochMillis > Long.MAX_VALUE - acceptedWindow) Long.MAX_VALUE else nowEpochMillis + acceptedWindow
+        return expiresAtEpochMillis <= latestAccepted
+    }
+
+    companion object {
+        const val MAX_FUTURE_TTL_MILLIS = 10L * 60L * 1_000L
+        const val CLOCK_SKEW_ALLOWANCE_MILLIS = 5_000L
+        private val MESSAGE_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
+    }
+}
+
+private class DeadlineBoundGroupMessageCodec(
+    private val clock: Clock,
+    private val delegate: RedisWireCodec<CrossServerGroupMessage> = GroupMessageCodec(),
+) : RedisWireCodec<CrossServerGroupMessage> {
+    override fun encode(value: CrossServerGroupMessage): String =
+        delegate.encode(value.also(::validateDeadline))
+
+    override fun decode(raw: String): CrossServerGroupMessage =
+        delegate.decode(raw).also(::validateDeadline)
+
+    private fun validateDeadline(message: CrossServerGroupMessage) {
+        require(message.hasAcceptableFutureDeadline(clock.millis())) {
+            "Group lobby deadline exceeds the maximum future TTL"
+        }
     }
 }
 
@@ -133,7 +160,7 @@ class CrossServerGroupBus(
         OriginBoundRedisBus(
             redis = redis,
             channel = CHANNEL,
-            codec = GroupMessageCodec(),
+            codec = DeadlineBoundGroupMessageCodec(clock),
             originAllowed = { origin -> origin != localServer.value },
             embeddedOrigin = { message -> message.sourceServer.value },
             messageId = { message -> replayKey(message.sourceServer, message.messageId) },

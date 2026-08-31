@@ -56,6 +56,7 @@ internal class MultiplayerSessionManager(
     private val networkReturn: (Player, ServerId) -> Unit = { _, _ -> },
     private val clock: Clock = Clock.systemUTC(),
     private val countdownSeconds: Int = 3,
+    private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
 ) : AutoCloseable {
     private data class Session(
         var match: MultiplayerMatch,
@@ -64,9 +65,16 @@ internal class MultiplayerSessionManager(
         val anchors: Map<UUID, Location>,
         val leases: List<PaperChunkTicketLease>,
         val origins: Map<PlayerId, ServerId>? = null,
+        val countdownSeconds: Int,
+        val finishDelayTicks: Long,
         var restoreInFlight: Boolean = false,
         var arrivals: CompletableFuture<Void>? = null,
         var waitingForArrivals: Boolean = false,
+    )
+
+    private data class RuntimePolicy(
+        val countdownSeconds: Int,
+        val finishDelayTicks: Long,
     )
 
     private val sessions = ConcurrentHashMap<MatchId, Session>()
@@ -87,6 +95,7 @@ internal class MultiplayerSessionManager(
         require(onlinePlayers.values.none { isEngaged(it) || playerStates.isPending(it.uniqueId) }) {
             "A multiplayer participant is already engaged or awaiting recovery"
         }
+        val policy = captureRuntimePolicy()
         val matchId = MatchId.random()
         val completion = CompletableFuture<MatchId>()
         arenas.reserveMultiplayer(roster).whenCompleteSync(tasks) { reservation, reservationFailure ->
@@ -102,7 +111,7 @@ internal class MultiplayerSessionManager(
                         return@whenCompleteSync
                     }
                     runCatching {
-                        createSession(matchId, roster, onlinePlayers, reservation, snapshots)
+                        createSession(matchId, roster, onlinePlayers, reservation, snapshots, policy = policy)
                     }.onSuccess {
                         completion.complete(matchId)
                     }.onFailure { failure ->
@@ -124,6 +133,7 @@ internal class MultiplayerSessionManager(
         require(origins.keys == roster.playerIds) { "Every roster participant must have an origin route" }
         require(onlinePlayers.values.all(Player::isOnline)) { "Every multiplayer participant must remain online" }
         require(onlinePlayers.values.none { isEngaged(it) }) { "A multiplayer participant is already engaged" }
+        val policy = captureRuntimePolicy()
         val completion = CompletableFuture<MatchId>()
         val snapshots = playerStates.findMatchSnapshots(matchId, origins)
         val reservation = arenas.reserveMultiplayer(roster)
@@ -138,7 +148,7 @@ internal class MultiplayerSessionManager(
                 val stored = onlinePlayers.mapValues { (playerId, player) ->
                     playerStates.decodeForArena(escrows.getValue(playerId), player)
                 }.mapKeys { it.key.value }
-                createSession(matchId, roster, onlinePlayers, reserved, stored, origins)
+                createSession(matchId, roster, onlinePlayers, reserved, stored, origins, policy)
             }.onSuccess {
                 completion.complete(matchId)
             }.onFailure { startFailure ->
@@ -253,6 +263,7 @@ internal class MultiplayerSessionManager(
         reservation: MultiplayerArenaReservation,
         snapshots: Map<UUID, StoredPlayerSnapshot>,
         origins: Map<PlayerId, ServerId>? = null,
+        policy: RuntimePolicy,
     ) {
         val leases = mutableListOf<PaperChunkTicketLease>()
         var session: Session? = null
@@ -260,7 +271,17 @@ internal class MultiplayerSessionManager(
             reservation.spawns.values.mapTo(leases, ::acquireChunkTicket)
             val match = MultiplayerMatch.reserve(matchId, reservation.arenaId, serverId, roster, clock.instant())
             val anchors = reservation.spawns.mapKeys { it.key.value }
-            val created = Session(match, reservation, snapshots, anchors, leases, origins)
+            val created =
+                Session(
+                    match,
+                    reservation,
+                    snapshots,
+                    anchors,
+                    leases,
+                    origins,
+                    countdownSeconds = policy.countdownSeconds,
+                    finishDelayTicks = policy.finishDelayTicks,
+                )
             session = created
             check(sessions.putIfAbsent(matchId, created) == null) { "Multiplayer match id collision" }
             check(roster.playerIds.none { byPlayer.putIfAbsent(it.value, matchId) != null }) { "A participant became engaged" }
@@ -288,7 +309,7 @@ internal class MultiplayerSessionManager(
                     return@whenCompleteSync
                 }
                 activeSession.match = activeSession.match.beginCountdown()
-                scheduleCountdown(activeSession, countdownSeconds)
+                scheduleCountdown(activeSession, activeSession.countdownSeconds)
             }
         } catch (failure: Throwable) {
             if (session != null) {
@@ -344,7 +365,7 @@ internal class MultiplayerSessionManager(
                     ),
                 )
             }
-            tasks.runLater(60L) { finishRestore(session) }
+            tasks.runLater(session.finishDelayTicks) { finishRestore(session) }
         }
     }
 
@@ -506,7 +527,16 @@ internal class MultiplayerSessionManager(
             .filter { playerId -> byPlayer[playerId.value] == session.match.id }
             .mapNotNull { playerId -> Bukkit.getPlayer(playerId.value) }
 
+    private fun captureRuntimePolicy(): RuntimePolicy {
+        val settings = runtimeSettings()
+        return RuntimePolicy(
+            countdownSeconds = settings?.countdownSeconds ?: countdownSeconds,
+            finishDelayTicks = settings?.multiplayerFinishDelayTicks ?: DEFAULT_FINISH_DELAY_TICKS,
+        )
+    }
+
     private companion object {
         const val RESTORE_RETRY_TICKS = 60L
+        const val DEFAULT_FINISH_DELAY_TICKS = 60L
     }
 }

@@ -39,6 +39,13 @@ data class DuelChallenge(
     companion object {
         private val TERMINAL_STATUSES = ChallengeStatus.entries.toSet() - ChallengeStatus.PENDING
 
+        internal fun validateTtl(ttl: Duration): Duration {
+            require(!ttl.isNegative && !ttl.isZero && ttl <= Duration.ofMinutes(10)) {
+                "Challenge TTL must be greater than zero and at most 10 minutes"
+            }
+            return ttl
+        }
+
         fun create(
             challenger: PlayerId,
             target: PlayerId,
@@ -47,16 +54,14 @@ data class DuelChallenge(
             ttl: Duration,
             arenaSelection: ArenaSelection? = null,
         ): DuelChallenge {
-            require(!ttl.isNegative && !ttl.isZero && ttl <= Duration.ofMinutes(10)) {
-                "Challenge TTL must be between 1 ms and 10 minutes"
-            }
+            val validatedTtl = validateTtl(ttl)
             return DuelChallenge(
                 id = ChallengeId.random(),
                 challenger = challenger,
                 target = target,
                 rules = rules,
                 createdAt = now,
-                expiresAt = now.plus(ttl),
+                expiresAt = now.plus(validatedTtl),
                 arenaSelection = arenaSelection,
             )
         }

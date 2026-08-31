@@ -1,6 +1,7 @@
 package ru.ruscrafting.duels.paper
 
 import org.bukkit.Location
+import org.bukkit.configuration.Configuration
 import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaAllocator
@@ -370,15 +371,28 @@ class PaperArenaCatalog private constructor(
         }
 
     fun reload(plugin: JavaPlugin): Int {
-        val loaded = parse(plugin, ArenaEnvironmentInspector.create(plugin))
+        val loaded = load(plugin)
+        return replaceWith(loaded)
+    }
+
+    /** Publishes an already validated catalog without exposing a partially parsed state. */
+    internal fun replaceWith(replacement: PaperArenaCatalog): Int {
         synchronized(lock) {
             check(reserved.isEmpty() && waiting.none { !it.future.isDone }) {
                 "Arenas cannot be reloaded while matches or queue entries are active"
             }
-            arenas = loaded
+            arenas = replacement.arenas
         }
-        return loaded.size
+        return arenas.size
     }
+
+    /** Non-throwing live-reload publication; a concurrent lease simply defers the candidate. */
+    internal fun tryReplaceWith(replacement: PaperArenaCatalog): Int? =
+        synchronized(lock) {
+            if (reserved.isNotEmpty() || waiting.any { !it.future.isDone }) return@synchronized null
+            arenas = replacement.arenas
+            arenas.size
+        }
 
     private fun reservationFor(id: ArenaId): ArenaReservation = ArenaReservation(id) { release(id) }
 
@@ -414,33 +428,40 @@ class PaperArenaCatalog private constructor(
 
     companion object {
         fun load(plugin: JavaPlugin): PaperArenaCatalog =
-            PaperArenaCatalog(parse(plugin, ArenaEnvironmentInspector.create(plugin)))
+            load(plugin, plugin.config, ArenaEnvironmentInspector.create(plugin))
 
         internal fun load(
             plugin: JavaPlugin,
             inspector: ArenaEnvironmentInspector,
-        ): PaperArenaCatalog = PaperArenaCatalog(parse(plugin, inspector))
+        ): PaperArenaCatalog = load(plugin, plugin.config, inspector)
+
+        internal fun load(
+            plugin: JavaPlugin,
+            configuration: Configuration,
+            inspector: ArenaEnvironmentInspector = ArenaEnvironmentInspector.create(plugin),
+        ): PaperArenaCatalog = PaperArenaCatalog(parse(plugin, configuration, inspector))
 
         private fun parse(
             plugin: JavaPlugin,
+            configuration: Configuration,
             inspector: ArenaEnvironmentInspector,
         ): Map<ArenaId, PaperArena> {
-            val root = plugin.config.getConfigurationSection("arenas")
+            val root = configuration.strictConfigurationSection("arenas")
                 ?: return emptyMap()
             val entries =
                 root.getKeys(false).mapNotNull { rawId ->
-                    val section = root.getConfigurationSection(rawId) ?: return@mapNotNull null
-                    if (!section.getBoolean("enabled", false)) return@mapNotNull null
+                    val section = requireNotNull(root.strictConfigurationSection(rawId))
+                    if (!section.strictBoolean("enabled", false)) return@mapNotNull null
                     val id = ArenaId(rawId.lowercase())
-                    val displayName = section.getString("display-name", rawId)!!.trim()
+                    val displayName = section.strictString("display-name", rawId).trim()
                     val first = section.readLocation(plugin, "first-spawn")
                     val second = section.readLocation(plugin, "second-spawn")
                     val firstWorld = requireNotNull(first.world)
                     require(second.world?.uid == firstWorld.uid) { "Arena $id spawns must be in the same world" }
                     val bounds = section.readBounds(firstWorld.uid)
                     require(bounds.contains(first) && bounds.contains(second)) { "Arena $id spawns must be inside its bounds" }
-                    val hill = section.getConfigurationSection("hill")?.readHill(plugin)
-                    val lobby = section.getConfigurationSection("lobby")?.let { section.readLocation(plugin, "lobby") }
+                    val hill = section.strictConfigurationSection("hill")?.readHill(plugin)
+                    val lobby = section.strictConfigurationSection("lobby")?.let { section.readLocation(plugin, "lobby") }
                     val postMatchAction =
                         section.getString("post-match-action")
                             ?.takeIf(String::isNotBlank)
@@ -479,19 +500,19 @@ class PaperArenaCatalog private constructor(
         }
 
         private fun ConfigurationSection.readBounds(worldId: UUID): ArenaBounds {
-            val section = getConfigurationSection("bounds") ?: error("Missing arena bounds $currentPath.bounds")
-            val minimum = section.getConfigurationSection("min") ?: error("Missing arena bounds $currentPath.bounds.min")
-            val maximum = section.getConfigurationSection("max") ?: error("Missing arena bounds $currentPath.bounds.max")
+            val section = strictConfigurationSection("bounds") ?: error("Missing arena bounds $currentPath.bounds")
+            val minimum = section.strictConfigurationSection("min") ?: error("Missing arena bounds $currentPath.bounds.min")
+            val maximum = section.strictConfigurationSection("max") ?: error("Missing arena bounds $currentPath.bounds.max")
             minimum.requireCoordinates()
             maximum.requireCoordinates()
             return ArenaBounds(
                 worldId = worldId,
-                minX = minimum.getDouble("x"),
-                minY = minimum.getDouble("y"),
-                minZ = minimum.getDouble("z"),
-                maxX = maximum.getDouble("x"),
-                maxY = maximum.getDouble("y"),
-                maxZ = maximum.getDouble("z"),
+                minX = minimum.strictNumber("x"),
+                minY = minimum.strictNumber("y"),
+                minZ = minimum.strictNumber("z"),
+                maxX = maximum.strictNumber("x"),
+                maxY = maximum.strictNumber("y"),
+                maxZ = maximum.strictNumber("z"),
             )
         }
 
@@ -499,17 +520,18 @@ class PaperArenaCatalog private constructor(
             plugin: JavaPlugin,
             path: String,
         ): Location {
-            val section = getConfigurationSection(path) ?: error("Missing arena location $currentPath.$path")
-            val worldName = section.getString("world") ?: error("Missing world for $currentPath.$path")
+            val section = strictConfigurationSection(path) ?: error("Missing arena location $currentPath.$path")
+            val worldName = section.strictString("world", "").takeIf(String::isNotBlank)
+                ?: error("Missing world for $currentPath.$path")
             val world = plugin.server.getWorld(worldName) ?: error("Arena world '$worldName' is not loaded")
             section.requireCoordinates()
             val location = Location(
                 world,
-                section.getDouble("x"),
-                section.getDouble("y"),
-                section.getDouble("z"),
-                section.getDouble("yaw").toFloat(),
-                section.getDouble("pitch").toFloat(),
+                section.strictNumber("x"),
+                section.strictNumber("y"),
+                section.strictNumber("z"),
+                section.strictNumber("yaw", 0.0).toFloat(),
+                section.strictNumber("pitch", 0.0).toFloat(),
             )
             require(listOf(location.x, location.y, location.z).all(Double::isFinite)) {
                 "Arena location $currentPath.$path must contain finite coordinates"
@@ -521,24 +543,24 @@ class PaperArenaCatalog private constructor(
             val center = readLocation(plugin, "center")
             return HillZone(
                 center = center,
-                radius = getDouble("radius", 3.5),
-                height = getDouble("height", 3.0),
+                radius = strictNumber("radius", 3.5),
+                height = strictNumber("height", 3.0),
             )
         }
 
         private fun ConfigurationSection.readMultiplayerSpawns(plugin: JavaPlugin): List<MultiplayerArenaSpawn> {
-            val root = getConfigurationSection("multiplayer-spawns") ?: return emptyList()
+            val root = strictConfigurationSection("multiplayer-spawns") ?: return emptyList()
             return root.getKeys(false)
                 .sortedWith(compareBy<String> { it.toIntOrNull() ?: Int.MAX_VALUE }.thenBy(String::lowercase))
                 .map { key ->
-                    val slot = root.getConfigurationSection(key) ?: error("Invalid multiplayer spawn $currentPath.$key")
+                    val slot = requireNotNull(root.strictConfigurationSection(key))
                     require(slot.contains("team-2") && slot.contains("team-3")) {
                         "Multiplayer spawn ${slot.currentPath} must declare team-2 and team-3"
                     }
                     MultiplayerArenaSpawn(
                         location = root.readLocation(plugin, key),
-                        twoTeam = slot.getInt("team-2"),
-                        threeTeam = slot.getInt("team-3"),
+                        twoTeam = slot.strictInteger("team-2"),
+                        threeTeam = slot.strictInteger("team-3"),
                     )
                 }
         }
@@ -559,7 +581,7 @@ class PaperArenaCatalog private constructor(
 
 internal fun readArenaAllowedLoadouts(section: ConfigurationSection): Set<DuelMode> {
     if (!section.contains(ARENA_LOADOUTS_PATH)) return DuelMode.entries.toSet()
-    val configured = section.getStringList(ARENA_LOADOUTS_PATH)
+    val configured = section.strictStringList(ARENA_LOADOUTS_PATH)
     require(configured.isNotEmpty()) { "Arena ${section.currentPath} must allow at least one loadout" }
     return configured.map { raw ->
         runCatching { DuelMode.valueOf(raw.trim().uppercase()) }
@@ -572,7 +594,7 @@ internal const val ARENA_OBJECTIVES_PATH = "allowed-objectives"
 
 internal fun readArenaAllowedObjectives(section: ConfigurationSection): Set<DuelObjectiveType> {
     if (!section.contains(ARENA_OBJECTIVES_PATH)) return DuelObjectiveType.entries.toSet()
-    val configured = section.getStringList(ARENA_OBJECTIVES_PATH)
+    val configured = section.strictStringList(ARENA_OBJECTIVES_PATH)
     require(configured.isNotEmpty()) { "Arena ${section.currentPath} must allow at least one objective" }
     return configured.mapTo(linkedSetOf()) { raw ->
         parseObjective(raw)

@@ -50,6 +50,7 @@ internal class DuelGameplayListener(
     private val controller: DuelController? = null,
     private val boundaryWarningDistance: Double = 12.0,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
 ) : Listener {
     private val boundaryWarnings = ConcurrentHashMap<UUID, Long>()
     private val boundaryParticles = ConcurrentHashMap<UUID, Long>()
@@ -200,14 +201,15 @@ internal class DuelGameplayListener(
                 } else {
                     val distance = sessions.boundaryDistance(event.player, destination) ?: return
                     val previousDistance = sessions.boundaryDistance(event.player, event.from)
-                    if (distance <= boundaryWarningDistance) {
+                    val warningDistance = runtimeSettings()?.boundaryWarningDistance ?: boundaryWarningDistance
+                    if (distance <= warningDistance) {
                         warnBoundary(
                             event.player,
                             destination,
                             reachedBoundary = false,
                             movingCloser = previousDistance == null || distance < previousDistance,
                         )
-                    } else if (distance > boundaryWarningDistance + 2.0) {
+                    } else if (distance > warningDistance + 2.0) {
                         boundaryWarnings.remove(event.player.uniqueId)
                         boundaryParticles.remove(event.player.uniqueId)
                     }

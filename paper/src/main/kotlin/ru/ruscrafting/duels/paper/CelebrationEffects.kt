@@ -14,17 +14,23 @@ import kotlin.math.sin
 
 internal class CelebrationEffects(
     private val plugin: JavaPlugin,
+    private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
 ) {
-    private val fireworksEnabled = plugin.config.getBoolean("celebration.fireworks.enabled", true)
-    private val fireworkCount = plugin.config.getInt("celebration.fireworks.count", 3).coerceIn(1, MAX_FIREWORKS)
-
-    fun play(player: Player) {
+    fun play(
+        player: Player,
+        settingsOverride: ArcDuelsRuntimeSettings? = null,
+    ) {
         val center = player.location.add(0.0, 1.0, 0.0)
         player.world.spawnParticle(Particle.FIREWORK, center, 120, 1.2, 1.5, 1.2, 0.2)
         player.world.spawnParticle(Particle.FLASH, center, 8, 0.7, 0.8, 0.7, 0.0, Color.WHITE)
         player.world.spawnParticle(Particle.TOTEM_OF_UNDYING, center, 80, 0.8, 1.0, 0.8, 0.15)
         player.world.playSound(center, Sound.ENTITY_FIREWORK_ROCKET_LARGE_BLAST, 0.8f, 1.0f)
         player.world.playSound(center, Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 0.6f, 1.2f)
+        val settings = settingsOverride ?: runtimeSettings()
+        val fireworksEnabled = settings?.celebrationFireworksEnabled
+            ?: plugin.config.getBoolean("celebration.fireworks.enabled", true)
+        val fireworkCount = settings?.celebrationFireworkCount
+            ?: plugin.config.getInt("celebration.fireworks.count", 4).coerceIn(1, MAX_FIREWORKS)
         if (!fireworksEnabled) return
 
         repeat(fireworkCount) { index ->
@@ -32,7 +38,7 @@ internal class CelebrationEffects(
                 plugin,
                 Runnable {
                     if (!plugin.isEnabled || !player.isOnline) return@Runnable
-                    spawnFirework(player, index)
+                    spawnFirework(player, index, fireworkCount)
                 },
                 index * FIREWORK_SPACING_TICKS,
             )
@@ -42,6 +48,7 @@ internal class CelebrationEffects(
     private fun spawnFirework(
         player: Player,
         index: Int,
+        fireworkCount: Int,
     ) {
         val angle = 2.0 * PI * index / fireworkCount
         val location = player.location.add(cos(angle) * 0.9, 0.4, sin(angle) * 0.9)

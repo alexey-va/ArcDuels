@@ -38,6 +38,7 @@ internal class ChallengeMessageCodec(
                 require(wire.messageId.matches(MESSAGE_ID_PATTERN)) { "Unsafe challenge message id" }
                 ServerId(wire.sourceServer)
                 require(wire.type.length in 1..32) { "Unsafe challenge message type" }
+                requireKitFingerprintForMode(DuelMode.valueOf(wire.mode), wire.kitFingerprint)
             },
         )
 
@@ -48,6 +49,7 @@ internal class ChallengeMessageCodec(
                 messageId = value.messageId,
                 sourceServer = value.sourceServer.value,
                 challengeId = value.challenge.id.toString(),
+                kitFingerprint = value.kitFingerprint,
                 challenger = value.challenge.challenger.toString(),
                 target = value.challenge.target.toString(),
                 challengerName = value.challengerName,
@@ -116,6 +118,7 @@ internal class ChallengeMessageCodec(
             sourceServer = ServerId(wire.sourceServer),
             type = ChallengeMessageType.valueOf(wire.type),
             challenge = challenge,
+            kitFingerprint = wire.kitFingerprint,
             challengerName = wire.challengerName,
             targetName = wire.targetName,
             challengerServer = ServerId(wire.challengerServer),
@@ -134,6 +137,7 @@ internal class ChallengeMessageCodec(
         val messageId: String,
         val sourceServer: String,
         val challengeId: String,
+        val kitFingerprint: String?,
         val challenger: String,
         val target: String,
         val challengerName: String,
@@ -165,7 +169,7 @@ internal class ChallengeMessageCodec(
     )
 
     private companion object {
-        const val WIRE_VERSION = 4
+        const val WIRE_VERSION = 5
         const val MAX_MESSAGE_CHARACTERS = 16_384
         val MESSAGE_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
         val WIRE_FIELDS =
@@ -175,6 +179,7 @@ internal class ChallengeMessageCodec(
                 "messageId",
                 "sourceServer",
                 "challengeId",
+                "kitFingerprint",
                 "challenger",
                 "target",
                 "challengerName",
@@ -212,6 +217,7 @@ internal class ChallengeMessageCodec(
                     "selectedArenaServer",
                     "selectedArenaId",
                     "kitId",
+                    "kitFingerprint",
                 )
     }
 }

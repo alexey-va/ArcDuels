@@ -162,6 +162,46 @@ class ChallengeRegistryTest : StringSpec({
         }
     }
 
+    "TTL update preserves existing challenge deadlines and pending entries" {
+        val registry = ChallengeRegistry(clock, Duration.ofSeconds(45))
+        val existing = registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+        val third = PlayerId(UUID.randomUUID())
+        registry.pendingCount shouldBe 1
+
+        registry.updateTtl(Duration.ofSeconds(90))
+
+        registry.find(existing.id)?.expiresAt shouldBe clock.instant().plusSeconds(45)
+        registry.pendingCount shouldBe 1
+        registry.pendingFor(first).map(DuelChallenge::id) shouldBe listOf(existing.id)
+        shouldThrow<IllegalStateException> {
+            registry.create(first, third, DuelRules(DuelMode.OWN_INVENTORY))
+        }
+    }
+
+    "new challenges use the latest TTL" {
+        val registry = ChallengeRegistry(clock, Duration.ofSeconds(45))
+        registry.updateTtl(Duration.ofSeconds(90))
+
+        val challenge = registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+
+        challenge.expiresAt shouldBe clock.instant().plusSeconds(90)
+        registry.pendingCount shouldBe 1
+    }
+
+    "invalid TTL update is rejected without replacing the previous value" {
+        val registry = ChallengeRegistry(clock, Duration.ofSeconds(45))
+
+        listOf(Duration.ZERO, Duration.ofSeconds(-1), Duration.ofMinutes(10).plusNanos(1)).forEach { invalidTtl ->
+            shouldThrow<IllegalArgumentException> {
+                registry.updateTtl(invalidTtl)
+            }
+        }
+
+        val challenge = registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+        challenge.expiresAt shouldBe clock.instant().plusSeconds(45)
+        registry.pendingCount shouldBe 1
+    }
+
     "resolved challenge history remains bounded on a long-running server" {
         val registry = ChallengeRegistry(clock)
         repeat(2_000) {
