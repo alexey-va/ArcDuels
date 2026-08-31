@@ -17,9 +17,57 @@ import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
 import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.ChallengeRegistry
 import java.io.File
+import java.io.InputStreamReader
 import java.time.Clock
 
 class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
+    "startup locale loading repairs obsolete values and persists missing bundled keys" {
+        withReloadPlugin { _, plugin ->
+            val localeFile = File(plugin.dataFolder, "lang/ru.yml")
+            val bundled =
+                requireNotNull(plugin.getResource("lang/ru.yml")).use {
+                    YamlConfiguration.loadConfiguration(InputStreamReader(it, Charsets.UTF_8))
+                }
+            editYaml(localeFile) {
+                set("menu.main.challenge", "<#92bed8>Пользовательский вызов</#92bed8>")
+                set(
+                    "multiplayer.start-failed",
+                    "<#c42323>Не удалось начать групповой матч:</#c42323> <#8c8c8c><reason></#8c8c8c>",
+                )
+                set("multiplayer.invite-open", null)
+            }
+
+            val locales = LocaleService.load(plugin)
+            val repaired = YamlConfiguration.loadConfiguration(localeFile)
+
+            repaired.getString("multiplayer.start-failed")?.contains("<reason>") shouldBe false
+            repaired.contains("multiplayer.invite-open") shouldBe true
+            repaired.getString("menu.main.challenge") shouldBe
+                "<color:#92bed8>Пользовательский вызов</color>"
+            PlainTextComponentSerializer.plainText().serialize(
+                locales.componentForLanguage("ru", "multiplayer.start-failed"),
+            ) shouldBe "Не удалось начать групповой матч. Состояние игроков защищено; попробуй собрать матч ещё раз."
+
+            val afterRepair = localeFile.readText()
+            LocaleService.load(plugin)
+            localeFile.readText() shouldBe afterRepair
+        }
+    }
+
+    "startup locale loading restores a missing locale file from the plugin jar" {
+        withReloadPlugin { _, plugin ->
+            val localeFile = File(plugin.dataFolder, "lang/ru.yml")
+            localeFile.delete() shouldBe true
+
+            val locales = LocaleService.load(plugin)
+
+            localeFile.isFile shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(
+                locales.componentForLanguage("ru", "menu.main.challenge"),
+            ) shouldBe "Вызвать на дуэль 1 на 1"
+        }
+    }
+
     "valid reload updates runtime locale and GUI without registering listeners again" {
         withReloadPlugin { paper, plugin ->
             val listenerCount = HandlerList.getRegisteredListeners(plugin).size

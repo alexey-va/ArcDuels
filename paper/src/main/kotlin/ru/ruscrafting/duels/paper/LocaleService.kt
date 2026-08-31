@@ -12,6 +12,7 @@ import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
+import ru.arc.config.Config
 import ru.arc.text.LocaleCatalog
 import ru.arc.text.LocalizedMiniMessage
 import java.io.File
@@ -150,14 +151,25 @@ class LocaleService private constructor(
             capturedBundles: Map<String, YamlConfiguration>? = null,
         ): LocaleService {
             val languages = listOf("ru", "en")
+            val persistentConfigs =
+                if (prepareFiles) {
+                    languages.associateWith { language ->
+                        val resource = "lang/$language.yml"
+                        Config(plugin.dataFolder.toPath(), resource).also {
+                            it.mergeMissingFromBundled(resource)
+                        }
+                    }
+                } else {
+                    emptyMap()
+                }
             languages.forEach { language ->
                 val localeFile = File(plugin.dataFolder, "lang/$language.yml")
                 if (capturedBundles?.containsKey(language) != true && !localeFile.isFile) {
                     require(prepareFiles) { "Missing ArcDuels locale $language" }
-                    plugin.saveResource("lang/$language.yml", false)
+                    error("ArcCore did not restore ArcDuels locale $language")
                 }
             }
-            val sources =
+            val loadedSources =
                 languages.associateWith { language ->
                     val external =
                         capturedBundles?.get(language)
@@ -171,7 +183,7 @@ class LocaleService private constructor(
             val allowedPlaceholdersByPath =
                 buildMap<String, Set<String>> {
                     putAll(OPTIONAL_PLACEHOLDERS_BY_PATH)
-                    sources.values.forEach { (_, bundled) ->
+                    loadedSources.values.forEach { (_, bundled) ->
                         bundled.getKeys(true).forEach { path ->
                             val names = bundled.localeStrings(path).flatMap(::customTagNames).toSet()
                             if (names.isNotEmpty()) put(path, get(path).orEmpty() + names)
@@ -185,15 +197,73 @@ class LocaleService private constructor(
                         resolver(Placeholder.component(name, Component.empty()))
                     }
                 }.build()
-            sources.forEach { (language, source) ->
-                validateLocaleBundle(
-                    language = language,
-                    effective = source.first,
-                    bundled = source.second,
-                    allowedPlaceholdersByPath = allowedPlaceholdersByPath,
-                    placeholderResolver = placeholderResolver,
-                )
-            }
+            val sources =
+                loadedSources.mapValues { (language, source) ->
+                    val (external, bundled) = source
+                    validateLocaleBundle(
+                        language = language,
+                        effective = bundled,
+                        bundled = bundled,
+                        allowedPlaceholdersByPath = allowedPlaceholdersByPath,
+                        placeholderResolver = placeholderResolver,
+                        validateAdditionalValues = false,
+                    )
+                    if (!prepareFiles) {
+                        validateLocaleBundle(
+                            language = language,
+                            effective = external,
+                            bundled = bundled,
+                            allowedPlaceholdersByPath = allowedPlaceholdersByPath,
+                            placeholderResolver = placeholderResolver,
+                        )
+                        return@mapValues source
+                    }
+                    val repairs =
+                        invalidBundledLocaleValues(
+                            language,
+                            external,
+                            bundled,
+                            allowedPlaceholdersByPath,
+                            placeholderResolver,
+                        )
+                    if (repairs.isEmpty()) {
+                        validateLocaleBundle(
+                            language = language,
+                            effective = external,
+                            bundled = bundled,
+                            allowedPlaceholdersByPath = allowedPlaceholdersByPath,
+                            placeholderResolver = placeholderResolver,
+                            validateAdditionalValues = false,
+                        )
+                        return@mapValues source
+                    }
+                    val displayedPaths = repairs.keys.take(12).joinToString()
+                    val undisplayedCount = repairs.size - minOf(repairs.size, 12)
+                    plugin.logger.warning(
+                        buildString {
+                            append("ArcDuels locale $language restored ${repairs.size} invalid bundled-owned value(s): ")
+                            append(displayedPaths)
+                            if (undisplayedCount > 0) append(" (+$undisplayedCount more)")
+                        },
+                    )
+                    requireNotNull(persistentConfigs[language]).apply {
+                        repairs.forEach(::setStructured)
+                        saveStrict()
+                    }
+                    val repaired = YamlConfiguration().apply {
+                        load(File(plugin.dataFolder, "lang/$language.yml"))
+                        setDefaults(bundled)
+                    }
+                    validateLocaleBundle(
+                        language = language,
+                        effective = repaired,
+                        bundled = bundled,
+                        allowedPlaceholdersByPath = allowedPlaceholdersByPath,
+                        placeholderResolver = placeholderResolver,
+                        validateAdditionalValues = false,
+                    )
+                    repaired to bundled
+                }
             val bundles = sources.mapValues { (_, source) -> source.first }
             val defaultLanguage = configuration.strictString("locale.default", "ru").lowercase(Locale.ROOT)
             require(defaultLanguage in bundles) { "locale.default must be ru or en" }
@@ -228,57 +298,113 @@ class LocaleService private constructor(
             bundled: YamlConfiguration,
             allowedPlaceholdersByPath: Map<String, Set<String>>,
             placeholderResolver: TagResolver,
+            validateAdditionalValues: Boolean = true,
         ) {
-            val paths = (bundled.getKeys(true) + effective.getKeys(true)).sorted()
-            paths.forEach { path ->
-                val bundledValue = bundled.get(path)
-                val effectiveValue = effective.get(path)
-                when (bundledValue) {
-                    is ConfigurationSection ->
-                        require(effectiveValue is ConfigurationSection) {
-                            "Locale $language.$path must be a section"
-                        }
+            val bundledPaths = bundled.getKeys(true)
+            bundledPaths.sorted().forEach { path ->
+                validateBundledLocaleValue(
+                    language,
+                    path,
+                    effective.get(path),
+                    requireNotNull(bundled.get(path)),
+                    allowedPlaceholdersByPath,
+                    placeholderResolver,
+                )
+            }
+            if (validateAdditionalValues) {
+                (effective.getKeys(true) - bundledPaths).sorted().forEach { path ->
+                    validateAdditionalLocaleValue(
+                        language,
+                        path,
+                        effective.get(path),
+                        allowedPlaceholdersByPath,
+                        placeholderResolver,
+                    )
+                }
+            }
+        }
 
-                    is String -> {
-                        require(effectiveValue is String) {
-                            "Locale $language.$path must be a scalar string"
-                        }
-                        validateMiniMessage(
+        private fun invalidBundledLocaleValues(
+            language: String,
+            effective: YamlConfiguration,
+            bundled: YamlConfiguration,
+            allowedPlaceholdersByPath: Map<String, Set<String>>,
+            placeholderResolver: TagResolver,
+        ): Map<String, Any> {
+            val repairs = linkedMapOf<String, Any>()
+            bundled.getKeys(true)
+                .sortedWith(compareBy({ it.count { character -> character == '.' } }, { it }))
+                .forEach { path ->
+                    if (repairs.keys.any { repaired -> path.startsWith("$repaired.") }) return@forEach
+                    try {
+                        validateBundledLocaleValue(
                             language,
                             path,
-                            path,
-                            effectiveValue,
+                            effective.get(path),
+                            requireNotNull(bundled.get(path)),
                             allowedPlaceholdersByPath,
                             placeholderResolver,
                         )
+                    } catch (_: IllegalArgumentException) {
+                        repairs[path] = structuredLocaleValue(requireNotNull(bundled.get(path)))
+                    }
+                }
+            return repairs
+        }
+
+        private fun validateBundledLocaleValue(
+            language: String,
+            path: String,
+            effectiveValue: Any?,
+            bundledValue: Any,
+            allowedPlaceholdersByPath: Map<String, Set<String>>,
+            placeholderResolver: TagResolver,
+        ) {
+            when (bundledValue) {
+                is ConfigurationSection ->
+                    require(effectiveValue is ConfigurationSection) {
+                        "Locale $language.$path must be a section"
                     }
 
-                    is List<*> -> {
-                        requireStringList("Bundled locale", language, path, bundledValue)
-                        requireStringList("Locale", language, path, effectiveValue).forEachIndexed { index, line ->
-                            validateMiniMessage(
-                                language,
-                                "$path[$index]",
-                                path,
-                                line,
-                                allowedPlaceholdersByPath,
-                                placeholderResolver,
-                            )
-                        }
+                is String -> {
+                    require(effectiveValue is String) {
+                        "Locale $language.$path must be a scalar string"
                     }
-
-                    null -> validateAdditionalLocaleValue(
+                    validateMiniMessage(
                         language,
+                        path,
                         path,
                         effectiveValue,
                         allowedPlaceholdersByPath,
                         placeholderResolver,
                     )
-
-                    else -> error("Bundled locale $language.$path must be a string, string list, or section")
                 }
+
+                is List<*> -> {
+                    requireStringList("Bundled locale", language, path, bundledValue)
+                    requireStringList("Locale", language, path, effectiveValue).forEachIndexed { index, line ->
+                        validateMiniMessage(
+                            language,
+                            "$path[$index]",
+                            path,
+                            line,
+                            allowedPlaceholdersByPath,
+                            placeholderResolver,
+                        )
+                    }
+                }
+
+                else -> error("Bundled locale $language.$path must be a string, string list, or section")
             }
         }
+
+        private fun structuredLocaleValue(value: Any): Any =
+            when (value) {
+                is ConfigurationSection -> value.getValues(false).mapValues { (_, child) -> structuredLocaleValue(child) }
+                is List<*> -> value.map { child -> structuredLocaleValue(requireNotNull(child)) }
+                is String -> value
+                else -> error("Bundled locale value must be a string, string list, or section")
+            }
 
         private fun validateAdditionalLocaleValue(
             language: String,

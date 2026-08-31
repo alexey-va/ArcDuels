@@ -3,5 +3,5 @@ plugins {
 }
 
 dependencies {
-    implementation("ru.ruscrafting.arc:arc-core:2.2.0")
+    implementation("ru.ruscrafting.arc:arc-core:2.2.5")
 }
