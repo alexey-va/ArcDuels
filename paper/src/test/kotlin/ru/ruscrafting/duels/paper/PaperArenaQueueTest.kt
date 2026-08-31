@@ -1,6 +1,7 @@
 package ru.ruscrafting.duels.paper
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.mockbukkit.mockbukkit.ServerMock
@@ -20,6 +21,7 @@ import ru.ruscrafting.duels.domain.MultiplayerRoster
 import ru.ruscrafting.duels.domain.MultiplayerRules
 import ru.ruscrafting.duels.domain.PlayerId
 import java.util.UUID
+import java.util.concurrent.ExecutionException
 
 class PaperArenaQueueTest : StringSpec({
     lateinit var server: ServerMock
@@ -193,6 +195,64 @@ class PaperArenaQueueTest : StringSpec({
         pair.get().arenaId shouldBe ArenaId("queue")
         pair.get().close()
     }
+
+    "multiplayer capacity remains true while a compatible arena is occupied and reservation reports busy" {
+        plugin.config.set("arenas.overlap.enabled", false)
+        plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
+        plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
+        val catalog = PaperArenaCatalog.load(plugin)
+        val roster =
+            MultiplayerRoster(
+                MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("classic")),
+                (0 until 3).map { index ->
+                    MultiplayerParticipant(PlayerId(UUID(0, index + 1L)), kitId = KitId("classic"))
+                },
+            )
+
+        val active = catalog.reserveMultiplayer(roster).get()
+        catalog.hasMultiplayerCapacity(roster) shouldBe true
+        val failure = shouldThrow<ExecutionException> { catalog.reserveMultiplayer(roster).get() }
+        (failure.cause is MultiplayerArenasBusyException) shouldBe true
+        active.close()
+    }
+
+    "procedural multiplayer placement supports every size and layout from three through twelve players" {
+        plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
+        plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
+        val catalog = PaperArenaCatalog.load(plugin)
+
+        (3..12).forEach { size ->
+            listOf(
+                MultiplayerLayout.FREE_FOR_ALL,
+                MultiplayerLayout.TWO_TEAMS,
+                MultiplayerLayout.THREE_TEAMS,
+            ).forEach { layout ->
+                val roster =
+                    MultiplayerRoster(
+                        MultiplayerRules(layout, MultiplayerKitPolicy.SHARED, KitId("classic")),
+                        (0 until size).map { index ->
+                            MultiplayerParticipant(
+                                PlayerId(UUID(0, index + 1L)),
+                                team = layout.teamCount?.let { index % it + 1 },
+                                kitId = KitId("classic"),
+                            )
+                        },
+                    )
+
+                withClue("procedural placement for $size players in $layout") {
+                    catalog.hasMultiplayerCapacity(roster) shouldBe true
+                }
+                val reservation = catalog.reserveMultiplayer(roster).get()
+                reservation.spawns.size shouldBe size
+                reservation.spawns.values
+                    .map { Triple(it.x, it.y, it.z) }
+                    .distinct()
+                    .size shouldBe size
+                reservation.spawns.values.all(catalog.get(reservation.arenaId).bounds::contains) shouldBe true
+                reservation.close()
+            }
+        }
+    }
 })
 
 private fun configureArena(
@@ -221,15 +281,4 @@ private fun configureArena(
     plugin.config.set("$path.bounds.max.x", 10.0)
     plugin.config.set("$path.bounds.max.y", 90.0)
     plugin.config.set("$path.bounds.max.z", 10.0)
-    repeat(6) { index ->
-        val slot = index + 1
-        plugin.config.set("$path.multiplayer-spawns.$slot.world", world)
-        plugin.config.set("$path.multiplayer-spawns.$slot.x", -7.5 + index * 3.0)
-        plugin.config.set("$path.multiplayer-spawns.$slot.y", 70.0)
-        plugin.config.set("$path.multiplayer-spawns.$slot.z", if (index % 2 == 0) -5.0 else 5.0)
-        plugin.config.set("$path.multiplayer-spawns.$slot.yaw", 0.0)
-        plugin.config.set("$path.multiplayer-spawns.$slot.pitch", 0.0)
-        plugin.config.set("$path.multiplayer-spawns.$slot.team-2", if (index < 3) 1 else 2)
-        plugin.config.set("$path.multiplayer-spawns.$slot.team-3", index % 3 + 1)
-    }
 }

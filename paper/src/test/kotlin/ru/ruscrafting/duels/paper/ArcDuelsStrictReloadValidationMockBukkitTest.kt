@@ -35,9 +35,11 @@ class ArcDuelsStrictReloadValidationMockBukkitTest : StringSpec({
                         set("arenas.example.enabled", true)
                         set("arenas.example.hill.radius", "3.5")
                     },
-                    InvalidScalar("arenas.example.multiplayer-spawns.1.team-2") {
-                        set("arenas.example.enabled", true)
-                        set("arenas.example.multiplayer-spawns.1.team-2", 1.0)
+                    InvalidScalar("multiplayer.spawn-placement.radius-scale") {
+                        set("multiplayer.spawn-placement.radius-scale", false)
+                    },
+                    InvalidScalar("multiplayer.spawn-placement") {
+                        set("multiplayer.spawn-placement", false)
                     },
                     InvalidScalar("arenas.example.hill") {
                         set("arenas.example.enabled", true)
@@ -47,9 +49,8 @@ class ArcDuelsStrictReloadValidationMockBukkitTest : StringSpec({
                         set("arenas.example.enabled", true)
                         set("arenas.example.lobby", false)
                     },
-                    InvalidScalar("arenas.example.multiplayer-spawns") {
-                        set("arenas.example.enabled", true)
-                        set("arenas.example.multiplayer-spawns", false)
+                    InvalidScalar("multiplayer.spawn-placement.teammate-spacing") {
+                        set("multiplayer.spawn-placement.teammate-spacing", 7.0)
                     },
                     InvalidScalar("arenas.example.allowed-loadouts") {
                         set("arenas.example.enabled", true)

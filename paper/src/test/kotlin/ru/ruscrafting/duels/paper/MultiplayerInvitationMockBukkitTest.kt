@@ -97,6 +97,35 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
         }
     }
 
+    "setup refuses an impossible group match before sending invitations" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(
+                    paper,
+                    listOf("GroupHost", "Alpha", "Bravo"),
+                    configureArena = { plugin ->
+                        plugin.config.set("arenas.example.first-spawn.z", -1.0)
+                        plugin.config.set("arenas.example.second-spawn.z", 1.0)
+                    },
+                ).use { harness ->
+                    val gui = harness.registerGui()
+                    val host = harness.players[0].apply { setLocale(Locale.ENGLISH) }
+
+                    gui.open(host)
+                    host.click(10)
+                    host.click(11)
+                    host.click(34)
+
+                    host.nextPlainMessage().contains("no suitable group arena") shouldBe true
+                    harness.players.drop(1).all { it.nextComponentMessage() == null } shouldBe true
+                    host.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
+                    harness.manager.activeCount() shouldBe 0
+                    gui.close()
+                }
+            }
+        }
+    }
+
     "local invitation opens only for the invited member and exact lobby id" {
         MockBukkitTestRuntime.open().use { paper ->
             failOnUnsupportedMockBukkitOperation {

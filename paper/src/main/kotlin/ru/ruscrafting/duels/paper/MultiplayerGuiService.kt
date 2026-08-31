@@ -335,6 +335,24 @@ internal class MultiplayerGuiService(
             host.sendMessage(locales.notice(host, "multiplayer.invalid-size"))
             return openSetup(host, draft)
         }
+        val plannedRoster = roster(draft)
+        if (!sessions.hasArenaCapacity(plannedRoster)) {
+            DuelLog.info(
+                "multiplayer-lobby-refused",
+                host,
+                "reason=no_arena_capacity participants={} layout={}",
+                total,
+                draft.layout,
+            )
+            host.sendMessage(
+                locales.notice(
+                    host,
+                    "multiplayer.no-arena-capacity",
+                    LocaleService.text("players", total),
+                ),
+            )
+            return openSetup(host, draft)
+        }
         val memberProfiles = selected.map { target ->
             val localPlayer = plugin.server.getPlayer(target.uniqueId)?.takeIf(Player::isOnline)
             NetworkGroupParticipant(
@@ -502,15 +520,18 @@ internal class MultiplayerGuiService(
         DuelLog.info("multiplayer-start-attempt", MatchId(lobby.id), "network=false participants={}", online.size)
         sessions.start(roster, online.associateBy { PlayerId(it.uniqueId) }).whenCompleteSync(tasks) { _, failure ->
             if (failure != null) {
+                val cause = failure.multiplayerRootCause()
+                val reason = cause.multiplayerStartFailure()
                 DuelLog.warn(
                     "multiplayer-start-failed",
                     MatchId(lobby.id),
-                    "network=false error_type={} error={}",
-                    failure.javaClass.simpleName,
-                    failure.message,
+                    "network=false reason={} error_type={} error={}",
+                    reason.code,
+                    cause.javaClass.simpleName,
+                    cause.message,
                 )
                 online.filter(Player::isOnline).forEach { player ->
-                    player.sendMessage(locales.notice(player, "multiplayer.start-failed"))
+                    player.sendMessage(locales.notice(player, reason.localeKey, LocaleService.text("players", online.size)))
                 }
             } else {
                 DuelLog.info("multiplayer-started", MatchId(lobby.id), "network=false participants={}", online.size)
@@ -575,16 +596,19 @@ internal class MultiplayerGuiService(
             .whenCompleteSync(tasks) { _, failure ->
                 duelSessions.stopExpectingNetworkPlayers(origins.keys)
                 if (failure != null) {
+                    val cause = failure.multiplayerRootCause()
+                    val reason = cause.multiplayerStartFailure()
                     DuelLog.warn(
                         "multiplayer-start-failed",
                         MatchId(lobby.id),
-                        "network=true error_type={} error={}",
-                        failure.javaClass.simpleName,
-                        failure.message,
+                        "network=true reason={} error_type={} error={}",
+                        reason.code,
+                        cause.javaClass.simpleName,
+                        cause.message,
                     )
                     publish(groupMessage(lobby, GroupLobbyMessageType.CANCEL))
                     online.filter(Player::isOnline).forEach { player ->
-                        player.sendMessage(locales.notice(player, "multiplayer.start-failed"))
+                        player.sendMessage(locales.notice(player, reason.localeKey, LocaleService.text("players", online.size)))
                     }
                     recoverNetworkParticipants(lobby)
                 } else {
@@ -604,6 +628,24 @@ internal class MultiplayerGuiService(
                 )
             },
         )
+
+    private fun roster(draft: Draft): MultiplayerRoster {
+        val kitId = if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) draft.sharedKit else draft.hostKit
+        return MultiplayerRoster(
+            MultiplayerRules(
+                draft.layout,
+                draft.kitPolicy,
+                draft.sharedKit.takeIf { draft.kitPolicy == MultiplayerKitPolicy.SHARED },
+            ),
+            (listOf(draft.hostId) + draft.selected).mapIndexed { index, playerId ->
+                MultiplayerParticipant(
+                    playerId = PlayerId(playerId),
+                    team = draft.layout.teamCount?.let { index % it + 1 },
+                    kitId = kitId,
+                )
+            },
+        )
+    }
 
     private fun recoverNetworkParticipants(lobby: Lobby) {
         duelSessions.stopExpectingNetworkPlayers(lobby.participants.map(NetworkGroupParticipant::playerId))

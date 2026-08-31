@@ -77,6 +77,7 @@ internal fun multiplayerHarness(
     networkReturn: (Player, ServerId) -> Unit = { _, _ -> },
     enableArena: Boolean = true,
     runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
+    configureArena: (ArcDuelsPlugin) -> Unit = {},
 ): MultiplayerHarness {
     val plugin = paper.loadPlugin<ArcDuelsPlugin>()
     HandlerList.unregisterAll(plugin)
@@ -84,6 +85,7 @@ internal fun multiplayerHarness(
     plugin.config.set("arenas.example.enabled", enableArena)
     plugin.config.set("arenas.example.allowed-loadouts", listOf("KIT"))
     plugin.config.set("arenas.example.allowed-objectives", listOf("ELIMINATION"))
+    configureArena(plugin)
     val players: List<PlayerMock> = playerNames.mapIndexed { index, name ->
         paper.server.addPlayer(name).also { player ->
             player.teleport(Location(world, index.toDouble(), 70.0, 40.0))

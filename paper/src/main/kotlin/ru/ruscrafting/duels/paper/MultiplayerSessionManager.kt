@@ -164,6 +164,8 @@ internal class MultiplayerSessionManager(
 
     fun isLocked(player: Player): Boolean = isEngaged(player)
 
+    fun hasArenaCapacity(roster: MultiplayerRoster): Boolean = arenas.hasMultiplayerCapacity(roster)
+
     fun isInsideArena(player: Player, destination: Location): Boolean =
         matchFor(player)?.let { arenas.get(it.arenaId).bounds.contains(destination) } ?: true
 
@@ -302,8 +304,16 @@ internal class MultiplayerSessionManager(
                     return@whenCompleteSync
                 }
                 if (failure != null) {
+                    val cause = failure.multiplayerRootCause()
+                    DuelLog.warn(
+                        "multiplayer-arrival-failed",
+                        activeSession.match.id,
+                        "reason=teleport error_type={} error={}",
+                        cause.javaClass.simpleName,
+                        cause.message,
+                    )
                     participants(activeSession).forEach { player ->
-                        audience.sendMessage(player, locales.notice(player, "multiplayer.start-failed", LocaleService.text("reason", failure.message ?: "teleport")))
+                        audience.sendMessage(player, locales.notice(player, "multiplayer.start-failed"))
                     }
                     finishRestore(activeSession)
                     return@whenCompleteSync
@@ -350,6 +360,14 @@ internal class MultiplayerSessionManager(
                 return@whenCompleteSync
             }
             if (failure != null) {
+                val cause = failure.multiplayerRootCause()
+                DuelLog.warn(
+                    "multiplayer-result-record-failed",
+                    session.match.id,
+                    "error_type={} error={}",
+                    cause.javaClass.simpleName,
+                    cause.message,
+                )
                 participants(session).forEach { audience.sendMessage(it, locales.notice(it, "multiplayer.result-pending")) }
                 tasks.runLater(40L) { complete(session) }
                 return@whenCompleteSync

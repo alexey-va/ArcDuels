@@ -220,11 +220,6 @@ arenas:
     allowed-objectives: [ELIMINATION, KING_OF_THE_HILL, SUMO, BOXING, COMBO]
     first-spawn: { world: duels, x: -8.5, y: 65, z: 0.5, yaw: -90, pitch: 0 }
     second-spawn: { world: duels, x: 8.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
-    multiplayer-spawns:
-      '1': { world: duels, x: -8.5, y: 65, z: -8.5, yaw: -45, pitch: 0, team-2: 1, team-3: 1 }
-      '2': { world: duels, x: 8.5, y: 65, z: -8.5, yaw: 45, pitch: 0, team-2: 1, team-3: 2 }
-      '3': { world: duels, x: 8.5, y: 65, z: 8.5, yaw: 135, pitch: 0, team-2: 2, team-3: 3 }
-      '4': { world: duels, x: -8.5, y: 65, z: 8.5, yaw: -135, pitch: 0, team-2: 2, team-3: 1 }
     lobby: { world: duels, x: 0.5, y: 65, z: 20.5, yaw: 180, pitch: 0 }
     post-match-action: LOCAL_LOBBY # or RETURN_TO_ORIGIN
     bounds:
@@ -236,14 +231,20 @@ arenas:
       height: 3.0
 ```
 
-`multiplayer-spawns` is the explicit safety contract for group matches. A
-group-capable arena needs enough distinct bounded points for the requested
-3–12-player roster. `team-2` and `team-3` declare which side owns each point in
-the corresponding layout; free-for-all uses the points in configured order.
-ArcDuels validates capacity before reservation and shares the same exclusive
-arena lease with 1v1, so the two runtimes cannot overlap. The in-game arena
-editor does not invent group coordinates: operators must survey and configure
-real safe points before enabling this path on a production arena.
+Group starts are generated from the verified axis between `first-spawn` and
+`second-spawn`, then constrained by `bounds`. Free-for-all distributes players
+over equal sectors. Two- and three-team layouts put each team on an
+opposite/equidistant side and keep teammates in compact centred rows, facing
+the arena centre. The global `multiplayer.spawn-placement` section controls
+radius scale, teammate spacing, minimum player separation, and horizontal
+bounds inset; all four values are strict reloadable configuration.
+
+ArcDuels calculates the entire requested 3–12-player layout before it creates a
+lobby or sends an invitation. If no enabled arena can safely fit that exact
+size and team layout, the host gets an actionable refusal while the setup menu
+stays open. A later reservation race is reported separately as “all suitable
+arenas are occupied.” Group and 1v1 paths share the same exclusive arena lease,
+so the two runtimes cannot overlap.
 
 The group GUI can invite players from the authenticated network directory, not
 only the current Paper node. Invite responses are sent through Redis, accepted

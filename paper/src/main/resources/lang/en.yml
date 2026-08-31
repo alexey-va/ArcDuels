@@ -264,6 +264,8 @@ multiplayer:
   no-kits: '<red>A group match requires at least one configured kit.</red>'
   network-unavailable: '<red>Network group matches are currently unavailable.</red>'
   invalid-size: '<red>Select 3 to 12 participants and keep every team non-empty.</red>'
+  no-arena-capacity: '<#c42323>A <players>-player match cannot be created.</#c42323> <#8c8c8c>This server has no suitable group arena. Reduce the roster or choose another format.</#8c8c8c>'
+  arenas-busy: '<#ff9f0f>All suitable group arenas are occupied.</#ff9f0f> <#8c8c8c>Try assembling the match again a little later.</#8c8c8c>'
   player-left: '<red>A participant left or became busy.</red>'
   invited: |-
     <#fff4d6><player> invited you to a group match.</#fff4d6>
