@@ -20,7 +20,8 @@ multiplayer:
     layout: FREE_FOR_ALL
     kit-policy: SHARED
     kit: classic
-  # Procedural placement uses every arena's verified 1v1 axis and bounds.
+  # Procedural placement uses every arena's verified 1v1 axis, bounds, and
+  # walkable component so generated starts cannot land behind arena barriers.
   # New drafts and /duels reload use current values; active matches keep their
   # already assigned positions.
   spawn-placement:

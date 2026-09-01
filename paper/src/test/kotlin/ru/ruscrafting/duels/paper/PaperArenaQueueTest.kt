@@ -32,7 +32,10 @@ class PaperArenaQueueTest : StringSpec({
         paper = MockBukkitTestRuntime.open()
         server = paper.server
         plugin = paper.loadPlugin<ArcDuelsPlugin>()
-        server.addSimpleWorld("queue-world")
+        val world = server.addSimpleWorld("queue-world")
+        for (x in -10..10) {
+            for (z in -10..10) world.getBlockAt(x, 69, z).type = org.bukkit.Material.STONE
+        }
         configureArena(plugin, "queue", "queue-world")
     }
 

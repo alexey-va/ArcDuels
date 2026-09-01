@@ -468,7 +468,7 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
 
                     player.openInventory(Bukkit.createInventory(null, 9))
                     player.click(0).isCancelled shouldBe true
-                    val unauthorizedTeleport = paper.callEvent(
+                    val rescueTeleport = paper.callEvent(
                         PlayerTeleportEvent(
                             player,
                             player.location,
@@ -476,7 +476,17 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                             PlayerTeleportEvent.TeleportCause.COMMAND,
                         ),
                     )
-                    unauthorizedTeleport.isCancelled shouldBe true
+                    rescueTeleport.isCancelled shouldBe false
+
+                    val outsideTeleport = paper.callEvent(
+                        PlayerTeleportEvent(
+                            player,
+                            player.location,
+                            anchor.clone().apply { x = 150.0 },
+                            PlayerTeleportEvent.TeleportCause.COMMAND,
+                        ),
+                    )
+                    outsideTeleport.isCancelled shouldBe true
 
                     paper.callEvent(PlayerCommandPreprocessEvent(player, "/msg Alpha hello")).isCancelled shouldBe false
                     paper.callEvent(PlayerCommandPreprocessEvent(player, "/spawn")).isCancelled shouldBe true

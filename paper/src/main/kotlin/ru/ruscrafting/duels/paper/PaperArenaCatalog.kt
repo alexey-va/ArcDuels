@@ -149,6 +149,8 @@ data class PaperArena(
     val postMatchAction: ArenaPostMatchAction? = null,
     val multiplayerPlacement: MultiplayerSpawnPlacementSettings = MultiplayerSpawnPlacementSettings(),
 ) {
+    internal var multiplayerNavigation: MultiplayerSpawnNavigation = MultiplayerSpawnNavigation.UNCHECKED
+
     init {
         require(displayName.isNotBlank() && displayName.length <= 64 && displayName.none(Char::isISOControl)) {
             "Arena display name must contain 1..64 visible characters"
@@ -454,7 +456,10 @@ class PaperArenaCatalog private constructor(
                             lobby,
                             postMatchAction,
                             multiplayerPlacement,
-                        )
+                        ).also { arena ->
+                            arena.multiplayerNavigation =
+                                MultiplayerSpawnNavigation.create(first, second, bounds, multiplayerPlacement)
+                        }
                 }
             require(entries.map(Pair<ArenaId, PaperArena>::first).distinct().size == entries.size) {
                 "Arena ids must be unique after lowercase normalization"

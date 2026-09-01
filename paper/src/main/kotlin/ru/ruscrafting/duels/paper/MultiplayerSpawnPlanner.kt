@@ -1,14 +1,17 @@
 package ru.ruscrafting.duels.paper
 
 import org.bukkit.Location
+import org.bukkit.World
 import org.bukkit.configuration.ConfigurationSection
 import ru.ruscrafting.duels.domain.MultiplayerLayout
 import ru.ruscrafting.duels.domain.MultiplayerRoster
 import ru.ruscrafting.duels.domain.PlayerId
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -93,7 +96,12 @@ internal object MultiplayerSpawnPlanner {
                     }
                 }
             }
-            if (isValid(arena, planned.values.toList())) return planned
+            val navigable = linkedMapOf<PlayerId, Location>()
+            for ((playerId, candidate) in planned) {
+                val spawn = arena.multiplayerNavigation.snap(candidate) ?: break
+                navigable[playerId] = spawn
+            }
+            if (navigable.size == planned.size && isValid(arena, navigable.values.toList())) return navigable
         }
         return null
     }
@@ -144,4 +152,157 @@ internal object MultiplayerSpawnPlanner {
     }
 
     private const val FULL_CIRCLE = PI * 2.0
+}
+
+internal fun interface MultiplayerSpawnNavigation {
+    fun snap(candidate: Location): Location?
+
+    companion object {
+        val UNCHECKED = MultiplayerSpawnNavigation(Location::clone)
+
+        fun create(
+            firstSpawn: Location,
+            secondSpawn: Location,
+            bounds: ArenaBounds,
+            settings: MultiplayerSpawnPlacementSettings,
+        ): MultiplayerSpawnNavigation =
+            BukkitMultiplayerSpawnNavigation(firstSpawn, secondSpawn, bounds, settings)
+    }
+}
+
+/**
+ * Caches the walkable component around the verified first duel spawn. A single
+ * flood fill proves transitive reachability for every generated group spawn;
+ * candidates behind barriers are snapped back to the nearest cell in that
+ * component instead of being accepted merely because broad safety bounds fit.
+ */
+private class BukkitMultiplayerSpawnNavigation(
+    private val firstSpawn: Location,
+    secondSpawn: Location,
+    private val bounds: ArenaBounds,
+    settings: MultiplayerSpawnPlacementSettings,
+) : MultiplayerSpawnNavigation {
+    private val world = requireNotNull(firstSpawn.world)
+    private val limits = NavigationLimits.create(firstSpawn, secondSpawn, bounds, settings)
+    private val reachable by lazy(LazyThreadSafetyMode.NONE, ::discoverReachable)
+
+    override fun snap(candidate: Location): Location? {
+        if (candidate.world?.uid != world.uid) return null
+        val target = Cell(candidate.blockX, candidate.blockY, candidate.blockZ)
+        val cell =
+            reachable.asSequence()
+                .filter { cell ->
+                    abs(cell.x - target.x) <= MAX_HORIZONTAL_SNAP &&
+                        abs(cell.z - target.z) <= MAX_HORIZONTAL_SNAP &&
+                        abs(cell.y - target.y) <= MAX_VERTICAL_SNAP
+                }
+                .minWithOrNull(
+                    compareBy<Cell> { cell ->
+                        val dx = candidate.x - (cell.x + 0.5)
+                        val dy = candidate.y - cell.y
+                        val dz = candidate.z - (cell.z + 0.5)
+                        dx * dx + dy * dy + dz * dz
+                    }.thenBy { it.y }.thenBy { it.x }.thenBy { it.z },
+                ) ?: return null
+        if (cell == target && isStandable(cell)) return candidate.clone()
+        return Location(world, cell.x + 0.5, cell.y.toDouble(), cell.z + 0.5, candidate.yaw, candidate.pitch)
+    }
+
+    private fun discoverReachable(): Set<Cell> {
+        val origin = nearestStandable(firstSpawn) ?: return emptySet()
+        val queue = ArrayDeque<Cell>()
+        val visited = linkedSetOf<Cell>()
+        queue += origin
+        while (queue.isNotEmpty() && visited.size < MAX_REACHABLE_CELLS) {
+            val current = queue.removeFirst()
+            if (!visited.add(current)) continue
+            for ((dx, dz) in CARDINAL_DIRECTIONS) {
+                for (dy in STEP_HEIGHTS) {
+                    val next = Cell(current.x + dx, current.y + dy, current.z + dz)
+                    if (next !in visited && limits.contains(next) && isStandable(next)) {
+                        queue += next
+                        break
+                    }
+                }
+            }
+        }
+        return visited
+    }
+
+    private fun nearestStandable(location: Location): Cell? {
+        val target = Cell(location.blockX, location.blockY, location.blockZ)
+        for (radius in 0..1) {
+            for (dx in -radius..radius) {
+                for (dz in -radius..radius) {
+                    for (dy in 0..MAX_VERTICAL_SNAP) {
+                        listOf(dy, -dy).distinct().forEach { offsetY ->
+                            val candidate = Cell(target.x + dx, target.y + offsetY, target.z + dz)
+                            if (limits.contains(candidate) && isStandable(candidate)) return candidate
+                        }
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun isStandable(cell: Cell): Boolean {
+        val feet = world.getBlockAt(cell.x, cell.y, cell.z)
+        val head = world.getBlockAt(cell.x, cell.y + 1, cell.z)
+        val floor = world.getBlockAt(cell.x, cell.y - 1, cell.z)
+        return feet.isPassable && !feet.isLiquid &&
+            head.isPassable && !head.isLiquid &&
+            floor.type.isSolid
+    }
+
+    private data class Cell(
+        val x: Int,
+        val y: Int,
+        val z: Int,
+    )
+
+    private data class NavigationLimits(
+        val minX: Int,
+        val minY: Int,
+        val minZ: Int,
+        val maxX: Int,
+        val maxY: Int,
+        val maxZ: Int,
+    ) {
+        fun contains(cell: Cell): Boolean =
+            cell.x in minX..maxX && cell.y in minY..maxY && cell.z in minZ..maxZ
+
+        companion object {
+            fun create(
+                first: Location,
+                second: Location,
+                bounds: ArenaBounds,
+                settings: MultiplayerSpawnPlacementSettings,
+            ): NavigationLimits {
+                val centerX = (first.x + second.x) / 2.0
+                val centerZ = (first.z + second.z) / 2.0
+                val formationRadius = hypot(first.x - centerX, first.z - centerZ) * settings.radiusScale
+                val horizontalRadius = formationRadius + settings.teammateSpacing * 2.0 + NAVIGATION_MARGIN
+                val inset = settings.boundsInset
+                return NavigationLimits(
+                    minX = ceil(maxOf(bounds.minX + inset, centerX - horizontalRadius) - 0.5).toInt(),
+                    minY = maxOf(ceil(bounds.minY).toInt(), minOf(first.blockY, second.blockY) - VERTICAL_MARGIN),
+                    minZ = ceil(maxOf(bounds.minZ + inset, centerZ - horizontalRadius) - 0.5).toInt(),
+                    maxX = floor(minOf(bounds.maxX - inset, centerX + horizontalRadius) - 0.5).toInt(),
+                    maxY = minOf(floor(bounds.maxY).toInt(), maxOf(first.blockY, second.blockY) + VERTICAL_MARGIN),
+                    maxZ = floor(minOf(bounds.maxZ - inset, centerZ + horizontalRadius) - 0.5).toInt(),
+                )
+            }
+        }
+    }
+
+    private companion object {
+        val CARDINAL_DIRECTIONS = listOf(-1 to 0, 1 to 0, 0 to -1, 0 to 1)
+        val STEP_HEIGHTS = listOf(0, 1, -1)
+        const val MAX_HORIZONTAL_SNAP = 4
+        const val MAX_VERTICAL_SNAP = 2
+        const val VERTICAL_MARGIN = 6
+        const val NAVIGATION_MARGIN = 8.0
+        const val MAX_REACHABLE_CELLS = 20_000
+    }
 }

@@ -82,6 +82,9 @@ internal fun multiplayerHarness(
     val plugin = paper.loadPlugin<ArcDuelsPlugin>()
     HandlerList.unregisterAll(plugin)
     val world = paper.server.getWorld("world") ?: paper.server.addSimpleWorld("world")
+    for (x in -24..24) {
+        for (z in -24..24) world.getBlockAt(x, 79, z).type = Material.STONE
+    }
     plugin.config.set("arenas.example.enabled", enableArena)
     plugin.config.set("arenas.example.allowed-loadouts", listOf("KIT"))
     plugin.config.set("arenas.example.allowed-objectives", listOf("ELIMINATION"))

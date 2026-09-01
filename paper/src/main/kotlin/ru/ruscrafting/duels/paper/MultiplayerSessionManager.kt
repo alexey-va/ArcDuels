@@ -190,6 +190,13 @@ internal class MultiplayerSessionManager(
     ): Boolean {
         if (!isLocked(player) || teleportsAuthorized.isAuthorized(player.uniqueId, destination)) return true
         val session = byPlayer[player.uniqueId]?.let(sessions::get) ?: return false
+        if (destination != null &&
+            session.match.state == MultiplayerMatchState.ACTIVE &&
+            cause in EXTERNAL_RESCUE_TELEPORT_CAUSES &&
+            arenas.get(session.match.arenaId).bounds.contains(destination)
+        ) {
+            return true
+        }
         val anchor = session.anchors[player.uniqueId] ?: return false
         if (cause != PlayerTeleportEvent.TeleportCause.PLUGIN || session.arrivals?.isDone != false) return false
         return runCatching {
@@ -559,6 +566,8 @@ internal class MultiplayerSessionManager(
     }
 
     private companion object {
+        val EXTERNAL_RESCUE_TELEPORT_CAUSES =
+            setOf(PlayerTeleportEvent.TeleportCause.COMMAND, PlayerTeleportEvent.TeleportCause.PLUGIN)
         const val RESTORE_RETRY_TICKS = 60L
         const val DEFAULT_FINISH_DELAY_TICKS = 60L
     }

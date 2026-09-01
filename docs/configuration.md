@@ -238,6 +238,9 @@ opposite/equidistant side and keep teammates in compact centred rows, facing
 the arena centre. The global `multiplayer.spawn-placement` section controls
 radius scale, teammate spacing, minimum player separation, and horizontal
 bounds inset; all four values are strict reloadable configuration.
+Generated starts are also snapped to safe standing blocks in the walkable
+component of `first-spawn`, so a broad safety bound cannot place a participant
+behind a wall or barrier that separates them from the rest of the arena.
 
 ArcDuels calculates the entire requested 3–12-player layout before it creates a
 lobby or sends an invitation. If no enabled arena can safely fit that exact
