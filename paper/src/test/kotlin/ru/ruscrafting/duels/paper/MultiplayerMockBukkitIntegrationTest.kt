@@ -11,6 +11,7 @@ import io.mockk.verify
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
+import org.bukkit.attribute.Attribute
 import org.bukkit.inventory.Inventory
 import org.bukkit.Material
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
@@ -489,6 +490,44 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     val leave = paper.callEvent(PlayerCommandPreprocessEvent(forfeiter, "/duel leave"))
                     leave.isCancelled shouldBe true
                     forfeiter.gameMode shouldBe GameMode.SPECTATOR
+                }
+            }
+        }
+    }
+
+    "admin player debug reports the active multiplayer session and its arena state" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("DebugHost", "DebugAlpha", "DebugBravo")).use { harness ->
+                    val player = harness.players.first()
+                    player.isOp = true
+                    requireNotNull(player.getAttribute(Attribute.MAX_HEALTH)).baseValue = 40.0
+                    harness.startAndArrive(ffaRoster(harness.players))
+                    while (player.nextComponentMessage() != null) Unit
+
+                    val duelSessions = mockk<DuelSessionManager>(relaxed = true)
+                    every { duelSessions.matchFor(player) } returns null
+                    val admin =
+                        DuelAdminCommand(
+                            plugin = harness.plugin,
+                            arenas = harness.arenas,
+                            sessions = duelSessions,
+                            multiplayerSessions = harness.manager,
+                        )
+                    val match = requireNotNull(harness.manager.matchFor(player))
+                    val distance = requireNotNull(harness.manager.boundaryDistance(player, player.location))
+                    val plain = PlainTextComponentSerializer.plainText()
+
+                    admin.execute(player, listOf("debug", "player", player.name))
+
+                    plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe
+                        "ARCDUELS_DEBUG kind=player name=DebugHost uuid=${player.uniqueId} preparing=false locked=true post_match=false pending_recovery=false return_offer=false"
+                    plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe
+                        "ARCDUELS_DEBUG kind=match player=DebugHost match=${match.id.value} arena=example state=ACTIVE type=MULTIPLAYER layout=FREE_FOR_ALL kit_policy=SHARED players=3 active_players=3 team=none kit=classic"
+                    plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe
+                        "ARCDUELS_DEBUG kind=health player=DebugHost health=20.000 max=20.000 absorption=0.000 kit_cap=true"
+                    plain.serialize(requireNotNull(player.nextComponentMessage())) shouldBe
+                        "ARCDUELS_DEBUG kind=position player=DebugHost world=world x=${"%.3f".format(Locale.ROOT, player.location.x)} y=${"%.3f".format(Locale.ROOT, player.location.y)} z=${"%.3f".format(Locale.ROOT, player.location.z)} in_bounds=true boundary_distance=${"%.3f".format(Locale.ROOT, distance)}"
                 }
             }
         }

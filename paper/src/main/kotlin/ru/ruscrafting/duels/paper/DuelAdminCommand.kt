@@ -9,6 +9,7 @@ import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelObjectiveType
+import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import java.util.Locale
 
@@ -23,6 +24,7 @@ internal class DuelAdminCommand(
     private val configGeneration: () -> Long = { 1L },
     private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
     private val configurationBusy: () -> Boolean = { false },
+    private val multiplayerSessions: MultiplayerSessionManager? = null,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
 
@@ -423,19 +425,18 @@ internal class DuelAdminCommand(
             return
         }
         val match = sessions.matchFor(player)
+        val multiplayerMatch = multiplayerSessions?.matchFor(player)
         sender.sendDebug(
             "player",
             "name" to player.name,
             "uuid" to player.uniqueId,
             "preparing" to sessions.isPreparing(player),
-            "locked" to sessions.isStateLocked(player),
+            "locked" to (sessions.isStateLocked(player) || multiplayerSessions?.isLocked(player) == true),
             "post_match" to sessions.isPostMatchWaiting(player),
             "pending_recovery" to sessions.hasPendingRecovery(player),
             "return_offer" to hasReturnOffer(player),
         )
-        if (match == null) {
-            sender.sendDebug("match", "player" to player.name, "match" to "none")
-        } else {
+        if (match != null) {
             sender.sendDebug(
                 "match",
                 "player" to player.name,
@@ -448,6 +449,24 @@ internal class DuelAdminCommand(
                 "best_of" to match.rules.bestOf,
                 "modified_blocks" to sessions.modifiedBlockCount(player),
             )
+        } else if (multiplayerMatch != null) {
+            val participant = multiplayerMatch.roster.participant(PlayerId(player.uniqueId))
+            sender.sendDebug(
+                "match",
+                "player" to player.name,
+                "match" to multiplayerMatch.id.value,
+                "arena" to multiplayerMatch.arenaId.value,
+                "state" to multiplayerMatch.state,
+                "type" to "MULTIPLAYER",
+                "layout" to multiplayerMatch.roster.rules.layout,
+                "kit_policy" to multiplayerMatch.roster.rules.kitPolicy,
+                "players" to multiplayerMatch.roster.participants.size,
+                "active_players" to multiplayerMatch.activePlayers.size,
+                "team" to (participant.team ?: "none"),
+                "kit" to participant.kitId.value,
+            )
+        } else {
+            sender.sendDebug("match", "player" to player.name, "match" to "none")
         }
         val maximumHealth = player.getAttribute(Attribute.MAX_HEALTH)?.value
         sender.sendDebug(
@@ -456,9 +475,20 @@ internal class DuelAdminCommand(
             "health" to formatDecimal(player.health),
             "max" to formatDecimal(maximumHealth),
             "absorption" to formatDecimal(player.absorptionAmount),
-            "kit_cap" to sessions.isKitHealthCapApplied(player),
+            "kit_cap" to (sessions.isKitHealthCapApplied(player) || multiplayerSessions?.isKitHealthCapApplied(player) == true),
         )
-        val distance = sessions.boundaryDistance(player, player.location)
+        val distance =
+            when {
+                match != null -> sessions.boundaryDistance(player, player.location)
+                multiplayerMatch != null -> multiplayerSessions.boundaryDistance(player, player.location)
+                else -> null
+            }
+        val inBounds =
+            when {
+                match != null -> sessions.isInsideArena(player, player.location)
+                multiplayerMatch != null -> multiplayerSessions.isInsideArena(player, player.location)
+                else -> true
+            }
         sender.sendDebug(
             "position",
             "player" to player.name,
@@ -466,8 +496,8 @@ internal class DuelAdminCommand(
             "x" to formatDecimal(player.location.x),
             "y" to formatDecimal(player.location.y),
             "z" to formatDecimal(player.location.z),
-            "in_bounds" to (match == null || sessions.isInsideArena(player, player.location)),
-            "boundary_distance" to (distance?.let(::formatDecimal) ?: if (match == null) "n/a" else "outside"),
+            "in_bounds" to inBounds,
+            "boundary_distance" to (distance?.let(::formatDecimal) ?: if (match == null && multiplayerMatch == null) "n/a" else "outside"),
         )
     }
 

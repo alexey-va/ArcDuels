@@ -304,6 +304,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                         multiplayerGui.activeFlowCount() > 0 ||
                         controller.activeAcceptedMatchCount() > 0
                 },
+                multiplayerSessions = multiplayerSessions,
             )
         gui =
             DuelGuiService(

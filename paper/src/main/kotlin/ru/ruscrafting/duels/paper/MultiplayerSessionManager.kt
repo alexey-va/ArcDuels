@@ -169,6 +169,11 @@ internal class MultiplayerSessionManager(
     fun isInsideArena(player: Player, destination: Location): Boolean =
         matchFor(player)?.let { arenas.get(it.arenaId).bounds.contains(destination) } ?: true
 
+    fun boundaryDistance(player: Player, location: Location): Double? =
+        matchFor(player)?.let { arenas.get(it.arenaId).bounds.distanceToEdge(location) }
+
+    fun isKitHealthCapApplied(player: Player): Boolean = kitHealth.isApplied(player)
+
     fun anchor(player: Player): Location? =
         byPlayer[player.uniqueId]?.let(sessions::get)?.anchors?.get(player.uniqueId)?.clone()
 
