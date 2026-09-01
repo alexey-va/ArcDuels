@@ -57,6 +57,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         }
         runCatching {
             saveDefaultConfig()
+            if (ArcDuelsConfigDefaults.mergeMissing(dataFolder.toPath())) reloadConfig()
             runCatching { DuelLog.install(this) }
                 .onFailure { logger.warning("Could not initialize arc-core diagnostics: ${it.message}") }
             bootstrap(lifecycle)
