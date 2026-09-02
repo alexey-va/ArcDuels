@@ -1,6 +1,5 @@
 package ru.ruscrafting.duels.paper
 
-import org.bukkit.inventory.Inventory
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.config.Config
 import ru.arc.menu.MenuCatalog
@@ -8,6 +7,7 @@ import ru.arc.menu.MenuContract
 import ru.arc.menu.MenuId
 import ru.arc.menu.MenuLayoutParser
 import ru.arc.menu.MenuRegionId
+import ru.arc.paper.menu.PaperMenuConfiguration
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -42,8 +42,16 @@ internal enum class ArcDuelsMenuScreen(val id: MenuId) {
  * ordered YAML grid maps those logical slots to physical inventory slots, so an
  * operator can rearrange every screen without changing click semantics.
  */
-internal class ArcDuelsMenuLayouts private constructor(private val catalog: MenuCatalog) {
-    fun rows(screen: ArcDuelsMenuScreen): Int = catalog.require(screen.id).rows
+internal class ArcDuelsMenuLayouts private constructor(catalog: MenuCatalog) {
+    private var configuration = PaperMenuConfiguration(catalog, emptyMap())
+
+    fun current(): PaperMenuConfiguration = configuration
+
+    fun replace(candidate: PaperMenuConfiguration) {
+        configuration = candidate
+    }
+
+    fun rows(screen: ArcDuelsMenuScreen): Int = configuration.catalog.require(screen.id).rows
 
     fun physical(screen: ArcDuelsMenuScreen, logicalSlot: Int): Int =
         grid(screen).getOrNull(logicalSlot)?.index
@@ -52,23 +60,11 @@ internal class ArcDuelsMenuLayouts private constructor(private val catalog: Menu
     fun logical(screen: ArcDuelsMenuScreen, physicalSlot: Int): Int? =
         grid(screen).indexOfFirst { it.index == physicalSlot }.takeIf { it >= 0 }
 
-    fun arrange(screen: ArcDuelsMenuScreen, inventory: Inventory) {
-        val slots = grid(screen)
-        require(inventory.size == slots.size) {
-            "Menu ${screen.id} inventory has ${inventory.size} slots, configured grid has ${slots.size}"
-        }
-        val logicalContents = inventory.contents.map { it?.clone() }
-        inventory.clear()
-        logicalContents.forEachIndexed { logical, item ->
-            if (item != null) inventory.setItem(slots[logical].index, item)
-        }
-    }
-
-    private fun grid(screen: ArcDuelsMenuScreen) = catalog.require(screen.id).region(GRID)
+    private fun grid(screen: ArcDuelsMenuScreen) = configuration.catalog.require(screen.id).region(GRID)
 
     companion object {
         const val RESOURCE = "gui-layouts.yml"
-        private val GRID = MenuRegionId.of("grid")
+        internal val GRID = MenuRegionId.of("grid")
         private val CONTRACTS = ArcDuelsMenuScreen.entries.associate { screen ->
             screen.id to MenuContract(requiredRegions = setOf(GRID))
         }
@@ -78,6 +74,8 @@ internal class ArcDuelsMenuLayouts private constructor(private val catalog: Menu
             config.mergeMissingFromBundled(RESOURCE)
             return parse(config)
         }
+
+        internal fun inspect(dataRoot: Path): ArcDuelsMenuLayouts = parse(Config(dataRoot, RESOURCE))
 
         internal fun loadResource(classLoader: ClassLoader): ArcDuelsMenuLayouts {
             val root = Files.createTempDirectory("arc-duels-menu-layouts")

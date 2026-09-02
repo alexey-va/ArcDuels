@@ -11,15 +11,18 @@ import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
-import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.inventory.InventoryCloseEvent
-import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.player.PlayerQuitEvent
-import org.bukkit.inventory.Inventory
-import org.bukkit.inventory.InventoryHolder
 import org.bukkit.inventory.ItemFlag
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
+import ru.arc.core.BukkitTaskScheduler
+import ru.arc.paper.menu.DEFAULT_MENU_CLICKS
+import ru.arc.paper.menu.PaperMenuConfiguration
+import ru.arc.paper.menu.PaperMenuFrame
+import ru.arc.paper.menu.PaperMenuRuntime
+import ru.arc.paper.menu.regionFrame
 import ru.ruscrafting.duels.domain.CombatModifiers
 import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelPreset
@@ -62,16 +65,19 @@ class DuelGuiService internal constructor(
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val clock: Clock = Clock.systemUTC(),
     private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
-) : Listener {
+) : Listener, AutoCloseable {
     private val pendingArenaNames = ConcurrentHashMap<UUID, PendingArenaName>()
     private val asyncMenuRequests = LatestRequestTracker()
+    private val menuRuntimeDelegate = lazy { PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuLayouts.current()) }
+    private val menuRuntime by menuRuntimeDelegate
+    private val frameHolders = java.util.IdentityHashMap<PaperMenuFrame, MenuHolder>()
+    private val activeFrames = mutableMapOf<UUID, MenuHolder>()
 
     /** Visible menus that retain kit or arena ids from one catalog generation. */
     internal fun activeConfigurationFlowCount(): Int =
         plugin.server.onlinePlayers.count { player ->
-            // Paper always exposes a view; MockBukkit represents "no inventory" as null despite
-            // the API annotation. Treat that test-runtime sentinel exactly like no bound flow.
-            val holder = runCatching { player.openInventory.topInventory.holder }.getOrNull()
+            val holder = activeFrames[player.uniqueId] ?: return@count false
+            if (menuRuntime.session(player) == null) return@count false
             when (holder) {
                 is LoadoutMenuHolder,
                 is RulesMenuHolder,
@@ -110,7 +116,7 @@ class DuelGuiService internal constructor(
         inventory.setItem(34, item(player, Material.WRITABLE_BOOK, "menu.main.help", "menu.main.help-lore"))
         mainRecoverySlot(player)?.let { inventory.setItem(it, item(player, Material.RECOVERY_COMPASS, "menu.main.recovery", "menu.main.recovery-lore")) }
         mainAdminSlot(player)?.let { inventory.setItem(it, item(player, Material.COMPARATOR, "menu.main.admin", "menu.main.admin-lore")) }
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     fun openTargets(player: Player, requestedPage: Int = 0) {
@@ -144,7 +150,7 @@ class DuelGuiService internal constructor(
         }
         if (availableTargets.isEmpty()) inventory.setItem(22, item(player, Material.BARRIER, "menu.targets.empty"))
         navigation(player, inventory, page, MenuBack.MAIN)
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     fun openAdmin(player: Player) {
@@ -178,7 +184,7 @@ class DuelGuiService internal constructor(
         inventory.setItem(29, item(player, Material.NAME_TAG, "menu.admin.create", "menu.admin.create-lore"))
         inventory.setItem(33, roleItem(player, "refresh", Material.REPEATER, "menu.admin.reload", "menu.admin.reload-lore"))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openAdminArenas(player: Player, requestedPage: Int = 0) {
@@ -218,7 +224,7 @@ class DuelGuiService internal constructor(
         }
         if (ids.isEmpty()) inventory.setItem(22, item(player, Material.PAPER, "menu.admin-arenas.empty", "menu.admin-arenas.empty-lore"))
         navigation(player, inventory, page, MenuBack.MAIN)
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openAdminArena(player: Player, arenaId: String) {
@@ -263,7 +269,7 @@ class DuelGuiService internal constructor(
             ),
         )
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openAdminArenaObjectives(player: Player, arenaId: String) {
@@ -287,7 +293,7 @@ class DuelGuiService internal constructor(
             )
         }
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openRecoveryPlayers(player: Player, requestedPage: Int = 0) {
@@ -302,7 +308,7 @@ class DuelGuiService internal constructor(
             inventory.setItem(slot, playerHead(target, locales.component(player, "menu.admin-recovery.player", LocaleService.text("player", target.name)), locales.lines(player, "menu.admin-recovery.player-lore")))
         }
         navigation(player, inventory, page, MenuBack.MAIN)
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     fun openLeaderboard(player: Player, requestedPage: Int = 0) {
@@ -341,7 +347,7 @@ class DuelGuiService internal constructor(
                 }
                 if (entries.isEmpty()) inventory.setItem(22, item(player, Material.PAPER, "menu.leaderboard.empty"))
                 navigation(player, inventory, page, MenuBack.MAIN)
-                player.openInventory(inventory)
+                show(player, inventory)
             }
         }
     }
@@ -378,7 +384,7 @@ class DuelGuiService internal constructor(
                 }
                 if (matches.isEmpty()) inventory.setItem(22, item(player, Material.PAPER, "menu.history.empty", "menu.history.empty-lore"))
                 navigation(player, inventory, page, MenuBack.MAIN)
-                player.openInventory(inventory)
+                show(player, inventory)
             }
         }
     }
@@ -447,7 +453,7 @@ class DuelGuiService internal constructor(
                     )
                 }
                 inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-                player.openInventory(inventory)
+                show(player, inventory)
             }
         }
     }
@@ -490,7 +496,7 @@ class DuelGuiService internal constructor(
                     }
                 }
                 inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-                player.openInventory(inventory)
+                show(player, inventory)
             }
         }
     }
@@ -505,7 +511,7 @@ class DuelGuiService internal constructor(
         objectiveItem(player, DuelObjectiveType.BOXING, Material.LEATHER_BOOTS)?.let { inventory.setItem(29, it) }
         objectiveItem(player, DuelObjectiveType.COMBO, Material.BLAZE_POWDER)?.let { inventory.setItem(33, it) }
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openLoadouts(player: Player, target: DuelTarget, objective: DuelObjectiveType, requestedPage: Int = 0) {
@@ -534,7 +540,7 @@ class DuelGuiService internal constructor(
             inventory.setItem(22, item(player, Material.BARRIER, "menu.loadouts.controlled-missing", resolvers = arrayOf(LocaleService.text("kit", controlledKit))))
         }
         navigation(player, inventory, page, MenuBack.MAIN)
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openRules(player: Player, draft: DuelDraft) {
@@ -583,7 +589,7 @@ class DuelGuiService internal constructor(
         inventory.setItem(38, item(player, Material.ENCHANTED_BOOK, "menu.rules.presets", "menu.rules.presets-lore"))
         inventory.setItem(40, roleItem(player, "confirm", Material.LIME_CONCRETE, "menu.rules.confirm", "menu.rules.confirm-lore"))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openArenas(
@@ -619,7 +625,7 @@ class DuelGuiService internal constructor(
         }
         if (choices.isEmpty()) inventory.setItem(22, item(player, Material.BARRIER, "menu.arenas.empty", "menu.arenas.empty-lore"))
         navigation(player, inventory, page, MenuBack.MAIN)
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openModes(player: Player) {
@@ -632,7 +638,7 @@ class DuelGuiService internal constructor(
         inventory.setItem(29, requireNotNull(objectiveItem(player, DuelObjectiveType.BOXING, Material.LEATHER_BOOTS)))
         inventory.setItem(33, requireNotNull(objectiveItem(player, DuelObjectiveType.COMBO, Material.BLAZE_POWDER)))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openKits(player: Player, requestedPage: Int = 0) {
@@ -642,7 +648,7 @@ class DuelGuiService internal constructor(
         decorate(inventory)
         page.items.forEachIndexed { index, kit -> inventory.setItem(CONTENT_SLOTS[index], kitItem(player, kit)) }
         navigation(player, inventory, page, MenuBack.MAIN)
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun openQueue(player: Player) {
@@ -652,7 +658,7 @@ class DuelGuiService internal constructor(
         inventory.setItem(12, item(player, Material.IRON_SWORD, "menu.queue.active", "menu.queue.active-lore", LocaleService.text("active", sessions.activeArenaCount())))
         inventory.setItem(14, item(player, Material.CLOCK, "menu.queue.waiting", "menu.queue.waiting-lore", LocaleService.text("waiting", sessions.queueSize())))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun showHelp(player: Player) {
@@ -660,19 +666,13 @@ class DuelGuiService internal constructor(
         locales.lines(player, "help.lines").forEach(player::sendMessage)
     }
 
-    @EventHandler
-    fun onOpen(event: InventoryOpenEvent) {
-        val holder = event.inventory.holder as? MenuHolder ?: return
-        menuLayouts.arrange(holder.screen, event.inventory)
-    }
-
-    @EventHandler
-    fun onClick(event: InventoryClickEvent) {
-        val player = event.whoClicked as? Player ?: return
-        val holder = event.view.topInventory.holder as? MenuHolder ?: return
-        event.isCancelled = true
-        if (event.clickedInventory != event.view.topInventory) return
-        val slot = menuLayouts.logical(holder.screen, event.rawSlot) ?: return
+    private fun handleClick(
+        player: Player,
+        holder: MenuHolder,
+        slot: Int,
+        shiftClick: Boolean,
+        rightClick: Boolean,
+    ) {
         when (holder) {
             is MainMenuHolder -> when (slot) {
                 4 -> statisticsAction(player, targets.local(player))
@@ -748,7 +748,7 @@ class DuelGuiService internal constructor(
             is PresetMenuHolder -> when {
                 slot == BACK_SLOT -> openRules(player, holder.draft)
                 else -> holder.presetSlots[slot]?.let { presetSlot ->
-                    handlePresetClick(player, holder, presetSlot, event.isShiftClick, event.isRightClick)
+                    handlePresetClick(player, holder, presetSlot, shiftClick, rightClick)
                 }
             }
             is CatalogMenuHolder -> when {
@@ -832,11 +832,12 @@ class DuelGuiService internal constructor(
     fun onQuit(event: PlayerQuitEvent) {
         pendingArenaNames.remove(event.player.uniqueId)
         asyncMenuRequests.invalidate(event.player.uniqueId)
+        activeFrames.remove(event.player.uniqueId)
     }
 
     @EventHandler
     fun onClose(event: InventoryCloseEvent) {
-        if (event.inventory.holder is MenuHolder) asyncMenuRequests.invalidate(event.player.uniqueId)
+        if (activeFrames.remove(event.player.uniqueId) != null) asyncMenuRequests.invalidate(event.player.uniqueId)
     }
 
     private fun promptArenaName(player: Player) {
@@ -1162,21 +1163,50 @@ class DuelGuiService internal constructor(
         return item(player, material, key, "$key-lore", LocaleService.component("state", state))
     }
 
-    private fun create(holder: MenuHolder, title: Component): Inventory =
-        Bukkit.createInventory(holder, menuLayouts.rows(holder.screen) * 9, title).also(holder::attach)
-
-    private fun decorate(inventory: Inventory) {
+    private fun create(holder: MenuHolder, title: Component): PaperMenuFrame {
         val filler = roleItem("background", Material.GRAY_STAINED_GLASS_PANE, Component.text(" "))
-        for (slot in 0 until inventory.size) inventory.setItem(slot, filler)
+        return menuRuntime.regionFrame(holder.screen.id, ArcDuelsMenuLayouts.GRID, title, filler).also {
+            frameHolders[it] = holder
+        }
     }
 
-    private fun <T> navigation(player: Player, inventory: Inventory, page: PageWindow<T>, back: MenuBack) {
+    private fun decorate(@Suppress("UNUSED_PARAMETER") inventory: PaperMenuFrame) = Unit
+
+    private fun <T> navigation(player: Player, inventory: PaperMenuFrame, page: PageWindow<T>, back: MenuBack) {
         if (back == MenuBack.MAIN) inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         if (page.hasPrevious) inventory.setItem(PREVIOUS_SLOT, roleItem(player, "previous", Material.ARROW, "menu.common.previous"))
         if (page.totalPages > 1) {
             inventory.setItem(PAGE_SLOT, roleItem(player, "info", Material.CLOCK, "menu.common.page", resolvers = arrayOf(LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages))))
         }
         if (page.hasNext) inventory.setItem(NEXT_SLOT, roleItem(player, "next", Material.SPECTRAL_ARROW, "menu.common.next"))
+    }
+
+    private fun show(player: Player, frame: PaperMenuFrame) {
+        val holder = requireNotNull(frameHolders.remove(frame)) { "Duel menu frame has no state holder" }
+        menuRuntime.open(player, holder.screen.id) {
+            val content = frame.content { slot, context ->
+                handleClick(context.player, holder, slot, context.event.isShiftClick, context.event.isRightClick)
+            }
+            content.copy(
+                regions = content.regions.mapValues { (_, entries) ->
+                    entries.map { it.copy(acceptedClicks = DUEL_MENU_CLICKS) }
+                },
+            )
+        }
+        activeFrames[player.uniqueId] = holder
+    }
+
+    fun replaceMenus(candidate: PaperMenuConfiguration) {
+        menuLayouts.replace(candidate)
+        frameHolders.clear()
+        activeFrames.clear()
+        if (menuRuntimeDelegate.isInitialized()) menuRuntime.replace(candidate)
+    }
+
+    override fun close() {
+        frameHolders.clear()
+        activeFrames.clear()
+        if (menuRuntimeDelegate.isInitialized()) menuRuntime.close()
     }
 
     private fun mainRecoverySlot(player: Player): Int? =
@@ -1254,11 +1284,7 @@ class DuelGuiService internal constructor(
         if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable(block))
     }
 
-    private abstract class MenuHolder(val screen: ArcDuelsMenuScreen) : InventoryHolder {
-        private lateinit var inventory: Inventory
-        fun attach(inventory: Inventory) { this.inventory = inventory }
-        override fun getInventory(): Inventory = inventory
-    }
+    private abstract class MenuHolder(val screen: ArcDuelsMenuScreen)
     private class MainMenuHolder : MenuHolder(ArcDuelsMenuScreen.MAIN)
     private class TargetMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.TARGETS) { val targets = mutableMapOf<Int, DuelTarget>() }
     private class ObjectiveMenuHolder(val target: DuelTarget) : MenuHolder(ArcDuelsMenuScreen.OBJECTIVES)
@@ -1324,6 +1350,7 @@ class DuelGuiService internal constructor(
                 enderPearls = false,
                 naturalRegeneration = false,
             )
+        val DUEL_MENU_CLICKS = DEFAULT_MENU_CLICKS + setOf(ClickType.SHIFT_LEFT, ClickType.SHIFT_RIGHT)
         val OBJECTIVE_SLOTS =
             mapOf(
                 11 to DuelObjectiveType.ELIMINATION,

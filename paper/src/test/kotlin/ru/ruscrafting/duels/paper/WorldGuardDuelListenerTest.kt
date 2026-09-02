@@ -51,7 +51,7 @@ class WorldGuardDuelListenerTest : StringSpec({
         val event = mockk<PlayerInteractEvent>(relaxed = true)
         every { event.player } returns player
         every { event.action } returns Action.RIGHT_CLICK_BLOCK
-        every { event.item } returns ItemStack(Material.LAVA_BUCKET)
+        every { event.item } returns mockk<ItemStack> { every { type } returns Material.LAVA_BUCKET }
         every { event.clickedBlock } returns clicked
         every { event.blockFace } returns BlockFace.UP
 
@@ -71,7 +71,7 @@ class WorldGuardDuelListenerTest : StringSpec({
         val event = mockk<PlayerInteractEvent>(relaxed = true)
         every { event.player } returns player
         every { event.action } returns Action.RIGHT_CLICK_BLOCK
-        every { event.item } returns ItemStack(Material.WATER_BUCKET)
+        every { event.item } returns mockk<ItemStack> { every { type } returns Material.WATER_BUCKET }
         every { event.clickedBlock } returns clicked
         every { event.blockFace } returns BlockFace.UP
 

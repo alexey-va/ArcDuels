@@ -12,7 +12,7 @@ Paper, MySQL, and Redis:
 | `network-redis` | Network player discovery, challenges, arena routing, events and cache invalidation |
 | `paper` | Commands, inventories, arena runtime and player presentation |
 
-`arc-core` is pinned to immutable public Maven release `2.2.5`; agents can opt
+`arc-core` is pinned to immutable public Maven release `2.4.3`; agents can opt
 into a local composite with `-ParcCoreDir=/absolute/path/to/arc-core` while
 developing both repositories. Redis is optional at runtime. MySQL is mandatory for starting matches
 because ArcDuels will not mutate a player's inventory or location without a
@@ -20,7 +20,7 @@ committed, checksum-verified recovery snapshot.
 
 Reusable infrastructure is owned by arc-core: typed network identifiers,
 bounded Redis codecs and origin/replay handling, Bungee transfer, scoped
-teleports, complete Paper player state, and the shared MockBukkit test runtime.
+teleports, complete Paper player state, config-driven Paper menus, and the shared MockBukkit test runtime.
 ArcDuels keeps duel state machines and its MySQL schema; it does not fork those
 cross-plugin mechanisms.
 

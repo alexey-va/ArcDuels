@@ -3,7 +3,14 @@ package ru.ruscrafting.duels.paper
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Material
+import org.bukkit.event.inventory.ClickType
+import org.bukkit.event.inventory.InventoryAction
+import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.inventory.InventoryType
 import org.bukkit.inventory.ItemStack
+import ru.arc.core.BukkitTaskScheduler
+import ru.arc.paper.menu.PaperMenuRuntime
+import ru.arc.paper.menu.regionFrame
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.nio.file.Files
 
@@ -21,7 +28,7 @@ class ArcDuelsMenuLayoutsTest : StringSpec({
         }
     }
 
-    "configured permutation moves rendered items and reverses click slots" {
+    "configured permutation renders and dispatches logical grid slots through the runtime" {
         val root = Files.createTempDirectory("arc-duels-menu-permutation")
         val source = requireNotNull(javaClass.classLoader.getResource("gui-layouts.yml")).readText()
         Files.writeString(
@@ -31,18 +38,47 @@ class ArcDuelsMenuLayoutsTest : StringSpec({
         val layouts = ArcDuelsMenuLayouts.load(root)
         val paper = MockBukkitTestRuntime.open()
         try {
-            val inventory = paper.server.createInventory(null, 45)
-            inventory.setItem(0, ItemStack(Material.STONE))
-            inventory.setItem(44, ItemStack(Material.DIAMOND))
+            val plugin = paper.createSimplePlugin("ArcDuelsLayout")
+            val player = paper.addPlayer("LayoutQA")
+            val runtime = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), layouts.current())
+            val frame = runtime.regionFrame(
+                ArcDuelsMenuScreen.MAIN.id,
+                ArcDuelsMenuLayouts.GRID,
+                net.kyori.adventure.text.Component.text("Layout"),
+                ItemStack(Material.GRAY_STAINED_GLASS_PANE),
+            )
+            frame.setItem(0, ItemStack(Material.STONE))
+            frame.setItem(44, ItemStack(Material.DIAMOND))
+            val clicked = mutableListOf<Int>()
 
-            layouts.arrange(ArcDuelsMenuScreen.MAIN, inventory)
+            runtime.open(player, ArcDuelsMenuScreen.MAIN.id) {
+                frame.content { logical, _ -> clicked += logical }
+            }
 
-            inventory.getItem(44)?.type shouldBe Material.STONE
-            inventory.getItem(0)?.type shouldBe Material.DIAMOND
+            player.openInventory.topInventory.getItem(44)?.type shouldBe Material.STONE
+            player.openInventory.topInventory.getItem(0)?.type shouldBe Material.DIAMOND
             layouts.logical(ArcDuelsMenuScreen.MAIN, 44) shouldBe 0
             layouts.logical(ArcDuelsMenuScreen.MAIN, 0) shouldBe 44
+            paper.callEvent(click(player, 44, ClickType.LEFT, InventoryAction.PICKUP_ALL))
+            val unsafe = paper.callEvent(click(player, 0, ClickType.NUMBER_KEY, InventoryAction.HOTBAR_SWAP))
+            clicked shouldBe listOf(0)
+            unsafe.isCancelled shouldBe true
+            runtime.close()
         } finally {
             paper.close()
         }
     }
 })
+
+private fun click(
+    player: org.bukkit.entity.Player,
+    rawSlot: Int,
+    click: ClickType,
+    action: InventoryAction,
+): InventoryClickEvent = InventoryClickEvent(
+    player.openInventory,
+    InventoryType.SlotType.CONTAINER,
+    rawSlot,
+    click,
+    action,
+)

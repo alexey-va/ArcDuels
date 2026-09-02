@@ -39,6 +39,9 @@ subprojects {
         // Enable direct self-attachment so Byte Buddy does not depend on a
         // separate macOS attach helper, which can block indefinitely on JDK 25.
         jvmArgs("-Djdk.attach.allowAttachSelf=true", "-XX:+EnableDynamicAgentLoading")
+        // MockBukkit and Paper retain enough static state between specs to exhaust the
+        // worker heap in the full suite. Periodic isolation keeps CI deterministic.
+        if (project.name == "paper") forkEvery = 10
     }
 }
 

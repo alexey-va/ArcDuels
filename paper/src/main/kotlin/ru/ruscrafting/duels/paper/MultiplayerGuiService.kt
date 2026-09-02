@@ -6,23 +6,26 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.event.HoverEvent
 import net.kyori.adventure.text.format.TextDecoration
-import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
-import org.bukkit.event.inventory.InventoryClickEvent
-import org.bukkit.event.inventory.InventoryOpenEvent
+import org.bukkit.event.inventory.ClickType
+import org.bukkit.event.inventory.InventoryCloseEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
-import org.bukkit.inventory.Inventory
-import org.bukkit.inventory.InventoryHolder
 import org.bukkit.inventory.ItemFlag
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
+import ru.arc.core.BukkitTaskScheduler
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.whenCompleteSync
+import ru.arc.paper.menu.DEFAULT_MENU_CLICKS
 import ru.arc.paper.network.BackendTransferResult
+import ru.arc.paper.menu.PaperMenuConfiguration
+import ru.arc.paper.menu.PaperMenuFrame
+import ru.arc.paper.menu.PaperMenuRuntime
+import ru.arc.paper.menu.regionFrame
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
@@ -113,11 +116,17 @@ internal class MultiplayerGuiService(
     private val preparationInFlight = mutableSetOf<Pair<UUID, UUID>>()
     private val preparationRetryScheduled = mutableSetOf<Pair<UUID, UUID>>()
     private val networkSubscription = groupBus?.subscribe { message -> tasks.runSync { onNetworkMessage(message) } }
+    private val menuRuntimeDelegate = lazy { PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuLayouts.current()) }
+    private val menuRuntime by menuRuntimeDelegate
+    private val frameHolders = java.util.IdentityHashMap<PaperMenuFrame, MultiplayerHolder>()
+    private val activeFrames = mutableMapOf<UUID, MultiplayerHolder>()
 
     internal fun activeFlowCount(): Int {
         val openDrafts =
             drafts.keys.count { playerId ->
-                plugin.server.getPlayer(playerId)?.openInventory?.topInventory?.holder is SetupHolder
+                plugin.server.getPlayer(playerId)?.let { player ->
+                    activeFrames[playerId] is SetupHolder && menuRuntime.session(player) != null
+                } == true
             }
         return openDrafts + lobbies.size + remoteInvites.size + preparationInFlight.size + preparationRetryScheduled.size
     }
@@ -190,19 +199,7 @@ internal class MultiplayerGuiService(
         player.sendMessage(locales.notice(player, "multiplayer.invite-unavailable"))
     }
 
-    @EventHandler
-    fun onOpen(event: InventoryOpenEvent) {
-        val holder = event.inventory.holder as? MultiplayerHolder ?: return
-        menuLayouts.arrange(holder.screen, event.inventory)
-    }
-
-    @EventHandler
-    fun onClick(event: InventoryClickEvent) {
-        val player = event.whoClicked as? Player ?: return
-        val holder = event.view.topInventory.holder as? MultiplayerHolder ?: return
-        event.isCancelled = true
-        if (event.clickedInventory != event.view.topInventory) return
-        val slot = menuLayouts.logical(holder.screen, event.rawSlot) ?: return
+    private fun handleClick(player: Player, holder: MultiplayerHolder, slot: Int) {
         when (holder) {
             is SetupHolder -> handleSetupClick(player, holder, slot)
             is LobbyHolder -> handleLobbyClick(player, holder, slot)
@@ -211,7 +208,13 @@ internal class MultiplayerGuiService(
     }
 
     @EventHandler
+    fun onClose(event: InventoryCloseEvent) {
+        activeFrames.remove(event.player.uniqueId)
+    }
+
+    @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
+        activeFrames.remove(event.player.uniqueId)
         drafts.remove(event.player.uniqueId)
         remoteInvites[event.player.uniqueId]?.let { invite ->
             if (!invite.preparing) publishResponse(invite.message, event.player.uniqueId, GroupLobbyResponse.DECLINED, null)
@@ -286,7 +289,7 @@ internal class MultiplayerGuiService(
             )
         }
         if (page.hasNext) inventory.setItem(43, roleItem(player, "next", Material.SPECTRAL_ARROW, "menu.common.next"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun handleSetupClick(player: Player, holder: SetupHolder, slot: Int) {
@@ -476,7 +479,7 @@ internal class MultiplayerGuiService(
             else -> inventory.setItem(34, item(player, Material.LIME_CONCRETE, "multiplayer.menu.accept", "multiplayer.menu.accept-lore"))
         }
         inventory.setItem(36, item(player, Material.RED_CONCRETE, if (player.uniqueId == lobby.hostId) "multiplayer.menu.cancel" else "multiplayer.menu.decline", "multiplayer.menu.cancel-lore"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun handleLobbyClick(player: Player, holder: LobbyHolder, slot: Int) {
@@ -916,7 +919,7 @@ internal class MultiplayerGuiService(
         inventory.setItem(32, kitButton(player, selectedKit, message.kitPolicy, interactive = message.kitPolicy == MultiplayerKitPolicy.PER_PLAYER && !invite.accepted))
         inventory.setItem(34, item(player, if (invite.accepted) Material.LIME_DYE else Material.LIME_CONCRETE, if (invite.accepted) "multiplayer.menu.accepted" else "multiplayer.menu.accept", if (invite.accepted) "multiplayer.menu.accepted-lore" else "multiplayer.menu.accept-lore"))
         inventory.setItem(36, item(player, Material.RED_CONCRETE, "multiplayer.menu.decline", "multiplayer.menu.cancel-lore"))
-        player.openInventory(inventory)
+        show(player, inventory)
     }
 
     private fun handleRemoteLobbyClick(player: Player, holder: RemoteLobbyHolder, slot: Int) {
@@ -1084,8 +1087,7 @@ internal class MultiplayerGuiService(
     }
 
     private fun closeLobbyInventory(player: Player, lobbyId: UUID) {
-        val topInventory = runCatching { player.openInventory.topInventory }.getOrNull() ?: return
-        val holder = topInventory.holder
+        val holder = activeFrames[player.uniqueId]
         val belongsToLobby =
             when (holder) {
                 is LobbyHolder -> holder.lobbyId == lobbyId
@@ -1200,16 +1202,40 @@ internal class MultiplayerGuiService(
             ) + kit.contentLore(player, locales),
         )
 
-    private fun create(holder: MultiplayerHolder, title: Component): Inventory =
-        Bukkit.createInventory(holder, menuLayouts.rows(holder.screen) * 9, nonItalic(title)).also(holder::attach)
-
-    private fun decorate(inventory: Inventory) {
+    private fun create(holder: MultiplayerHolder, title: Component): PaperMenuFrame {
         val filler = style(guiItems.create("background", Material.GRAY_STAINED_GLASS_PANE), Component.text(" "), emptyList())
-        repeat(inventory.size) { inventory.setItem(it, filler) }
+        return menuRuntime.regionFrame(holder.screen.id, ArcDuelsMenuLayouts.GRID, nonItalic(title), filler).also {
+            frameHolders[it] = holder
+        }
+    }
+
+    private fun decorate(@Suppress("UNUSED_PARAMETER") inventory: PaperMenuFrame) = Unit
+
+    private fun show(player: Player, frame: PaperMenuFrame) {
+        val holder = requireNotNull(frameHolders.remove(frame)) { "Multiplayer menu frame has no state holder" }
+        menuRuntime.open(player, holder.screen.id) {
+            val content = frame.content { slot, context -> handleClick(context.player, holder, slot) }
+            content.copy(
+                regions = content.regions.mapValues { (_, entries) ->
+                    entries.map { it.copy(acceptedClicks = MULTIPLAYER_MENU_CLICKS) }
+                },
+            )
+        }
+        activeFrames[player.uniqueId] = holder
+    }
+
+    fun replaceMenus(candidate: PaperMenuConfiguration) {
+        menuLayouts.replace(candidate)
+        frameHolders.clear()
+        activeFrames.clear()
+        if (menuRuntimeDelegate.isInitialized()) menuRuntime.replace(candidate)
     }
 
     override fun close() {
         networkSubscription?.close()
+        frameHolders.clear()
+        activeFrames.clear()
+        if (menuRuntimeDelegate.isInitialized()) menuRuntime.close()
         remoteInvites.clear()
         preparationInFlight.clear()
         preparationRetryScheduled.clear()
@@ -1252,11 +1278,7 @@ internal class MultiplayerGuiService(
     private fun policyMaterial(policy: MultiplayerKitPolicy): Material =
         if (policy == MultiplayerKitPolicy.SHARED) Material.CHEST else Material.BUNDLE
 
-    private abstract class MultiplayerHolder(val screen: ArcDuelsMenuScreen) : InventoryHolder {
-        private lateinit var inventory: Inventory
-        fun attach(inventory: Inventory) { this.inventory = inventory }
-        override fun getInventory(): Inventory = inventory
-    }
+    private abstract class MultiplayerHolder(val screen: ArcDuelsMenuScreen)
     private class SetupHolder(
         val hostId: UUID,
         val page: Int,
@@ -1269,6 +1291,7 @@ internal class MultiplayerGuiService(
     private class RemoteLobbyHolder(val lobbyId: UUID) : MultiplayerHolder(ArcDuelsMenuScreen.MULTIPLAYER_REMOTE_LOBBY)
 
     private companion object {
+        val MULTIPLAYER_MENU_CLICKS = DEFAULT_MENU_CLICKS + setOf(ClickType.SHIFT_LEFT, ClickType.SHIFT_RIGHT)
         const val MENU_SIZE = 45
         const val INVITE_TIMEOUT_TICKS = 900L
         const val MAX_INVITE_TIMEOUT_TICKS = 12_000L

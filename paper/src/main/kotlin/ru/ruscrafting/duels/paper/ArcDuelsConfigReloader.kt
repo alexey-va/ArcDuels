@@ -2,6 +2,7 @@ package ru.ruscrafting.duels.paper
 
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.plugin.java.JavaPlugin
+import ru.arc.paper.menu.PaperMenuConfiguration
 import ru.ruscrafting.duels.domain.ChallengeRegistry
 import java.io.File
 import java.io.InputStreamReader
@@ -48,6 +49,7 @@ internal class ArcDuelsConfigReloader(
     private val afterSourceCapture: () -> Unit = {},
     private val beforeCommit: () -> Unit = {},
     private val afterCatalogReplacement: () -> Unit = {},
+    private val commitMenus: (PaperMenuConfiguration) -> Unit = {},
     private val activity: () -> ArcDuelsReloadActivity,
 ) {
     private var deferredCatalogs: PreparedCatalogs? = null
@@ -96,6 +98,7 @@ internal class ArcDuelsConfigReloader(
                         ),
                     serverNames = ServerDisplayNames.load(configuration, plugin.logger::warning),
                     guiItems = GuiItemCatalog.load(configuration),
+                    menus = ArcDuelsMenuLayouts.inspect(plugin.dataFolder.toPath()).current(),
                     sourceRevision = sources.revision,
                 )
             // Prove the exact candidate can be copied into Bukkit's live configuration type
@@ -120,6 +123,7 @@ internal class ArcDuelsConfigReloader(
             locales.replaceWith(prepared.locales)
             serverNames.replaceWith(prepared.serverNames)
             guiItems.replaceWith(prepared.guiItems)
+            commitMenus(prepared.menus)
             challenges.updateTtl(committed.snapshot.settings.challengeTimeout)
 
             val immediateArenaCount =
@@ -221,11 +225,13 @@ internal class ArcDuelsConfigReloader(
         )
 
     private fun sourceFiles(): List<File> =
-        listOf(configFile(), loadoutsFile()) + localeFiles().values + arcRedisSourceFiles()
+        listOf(configFile(), loadoutsFile(), guiLayoutsFile()) + localeFiles().values + arcRedisSourceFiles()
 
     private fun configFile(): File = File(plugin.dataFolder, "config.yml")
 
     private fun loadoutsFile(): File = File(plugin.dataFolder, "loadouts.yml")
+
+    private fun guiLayoutsFile(): File = File(plugin.dataFolder, ArcDuelsMenuLayouts.RESOURCE)
 
     private fun localeFiles(): Map<String, File> =
         mapOf(
@@ -246,6 +252,7 @@ internal class ArcDuelsConfigReloader(
         val locales: LocaleService,
         val serverNames: ServerDisplayNames,
         val guiItems: GuiItemCatalog,
+        val menus: PaperMenuConfiguration,
         val sourceRevision: SourceRevision,
     )
 

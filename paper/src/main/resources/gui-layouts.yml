@@ -1,5 +1,5 @@
-# ArcDuels keeps complex, stateful InventoryHolder controllers. Each ordered
-# grid maps logical controller slots 0..44 to physical chest slots. Reorder one
+# PaperMenuRuntime keeps the complex stateful controller separate from layout.
+# Each ordered grid maps logical controller slots 0..44 to physical chest slots. Reorder one
 # list to move that screen without recompiling; it must remain a 45-slot
 # permutation. Materials are configured under gui.items in config.yml and all
 # names/lore (with their placeholders) under lang/*.yml.

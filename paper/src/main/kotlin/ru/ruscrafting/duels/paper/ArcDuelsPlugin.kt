@@ -97,6 +97,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val serverNames = ServerDisplayNames.load(config, logger::warning)
         serverNames.display(serverId)
         val guiItems = GuiItemCatalog.load(config)
+        val menuLayouts = ArcDuelsMenuLayouts.load(this)
         val arenas = PaperArenaCatalog.load(this)
         val kits = KitRegistry.load(this)
         val persistence = createPersistence(lifecycle)
@@ -256,6 +257,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 playerDataReady = playerDataSync::isReady,
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 guiItems = guiItems,
+                menuLayouts = menuLayouts,
             ) { player ->
                 gui.openMain(player)
             }
@@ -272,6 +274,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 guiItems = guiItems,
                 challenges = challenges,
                 afterCatalogReplacement = { publishArenaStatus() },
+                commitMenus = { candidate ->
+                    multiplayerGui.replaceMenus(candidate)
+                    gui.replaceMenus(candidate)
+                },
                 activity = {
                     ArcDuelsReloadActivity(
                         reservedArenas = arenas.reservedCount(),
@@ -324,9 +330,11 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 },
                 multiplayerAction = multiplayerGui::open,
                 guiItems = guiItems,
+                menuLayouts = menuLayouts,
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 startupServerId = serverId,
             )
+        lifecycle.own(gui)
         val command = DuelCommand(controller, gui, admin, targets, locales, multiplayerGui)
         val pluginCommand = requireNotNull(getCommand("duel")) { "Command /duel is missing from plugin.yml" }
         pluginCommand.setExecutor(command)
