@@ -42,7 +42,7 @@ internal class GuiItemCatalog private constructor(
     fun create(
         role: String,
         fallback: Material,
-    ): ItemStack = (configured[role] ?: GuiItemSpec(fallback)).create()
+    ): ItemStack = (configured[role] ?: configured[role.replace('.', '-')] ?: GuiItemSpec(fallback)).create()
 
     internal fun replaceWith(replacement: GuiItemCatalog) {
         configured = replacement.configured

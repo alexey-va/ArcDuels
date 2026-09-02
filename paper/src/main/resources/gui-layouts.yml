@@ -1,0 +1,31 @@
+# ArcDuels keeps complex, stateful InventoryHolder controllers. Each ordered
+# grid maps logical controller slots 0..44 to physical chest slots. Reorder one
+# list to move that screen without recompiling; it must remain a 45-slot
+# permutation. Materials are configured under gui.items in config.yml and all
+# names/lore (with their placeholders) under lang/*.yml.
+menus:
+  layouts:
+    duel-main: &screen
+      schema-version: 1
+      rows: 5
+      regions: { grid: { slots: ['0-44'] } }
+    duel-targets: *screen
+    duel-objectives: *screen
+    duel-loadouts: *screen
+    duel-rules: *screen
+    duel-arenas: *screen
+    duel-leaderboard: *screen
+    duel-history: *screen
+    duel-head-to-head: *screen
+    duel-presets: *screen
+    duel-catalog-modes: *screen
+    duel-catalog-kits: *screen
+    duel-queue: *screen
+    duel-admin: *screen
+    duel-admin-arenas: *screen
+    duel-admin-arena: *screen
+    duel-admin-objectives: *screen
+    duel-recovery: *screen
+    multiplayer-setup: *screen
+    multiplayer-lobby: *screen
+    multiplayer-remote-lobby: *screen

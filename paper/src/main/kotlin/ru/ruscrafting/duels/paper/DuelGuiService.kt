@@ -13,6 +13,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.inventory.InventoryClickEvent
 import org.bukkit.event.inventory.InventoryCloseEvent
+import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.InventoryHolder
@@ -57,6 +58,7 @@ class DuelGuiService internal constructor(
     private val arenaChoices: (DuelRules) -> List<ArenaChoice> = { emptyList() },
     private val multiplayerAction: (Player) -> Unit = {},
     private val guiItems: GuiItemCatalog = GuiItemCatalog.load(plugin),
+    private val menuLayouts: ArcDuelsMenuLayouts = ArcDuelsMenuLayouts.load(plugin),
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val clock: Clock = Clock.systemUTC(),
     private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
@@ -659,12 +661,18 @@ class DuelGuiService internal constructor(
     }
 
     @EventHandler
+    fun onOpen(event: InventoryOpenEvent) {
+        val holder = event.inventory.holder as? MenuHolder ?: return
+        menuLayouts.arrange(holder.screen, event.inventory)
+    }
+
+    @EventHandler
     fun onClick(event: InventoryClickEvent) {
         val player = event.whoClicked as? Player ?: return
         val holder = event.view.topInventory.holder as? MenuHolder ?: return
         event.isCancelled = true
         if (event.clickedInventory != event.view.topInventory) return
-        val slot = event.rawSlot
+        val slot = menuLayouts.logical(holder.screen, event.rawSlot) ?: return
         when (holder) {
             is MainMenuHolder -> when (slot) {
                 4 -> statisticsAction(player, targets.local(player))
@@ -1155,7 +1163,7 @@ class DuelGuiService internal constructor(
     }
 
     private fun create(holder: MenuHolder, title: Component): Inventory =
-        Bukkit.createInventory(holder, MENU_SIZE, title).also(holder::attach)
+        Bukkit.createInventory(holder, menuLayouts.rows(holder.screen) * 9, title).also(holder::attach)
 
     private fun decorate(inventory: Inventory) {
         val filler = roleItem("background", Material.GRAY_STAINED_GLASS_PANE, Component.text(" "))
@@ -1178,10 +1186,14 @@ class DuelGuiService internal constructor(
         if (!player.hasPermission(ADMIN_PERMISSION)) null else if (sessions.hasPendingRecovery(player)) 41 else 40
 
     private fun item(player: Player, material: Material, nameKey: String, loreKey: String? = null, vararg resolvers: LocaleValue): ItemStack =
-        item(material, locales.component(player, nameKey, *resolvers), loreKey?.let { locales.lines(player, it, *resolvers) }.orEmpty())
+        style(
+            guiItems.create(nameKey, material),
+            locales.component(player, nameKey, *resolvers),
+            loreKey?.let { locales.lines(player, it, *resolvers) }.orEmpty(),
+        )
 
     private fun item(player: Player, material: Material, nameKey: String, resolvers: Array<LocaleValue>): ItemStack =
-        item(material, locales.component(player, nameKey, *resolvers))
+        style(guiItems.create(nameKey, material), locales.component(player, nameKey, *resolvers), emptyList())
 
     private fun roleItem(
         player: Player,
@@ -1242,34 +1254,40 @@ class DuelGuiService internal constructor(
         if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable(block))
     }
 
-    private abstract class MenuHolder : InventoryHolder {
+    private abstract class MenuHolder(val screen: ArcDuelsMenuScreen) : InventoryHolder {
         private lateinit var inventory: Inventory
         fun attach(inventory: Inventory) { this.inventory = inventory }
         override fun getInventory(): Inventory = inventory
     }
-    private class MainMenuHolder : MenuHolder()
-    private class TargetMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val targets = mutableMapOf<Int, DuelTarget>() }
-    private class ObjectiveMenuHolder(val target: DuelTarget) : MenuHolder()
-    private class LoadoutMenuHolder(val target: DuelTarget, val objective: DuelObjectiveType, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val kits = mutableMapOf<Int, KitId>(); var ownInventorySlot = -1 }
-    private class RulesMenuHolder(val draft: DuelDraft) : MenuHolder()
-    private class ArenaMenuHolder(val draft: DuelDraft, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() {
+    private class MainMenuHolder : MenuHolder(ArcDuelsMenuScreen.MAIN)
+    private class TargetMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.TARGETS) { val targets = mutableMapOf<Int, DuelTarget>() }
+    private class ObjectiveMenuHolder(val target: DuelTarget) : MenuHolder(ArcDuelsMenuScreen.OBJECTIVES)
+    private class LoadoutMenuHolder(val target: DuelTarget, val objective: DuelObjectiveType, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.LOADOUTS) { val kits = mutableMapOf<Int, KitId>(); var ownInventorySlot = -1 }
+    private class RulesMenuHolder(val draft: DuelDraft) : MenuHolder(ArcDuelsMenuScreen.RULES)
+    private class ArenaMenuHolder(val draft: DuelDraft, val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.ARENAS) {
         val choices = mutableMapOf<Int, ArenaSelection>()
     }
-    private class LeaderboardMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder()
-    private class HistoryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() {
+    private class LeaderboardMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.LEADERBOARD)
+    private class HistoryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.HISTORY) {
         val matches = mutableMapOf<Int, RecordedMatch>()
     }
-    private class HeadToHeadMenuHolder(val opponentId: UUID, val opponentName: String, val historyPage: Int) : MenuHolder()
-    private class PresetMenuHolder(val draft: DuelDraft) : MenuHolder() {
+    private class HeadToHeadMenuHolder(val opponentId: UUID, val opponentName: String, val historyPage: Int) : MenuHolder(ArcDuelsMenuScreen.HEAD_TO_HEAD)
+    private class PresetMenuHolder(val draft: DuelDraft) : MenuHolder(ArcDuelsMenuScreen.PRESETS) {
         val presetSlots = mutableMapOf<Int, Int>()
         val presets = mutableMapOf<Int, DuelPreset>()
     }
-    private class CatalogMenuHolder(val type: CatalogType, val page: Int = 0, val hasPrevious: Boolean = false, val hasNext: Boolean = false) : MenuHolder()
-    private class AdminMenuHolder : MenuHolder()
-    private class AdminArenaListHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val arenas = mutableMapOf<Int, String>() }
-    private class AdminArenaHolder(val arenaId: String) : MenuHolder()
-    private class AdminArenaObjectivesHolder(val arenaId: String) : MenuHolder() { val objectives = mutableMapOf<Int, DuelObjectiveType>() }
-    private class RecoveryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder() { val players = mutableMapOf<Int, UUID>() }
+    private class CatalogMenuHolder(val type: CatalogType, val page: Int = 0, val hasPrevious: Boolean = false, val hasNext: Boolean = false) : MenuHolder(
+        when (type) {
+            CatalogType.MODES -> ArcDuelsMenuScreen.CATALOG_MODES
+            CatalogType.KITS -> ArcDuelsMenuScreen.CATALOG_KITS
+            CatalogType.QUEUE -> ArcDuelsMenuScreen.QUEUE
+        },
+    )
+    private class AdminMenuHolder : MenuHolder(ArcDuelsMenuScreen.ADMIN)
+    private class AdminArenaListHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.ADMIN_ARENAS) { val arenas = mutableMapOf<Int, String>() }
+    private class AdminArenaHolder(val arenaId: String) : MenuHolder(ArcDuelsMenuScreen.ADMIN_ARENA)
+    private class AdminArenaObjectivesHolder(val arenaId: String) : MenuHolder(ArcDuelsMenuScreen.ADMIN_OBJECTIVES) { val objectives = mutableMapOf<Int, DuelObjectiveType>() }
+    private class RecoveryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.RECOVERY) { val players = mutableMapOf<Int, UUID>() }
     private class PendingArenaName(val expiresAt: Instant)
     private enum class CatalogType { MODES, KITS, QUEUE }
     private enum class MenuBack { MAIN }

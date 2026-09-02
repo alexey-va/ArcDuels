@@ -12,6 +12,7 @@ import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.Inventory
@@ -63,6 +64,7 @@ internal class MultiplayerGuiService(
     private val clock: Clock = Clock.systemUTC(),
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val guiItems: GuiItemCatalog = GuiItemCatalog.load(plugin),
+    private val menuLayouts: ArcDuelsMenuLayouts = ArcDuelsMenuLayouts.load(plugin),
     private val backAction: (Player) -> Unit,
 ) : Listener, AutoCloseable, MultiplayerInvitationActions {
     private data class Draft(
@@ -189,15 +191,22 @@ internal class MultiplayerGuiService(
     }
 
     @EventHandler
+    fun onOpen(event: InventoryOpenEvent) {
+        val holder = event.inventory.holder as? MultiplayerHolder ?: return
+        menuLayouts.arrange(holder.screen, event.inventory)
+    }
+
+    @EventHandler
     fun onClick(event: InventoryClickEvent) {
         val player = event.whoClicked as? Player ?: return
         val holder = event.view.topInventory.holder as? MultiplayerHolder ?: return
         event.isCancelled = true
         if (event.clickedInventory != event.view.topInventory) return
+        val slot = menuLayouts.logical(holder.screen, event.rawSlot) ?: return
         when (holder) {
-            is SetupHolder -> handleSetupClick(player, holder, event.rawSlot)
-            is LobbyHolder -> handleLobbyClick(player, holder, event.rawSlot)
-            is RemoteLobbyHolder -> handleRemoteLobbyClick(player, holder, event.rawSlot)
+            is SetupHolder -> handleSetupClick(player, holder, slot)
+            is LobbyHolder -> handleLobbyClick(player, holder, slot)
+            is RemoteLobbyHolder -> handleRemoteLobbyClick(player, holder, slot)
         }
     }
 
@@ -1192,7 +1201,7 @@ internal class MultiplayerGuiService(
         )
 
     private fun create(holder: MultiplayerHolder, title: Component): Inventory =
-        Bukkit.createInventory(holder, MENU_SIZE, nonItalic(title)).also(holder::attach)
+        Bukkit.createInventory(holder, menuLayouts.rows(holder.screen) * 9, nonItalic(title)).also(holder::attach)
 
     private fun decorate(inventory: Inventory) {
         val filler = style(guiItems.create("background", Material.GRAY_STAINED_GLASS_PANE), Component.text(" "), emptyList())
@@ -1207,7 +1216,7 @@ internal class MultiplayerGuiService(
     }
 
     private fun item(player: Player, material: Material, nameKey: String, loreKey: String? = null, vararg values: LocaleValue): ItemStack =
-        style(ItemStack(material), locales.component(player, nameKey, *values), loreKey?.let { locales.lines(player, it, *values) }.orEmpty())
+        style(guiItems.create(nameKey, material), locales.component(player, nameKey, *values), loreKey?.let { locales.lines(player, it, *values) }.orEmpty())
 
     private fun roleItem(
         player: Player,
@@ -1243,7 +1252,7 @@ internal class MultiplayerGuiService(
     private fun policyMaterial(policy: MultiplayerKitPolicy): Material =
         if (policy == MultiplayerKitPolicy.SHARED) Material.CHEST else Material.BUNDLE
 
-    private abstract class MultiplayerHolder : InventoryHolder {
+    private abstract class MultiplayerHolder(val screen: ArcDuelsMenuScreen) : InventoryHolder {
         private lateinit var inventory: Inventory
         fun attach(inventory: Inventory) { this.inventory = inventory }
         override fun getInventory(): Inventory = inventory
@@ -1253,11 +1262,11 @@ internal class MultiplayerGuiService(
         val page: Int,
         val hasPrevious: Boolean,
         val hasNext: Boolean,
-    ) : MultiplayerHolder() {
+    ) : MultiplayerHolder(ArcDuelsMenuScreen.MULTIPLAYER_SETUP) {
         val players = mutableMapOf<Int, UUID>()
     }
-    private class LobbyHolder(val lobbyId: UUID) : MultiplayerHolder()
-    private class RemoteLobbyHolder(val lobbyId: UUID) : MultiplayerHolder()
+    private class LobbyHolder(val lobbyId: UUID) : MultiplayerHolder(ArcDuelsMenuScreen.MULTIPLAYER_LOBBY)
+    private class RemoteLobbyHolder(val lobbyId: UUID) : MultiplayerHolder(ArcDuelsMenuScreen.MULTIPLAYER_REMOTE_LOBBY)
 
     private companion object {
         const val MENU_SIZE = 45

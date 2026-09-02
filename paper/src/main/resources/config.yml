@@ -122,8 +122,10 @@ redis:
   transfer-timeout-seconds: 30
 
 # Stable semantic GUI roles. The bundled defaults work without a resource pack.
+# Besides the common roles below, any localized item can be overridden by its
+# language key with dots replaced by dashes, for example menu-main-challenge.
 # A production overlay may add custom-model-data only together with its matching
-# ItemsAdder base material.
+# ItemsAdder base material. Screen placement lives in gui-layouts.yml.
 gui:
   # Maximum time an administrator may keep the create-arena chat prompt open.
   arena-name-input-timeout-seconds: 60
