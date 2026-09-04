@@ -262,42 +262,31 @@ class DuelController(
         }
     }
 
-    fun deny(
-        player: Player,
-        challengeId: ChallengeId? = null,
-    ) {
-        val challenge = resolveCandidate(player, challengeId, incoming = true) ?: return
-        DuelLog.info("challenge-deny-request", MatchId(challenge.id.value), player, "player={}", player.name)
-        runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.DENIED) }
-            .onSuccess { resolved ->
-                cancelChallengeExpiry(resolved.id)
-                if (resolved.status == ChallengeStatus.EXPIRED) {
-                    announceExpired(resolved)
-                } else if (participants(resolved).size == 2 || challengeBus == null) {
-                    participants(resolved).forEach { it.sendMessage(locales.notice(it, "controller.denied")) }
-                } else {
-                    if (!publishResolution(resolved, null)) {
-                        player.sendMessage(locales.notice(player, "controller.network-unavailable"))
-                    }
-                }
-            }
-            .onFailure { player.sendMessage(locales.notice(player, "controller.failed")) }
-    }
+    fun deny(player: Player, challengeId: ChallengeId? = null) =
+        resolveChallengeAction(player, challengeId, ChallengeStatus.DENIED)
 
-    fun cancel(player: Player) {
-        val challenge = resolveCandidate(player, null, incoming = false) ?: return
-        DuelLog.info("challenge-cancel-request", MatchId(challenge.id.value), player, "player={}", player.name)
-        runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), ChallengeStatus.CANCELLED) }
+    fun cancel(player: Player) =
+        resolveChallengeAction(player, null, ChallengeStatus.CANCELLED)
+
+    private fun resolveChallengeAction(
+        player: Player,
+        challengeId: ChallengeId?,
+        status: ChallengeStatus,
+    ) {
+        val incoming = status == ChallengeStatus.DENIED
+        val requestLog = if (incoming) "challenge-deny-request" else "challenge-cancel-request"
+        val noticeKey = if (incoming) "controller.denied" else "controller.cancelled"
+        val challenge = resolveCandidate(player, challengeId, incoming) ?: return
+        DuelLog.info(requestLog, MatchId(challenge.id.value), player, "player={}", player.name)
+        runCatching { challenges.resolve(challenge.id, PlayerId(player.uniqueId), status) }
             .onSuccess { resolved ->
                 cancelChallengeExpiry(resolved.id)
-                if (resolved.status == ChallengeStatus.EXPIRED) {
-                    announceExpired(resolved)
-                } else if (participants(resolved).size == 2 || challengeBus == null) {
-                    participants(resolved).forEach { it.sendMessage(locales.notice(it, "controller.cancelled")) }
-                } else {
-                    if (!publishResolution(resolved, null)) {
+                when {
+                    resolved.status == ChallengeStatus.EXPIRED -> announceExpired(resolved)
+                    participants(resolved).size == 2 || challengeBus == null ->
+                        participants(resolved).forEach { it.sendMessage(locales.notice(it, noticeKey)) }
+                    !publishResolution(resolved, null) ->
                         player.sendMessage(locales.notice(player, "controller.network-unavailable"))
-                    }
                 }
             }
             .onFailure { player.sendMessage(locales.notice(player, "controller.failed")) }

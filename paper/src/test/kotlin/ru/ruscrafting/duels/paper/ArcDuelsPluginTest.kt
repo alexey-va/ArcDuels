@@ -261,6 +261,87 @@ class ArcDuelsPluginTest : StringSpec({
         controller.close()
     }
 
+    "local challenge cancel and deny resolve the requested side and notify both players" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val locales = LocaleService.load(plugin)
+        val clock = Clock.fixed(Instant.parse("2026-08-15T00:00:00Z"), ZoneOffset.UTC)
+        val challenges = ChallengeRegistry(clock)
+        val targets = DuelTargetDirectory(plugin, ServerId("test"), null)
+        val challenger = server.addPlayer("CancelCharacterization")
+        val target = server.addPlayer("DenyCharacterization")
+        val controller = DuelController(plugin, challenges, sessions, InMemoryStatisticsRepository(), locales, targets, ServerId("test"), clock = clock)
+
+        try {
+            controller.challenge(challenger, targets.local(target), DuelRules(DuelMode.OWN_INVENTORY))
+            val cancelChallenge = requireNotNull(challenges.pendingFor(PlayerId(challenger.uniqueId)).single())
+            target.nextComponentMessage()
+            challenger.nextComponentMessage()
+            controller.cancel(challenger)
+            challenges.find(cancelChallenge.id)?.status shouldBe ChallengeStatus.CANCELLED
+            target.nextComponentMessage() shouldBe locales.notice(target, "controller.cancelled")
+            challenger.nextComponentMessage() shouldBe locales.notice(challenger, "controller.cancelled")
+
+            controller.challenge(challenger, targets.local(target), DuelRules(DuelMode.OWN_INVENTORY))
+            val denyChallenge = requireNotNull(challenges.pendingFor(PlayerId(target.uniqueId)).single())
+            target.nextComponentMessage()
+            challenger.nextComponentMessage()
+            controller.deny(target)
+            challenges.find(denyChallenge.id)?.status shouldBe ChallengeStatus.DENIED
+            challenger.nextComponentMessage() shouldBe locales.notice(challenger, "controller.denied")
+            target.nextComponentMessage() shouldBe locales.notice(target, "controller.denied")
+        } finally {
+            controller.close()
+            challenger.disconnect()
+            target.disconnect()
+        }
+    }
+
+    "remote cancel reports publication failure after resolving the challenge" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val bus = mockk<CrossServerChallengeBus>()
+        every { bus.subscribe(any()) } returns AutoCloseable { }
+        every { bus.publish(any()) } answers {
+            if ((args[0] as CrossServerChallengeMessage).type == ChallengeMessageType.RESOLUTION) {
+                error("planned resolution publication failure")
+            }
+        }
+        val targetId = UUID.randomUUID()
+        val target = DuelTarget(targetId, "RemoteTarget", ServerId("survival"), local = false)
+        val targets = mockk<DuelTargetDirectory>()
+        every { targets.find(any<UUID>()) } returns target
+        val challenger = server.addPlayer("RemoteCancel").apply { setLocale(java.util.Locale.forLanguageTag("ru-RU")) }
+        val challenges = ChallengeRegistry(Clock.systemUTC())
+        val controller =
+            DuelController(
+                plugin,
+                challenges,
+                sessions,
+                InMemoryStatisticsRepository(),
+                LocaleService.load(plugin),
+                targets,
+                ServerId("spawn"),
+                challengeBus = bus,
+                arenaDirectory = mockk(relaxed = true),
+                transfer = mockk(relaxed = true),
+            )
+
+        try {
+            controller.challenge(challenger, target, DuelRules(DuelMode.OWN_INVENTORY))
+            val challenge = requireNotNull(challenges.pendingFor(PlayerId(challenger.uniqueId)).single())
+            while (challenger.nextComponentMessage() != null) Unit
+            controller.cancel(challenger)
+
+            challenges.find(challenge.id)?.status shouldBe ChallengeStatus.CANCELLED
+            challenger.nextComponentMessage() shouldBe LocaleService.load(plugin).notice(challenger, "controller.network-unavailable")
+            verify(exactly = 1) { bus.publish(match { it.type == ChallengeMessageType.RESOLUTION }) }
+        } finally {
+            controller.close()
+            challenger.disconnect()
+        }
+    }
+
     "a Redis publication failure cancels the local offer instead of leaking a pending challenge" {
         val sessions = mockk<DuelSessionManager>(relaxed = true)
         every { sessions.onCompleted(any()) } returns AutoCloseable { }
