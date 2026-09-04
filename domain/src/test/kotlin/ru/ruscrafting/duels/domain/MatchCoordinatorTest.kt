@@ -6,11 +6,13 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class MatchCoordinatorTest : StringSpec({
@@ -213,6 +215,29 @@ class MatchCoordinatorTest : StringSpec({
         racingCoordinator.activeMatches() shouldHaveSize 1
     }
 
+    "a pending match id cannot reserve a second arena" {
+        val reservations = CopyOnWriteArrayList<CompletableFuture<ArenaReservation>>()
+        val collisionCoordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator { CompletableFuture<ArenaReservation>().also(reservations::add) },
+                InMemoryStatisticsRepository(),
+            )
+        val sharedId = MatchId(UUID.randomUUID())
+        val third = PlayerId(UUID.randomUUID())
+        val fourth = PlayerId(UUID.randomUUID())
+
+        val firstReservation = collisionCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), sharedId)
+
+        shouldThrow<IllegalStateException> {
+            collisionCoordinator.reserve(third, fourth, DuelRules(DuelMode.OWN_INVENTORY), sharedId)
+        }
+        reservations shouldHaveSize 1
+
+        reservations.single().complete(ArenaReservation(ArenaId("collision-safe")) {})
+        firstReservation.get().id shouldBe sharedId
+    }
+
     "cancelling an arena wait releases both queued player ownerships" {
         val arenaFutures = CopyOnWriteArrayList<CompletableFuture<ArenaReservation>>()
         val cancellable =
@@ -231,6 +256,129 @@ class MatchCoordinatorTest : StringSpec({
         cancellable.isQueuedOrMatched(second) shouldBe false
         cancellable.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY))
         arenaFutures shouldHaveSize 2
+    }
+
+    "late failed allocation cannot clear a replacement reservation" {
+        val allocations = CopyOnWriteArrayList<NonCancellableFuture<ArenaReservation>>()
+        val replacementCoordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator { NonCancellableFuture<ArenaReservation>().also(allocations::add) },
+                InMemoryStatisticsRepository(),
+            )
+        val matchId = MatchId(UUID.randomUUID())
+        val cancelled = replacementCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId)
+        cancelled.cancel(false) shouldBe true
+        val replacement = replacementCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId)
+
+        allocations[0].completeExceptionally(IllegalStateException("late allocation failure"))
+        allocations[1].complete(ArenaReservation(ArenaId("replacement")) {})
+
+        replacement.get().id shouldBe matchId
+        replacementCoordinator.findByPlayer(first)?.id shouldBe matchId
+    }
+
+    "late successful allocation closes only its own reservation" {
+        val allocations = CopyOnWriteArrayList<NonCancellableFuture<ArenaReservation>>()
+        val lateReleases = AtomicInteger()
+        val replacementCoordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator { NonCancellableFuture<ArenaReservation>().also(allocations::add) },
+                InMemoryStatisticsRepository(),
+            )
+        val matchId = MatchId(UUID.randomUUID())
+        val cancelled = replacementCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId)
+        cancelled.cancel(false) shouldBe true
+        val replacement = replacementCoordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId)
+
+        allocations[0].complete(ArenaReservation(ArenaId("late"), lateReleases::incrementAndGet))
+        allocations[1].complete(ArenaReservation(ArenaId("replacement")) {})
+
+        lateReleases.get() shouldBe 1
+        replacement.get().id shouldBe matchId
+        replacementCoordinator.findByPlayer(first)?.id shouldBe matchId
+    }
+
+    "allocator throw releases the reservation attempt" {
+        var fail = true
+        val coordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator {
+                    if (fail) {
+                        fail = false
+                        throw IllegalStateException("allocator rejected reservation")
+                    }
+                    CompletableFuture.completedFuture(ArenaReservation(ArenaId("recovered")) {})
+                },
+                InMemoryStatisticsRepository(),
+            )
+        val matchId = MatchId(UUID.randomUUID())
+
+        shouldThrow<IllegalStateException> {
+            coordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId)
+        }
+
+        coordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId).get().id shouldBe matchId
+    }
+
+    "construction failure releases its reservation and preserves the close error" {
+        var failConstruction = true
+        val clock =
+            object : Clock() {
+                override fun getZone(): ZoneId = ZoneOffset.UTC
+
+                override fun withZone(zone: ZoneId): Clock = this
+
+                override fun instant(): Instant {
+                    if (failConstruction) {
+                        failConstruction = false
+                        throw IllegalStateException("clock failed during match construction")
+                    }
+                    return Instant.parse("2026-08-13T10:00:00Z")
+                }
+            }
+        val coordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator {
+                    CompletableFuture.completedFuture(ArenaReservation(ArenaId("throwing-close")) {
+                        error("reservation release failed")
+                    })
+                },
+                InMemoryStatisticsRepository(),
+                clock = clock,
+            )
+        val matchId = MatchId(UUID.randomUUID())
+
+        val failure = shouldThrow<ExecutionException> {
+            coordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId).get(1, TimeUnit.SECONDS)
+        }.cause ?: error("missing construction failure")
+
+        failure.message shouldBe "clock failed during match construction"
+        failure.suppressed.single().message shouldBe "reservation release failed"
+        coordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId).get(1, TimeUnit.SECONDS).id shouldBe matchId
+    }
+
+    "late reservation close failure cannot strand its replacement" {
+        val allocations = CopyOnWriteArrayList<NonCancellableFuture<ArenaReservation>>()
+        val coordinator =
+            MatchCoordinator(
+                ServerId("duels-1"),
+                ArenaAllocator { NonCancellableFuture<ArenaReservation>().also(allocations::add) },
+                InMemoryStatisticsRepository(),
+            )
+        val matchId = MatchId(UUID.randomUUID())
+        val cancelled = coordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId)
+        cancelled.cancel(false) shouldBe true
+        val replacement = coordinator.reserve(first, second, DuelRules(DuelMode.OWN_INVENTORY), matchId)
+
+        allocations[0].complete(ArenaReservation(ArenaId("late")) { error("late release failed") })
+        allocations[1].complete(ArenaReservation(ArenaId("replacement")) {})
+
+        replacement.get().id shouldBe matchId
+        coordinator.findByPlayer(first)?.id shouldBe matchId
     }
 
     "overlapping successful persistence retries publish completion events once" {
@@ -299,3 +447,7 @@ class MatchCoordinatorTest : StringSpec({
         retryEvents shouldHaveSize 2
     }
 })
+
+private class NonCancellableFuture<T> : CompletableFuture<T>() {
+    override fun cancel(mayInterruptIfRunning: Boolean): Boolean = false
+}

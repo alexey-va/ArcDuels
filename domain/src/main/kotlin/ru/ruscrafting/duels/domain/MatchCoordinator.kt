@@ -15,7 +15,8 @@ class MatchCoordinator(
     private val lock = Any()
     private val matches = ConcurrentHashMap<MatchId, DuelMatch>()
     private val matchByPlayer = ConcurrentHashMap<PlayerId, MatchId>()
-    private val pendingPlayers = ConcurrentHashMap.newKeySet<PlayerId>()
+    private val pendingPlayers = ConcurrentHashMap<PlayerId, Any>()
+    private val pendingMatchIds = ConcurrentHashMap<MatchId, Any>()
     private val reservations = ConcurrentHashMap<MatchId, ArenaReservation>()
 
     fun reserve(
@@ -26,21 +27,23 @@ class MatchCoordinator(
         arenaId: ArenaId? = null,
     ): CompletableFuture<DuelMatch> {
         require(firstPlayer != secondPlayer) { "A player cannot duel themselves" }
+        val attempt = Any()
         val arenaFuture =
             synchronized(lock) {
-                check(matchByPlayer[firstPlayer] == null && firstPlayer !in pendingPlayers) {
+                check(!matches.containsKey(matchId) && !pendingMatchIds.containsKey(matchId)) { "Match id is already reserved" }
+                check(matchByPlayer[firstPlayer] == null && !pendingPlayers.containsKey(firstPlayer)) {
                     "First player is already queued or in a match"
                 }
-                check(matchByPlayer[secondPlayer] == null && secondPlayer !in pendingPlayers) {
+                check(matchByPlayer[secondPlayer] == null && !pendingPlayers.containsKey(secondPlayer)) {
                     "Second player is already queued or in a match"
                 }
-                pendingPlayers += firstPlayer
-                pendingPlayers += secondPlayer
+                pendingPlayers[firstPlayer] = attempt
+                pendingPlayers[secondPlayer] = attempt
+                pendingMatchIds[matchId] = attempt
                 try {
                     arenaAllocator.reserve(rules, arenaId)
                 } catch (failure: Throwable) {
-                    pendingPlayers -= firstPlayer
-                    pendingPlayers -= secondPlayer
+                    releasePendingAttempt(firstPlayer, secondPlayer, matchId, attempt)
                     throw failure
                 }
             }
@@ -48,16 +51,17 @@ class MatchCoordinator(
         arenaFuture.whenComplete { reservation, failure ->
             if (failure != null) {
                 synchronized(lock) {
-                    pendingPlayers -= firstPlayer
-                    pendingPlayers -= secondPlayer
+                    releasePendingAttempt(firstPlayer, secondPlayer, matchId, attempt)
                 }
                 result.completeExceptionally(failure)
                 return@whenComplete
             }
+            var reservationAttached = false
             try {
                 val match = synchronized(lock) {
-                    check(firstPlayer in pendingPlayers) { "First player's queued reservation was cancelled" }
-                    check(secondPlayer in pendingPlayers) { "Second player's queued reservation was cancelled" }
+                    check(pendingPlayers[firstPlayer] === attempt) { "First player's queued reservation was cancelled" }
+                    check(pendingPlayers[secondPlayer] === attempt) { "Second player's queued reservation was cancelled" }
+                    check(pendingMatchIds[matchId] === attempt) { "Match id's queued reservation was cancelled" }
                     check(matchByPlayer[firstPlayer] == null) { "First player joined another match" }
                     check(matchByPlayer[secondPlayer] == null) { "Second player joined another match" }
                     val match =
@@ -73,34 +77,29 @@ class MatchCoordinator(
                     matches[match.id] = match
                     matchByPlayer[firstPlayer] = match.id
                     matchByPlayer[secondPlayer] = match.id
-                    pendingPlayers -= firstPlayer
-                    pendingPlayers -= secondPlayer
+                    releasePendingAttempt(firstPlayer, secondPlayer, matchId, attempt)
                     reservations[match.id] = reservation
+                    reservationAttached = true
                     match
                 }
                 if (!result.complete(match)) {
-                    synchronized(lock) {
-                        matches[match.id]?.takeIf { it.state == MatchState.RESERVED }?.let { reserved ->
-                            val cancelled = reserved.cancel(clock.instant(), MatchEndReason.ADMIN_CANCEL)
-                            matches[match.id] = cancelled
-                            releaseLocked(cancelled)
-                        }
-                    }
+                    releaseCancelledReservation(match)
                 }
             } catch (failure: Throwable) {
-                reservation.close()
-                synchronized(lock) {
-                    pendingPlayers -= firstPlayer
-                    pendingPlayers -= secondPlayer
+                if (!reservationAttached) {
+                    runCatching { reservation.close() }.exceptionOrNull()?.takeUnless { it === failure }?.let(failure::addSuppressed)
                 }
                 result.completeExceptionally(failure)
+            } finally {
+                synchronized(lock) {
+                    releasePendingAttempt(firstPlayer, secondPlayer, matchId, attempt)
+                }
             }
         }
         result.whenComplete { _, _ ->
             if (result.isCancelled) {
                 synchronized(lock) {
-                    pendingPlayers -= firstPlayer
-                    pendingPlayers -= secondPlayer
+                    releasePendingAttempt(firstPlayer, secondPlayer, matchId, attempt)
                 }
                 arenaFuture.cancel(false)
             }
@@ -176,7 +175,7 @@ class MatchCoordinator(
 
     fun findByPlayer(playerId: PlayerId): DuelMatch? = matchByPlayer[playerId]?.let(matches::get)
 
-    fun isQueuedOrMatched(playerId: PlayerId): Boolean = playerId in pendingPlayers || matchByPlayer[playerId] != null
+    fun isQueuedOrMatched(playerId: PlayerId): Boolean = pendingPlayers.containsKey(playerId) || matchByPlayer[playerId] != null
 
     fun activeMatches(): List<DuelMatch> =
         matches.values.filter { it.state !in setOf(MatchState.COMPLETED, MatchState.CANCELLED) }.sortedBy(DuelMatch::createdAt)
@@ -272,6 +271,27 @@ class MatchCoordinator(
         }
 
     private fun getRequired(matchId: MatchId): DuelMatch = matches[matchId] ?: error("Unknown match")
+
+    private fun releasePendingAttempt(
+        firstPlayer: PlayerId,
+        secondPlayer: PlayerId,
+        matchId: MatchId,
+        attempt: Any,
+    ) {
+        pendingPlayers.remove(firstPlayer, attempt)
+        pendingPlayers.remove(secondPlayer, attempt)
+        pendingMatchIds.remove(matchId, attempt)
+    }
+
+    private fun releaseCancelledReservation(match: DuelMatch) {
+        synchronized(lock) {
+            matches[match.id]?.takeIf { it === match && it.state == MatchState.RESERVED }?.let {
+                val cancelled = match.cancel(clock.instant(), MatchEndReason.ADMIN_CANCEL)
+                matches[match.id] = cancelled
+                releaseLocked(cancelled)
+            }
+        }
+    }
 
     private fun release(match: DuelMatch) {
         synchronized(lock) {

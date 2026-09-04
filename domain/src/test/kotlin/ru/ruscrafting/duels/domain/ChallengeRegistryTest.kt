@@ -66,6 +66,36 @@ class ChallengeRegistryTest : StringSpec({
         registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
     }
 
+    "late offer delivery keeps an already received network resolution" {
+        val registry = ChallengeRegistry(clock)
+        val challenge = DuelChallenge.create(first, second, DuelRules(DuelMode.OWN_INVENTORY), clock.instant(), Duration.ofSeconds(45))
+        val resolved = challenge.resolve(ChallengeStatus.ACCEPTED, clock.instant())
+
+        registry.registerResolution(resolved) shouldBe resolved
+
+        registry.register(challenge) shouldBe resolved
+        registry.find(challenge.id) shouldBe resolved
+    }
+
+    "expired remote offer never claims its players" {
+        var now = Instant.parse("2026-08-14T09:00:00Z")
+        val mutableClock =
+            object : Clock() {
+                override fun getZone(): ZoneId = ZoneOffset.UTC
+
+                override fun withZone(zone: ZoneId): Clock = this
+
+                override fun instant(): Instant = now
+            }
+        val registry = ChallengeRegistry(mutableClock)
+        val challenge = DuelChallenge.create(first, second, DuelRules(DuelMode.OWN_INVENTORY), now, Duration.ofSeconds(1))
+        now = now.plusSeconds(1)
+
+        registry.register(challenge).status shouldBe ChallengeStatus.EXPIRED
+        registry.pendingFor(first) shouldBe emptyList()
+        registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
+    }
+
     "network resolution cannot replace the arena selected in the offer" {
         val registry = ChallengeRegistry(clock)
         val selected = ArenaSelection(ServerId("spawn"), ArenaId("kit-test"))

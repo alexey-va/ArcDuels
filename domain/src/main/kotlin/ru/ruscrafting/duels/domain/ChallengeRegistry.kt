@@ -60,17 +60,27 @@ class ChallengeRegistry(
             expirePending()
             val existing = challenges[challenge.id]
             if (existing != null) {
-                require(existing == challenge) { "Challenge id is already registered with different data" }
+                require(existing.hasSameOffer(challenge)) { "Challenge id is already registered with different data" }
+                require(
+                    existing.status == challenge.status ||
+                        (existing.status != ChallengeStatus.PENDING && challenge.status == ChallengeStatus.PENDING),
+                ) { "Challenge id is already registered with a different resolution" }
                 return@synchronized existing
             }
-            if (challenge.status == ChallengeStatus.PENDING) {
-                check(pendingByPlayer[challenge.challenger] == null) { "The challenger already has a pending challenge" }
-                check(pendingByPlayer[challenge.target] == null) { "The target already has a pending challenge" }
-                claimPendingPlayers(challenge)
+            val registered =
+                if (challenge.status == ChallengeStatus.PENDING && !clock.instant().isBefore(challenge.expiresAt)) {
+                    challenge.resolve(ChallengeStatus.EXPIRED, clock.instant())
+                } else {
+                    challenge
+                }
+            if (registered.status == ChallengeStatus.PENDING) {
+                check(pendingByPlayer[registered.challenger] == null) { "The challenger already has a pending challenge" }
+                check(pendingByPlayer[registered.target] == null) { "The target already has a pending challenge" }
+                claimPendingPlayers(registered)
             }
-            challenges[challenge.id] = challenge
+            challenges[registered.id] = registered
             pruneTerminalChallenges()
-            challenge
+            registered
         }
 
     /** Applies an authenticated terminal state received from another server. */
@@ -183,6 +193,14 @@ class ChallengeRegistry(
         pendingByPlayer.remove(challenge.challenger, challenge.id)
         pendingByPlayer.remove(challenge.target, challenge.id)
     }
+
+    private fun DuelChallenge.hasSameOffer(other: DuelChallenge): Boolean =
+        challenger == other.challenger &&
+            target == other.target &&
+            rules == other.rules &&
+            arenaSelection == other.arenaSelection &&
+            createdAt == other.createdAt &&
+            expiresAt == other.expiresAt
 
     private companion object {
         const val MAX_RETAINED_TERMINAL = 1_024
