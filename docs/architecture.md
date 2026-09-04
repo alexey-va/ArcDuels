@@ -31,7 +31,8 @@ leaderboard rendered on another Paper node does not fall back to UUIDs.
 Concurrent result writes lock both player rows in deterministic order. InnoDB
 deadlock victims and lock-wait rollbacks receive a bounded asynchronous retry
 with backoff; connection failures and other SQL errors remain visible and are
-never retried blindly. Match timestamps are canonicalized to MySQL's declared
+never retried blindly. `MySqlTransactionRetry.kt` owns this policy for result
+writes and both escrow save paths. Match timestamps are canonicalized to MySQL's declared
 millisecond precision before idempotency comparison.
 The same receipt stores the complete accepted rules, exact arena, perspective
 score, completion reason, and rating results. History, head-to-head aggregation,

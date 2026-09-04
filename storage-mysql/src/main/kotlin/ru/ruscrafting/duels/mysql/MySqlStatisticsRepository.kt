@@ -32,13 +32,9 @@ import ru.ruscrafting.duels.domain.validatePlayerName
 import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.ResultSet
-import java.sql.SQLException
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletionException
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeUnit
 
 class MySqlStatisticsRepository(
     private val runtime: SqlRuntime,
@@ -93,8 +89,12 @@ class MySqlStatisticsRepository(
             }
         }
 
-    override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> =
-        recordWithRetry(outcome.canonicalized(), attempt = 0)
+    override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> {
+        val canonical = outcome.canonicalized()
+        return retryMySqlTransaction {
+            runtime.executor.transaction { connection -> recordTransaction(connection, canonical) }
+        }
+    }
 
     override fun record(outcome: MultiplayerMatchOutcome): CompletableFuture<Boolean> {
         val fingerprint = multiplayerFingerprint(outcome)
@@ -347,12 +347,29 @@ class MySqlStatisticsRepository(
             "Escrow participants must belong to the same server"
         }
         snapshots.forEach(::validateEscrow)
-        return saveAllWithRetry(snapshots.sortedBy { it.playerId.value }, attempt = 0)
+        val ordered = snapshots.sortedBy { it.playerId.value }
+        return retryMySqlTransaction {
+            runtime.executor.transaction { connection -> saveAllTransaction(connection, ordered) }
+        }
     }
 
     override fun save(snapshot: PlayerStateEscrow): CompletableFuture<Unit> {
         validateEscrow(snapshot)
-        return saveWithRetry(snapshot, attempt = 0)
+        return retryMySqlTransaction {
+            runtime.executor.transaction { connection ->
+                val existing = findEscrow(connection, snapshot.playerId, lock = true)
+                if (existing == null) {
+                    insertEscrow(connection, snapshot)
+                } else {
+                    check(existing.sameContent(snapshot)) {
+                        "Player ${snapshot.playerId} already has a different pending state escrow"
+                    }
+                }
+                val committed = checkNotNull(findEscrow(connection, snapshot.playerId, lock = false))
+                check(committed.sameContent(snapshot)) { "Committed escrow verification failed for ${snapshot.playerId}" }
+                validateEscrow(committed)
+            }
+        }
     }
 
     override fun findPending(playerId: PlayerId): CompletableFuture<PlayerStateEscrow?> =
@@ -440,59 +457,6 @@ class MySqlStatisticsRepository(
         }
 
     override fun close() = runtime.close()
-
-    private fun saveAllWithRetry(
-        snapshots: List<PlayerStateEscrow>,
-        attempt: Int,
-    ): CompletableFuture<Unit> =
-        runtime.executor.transaction { connection -> saveAllTransaction(connection, snapshots) }
-            .handle { result, failure ->
-                if (failure == null) {
-                    CompletableFuture.completedFuture(result)
-                } else {
-                    val cause = failure.unwrapCompletion()
-                    if (attempt < MAX_TRANSACTION_RETRIES && cause.isRetryableMySqlTransactionFailure()) {
-                        CompletableFuture.runAsync(
-                            {},
-                            CompletableFuture.delayedExecutor(RETRY_BASE_DELAY_MS shl attempt, TimeUnit.MILLISECONDS),
-                        ).thenCompose { saveAllWithRetry(snapshots, attempt + 1) }
-                    } else {
-                        CompletableFuture.failedFuture(cause)
-                    }
-                }
-            }.thenCompose { it }
-
-    private fun saveWithRetry(
-        snapshot: PlayerStateEscrow,
-        attempt: Int,
-    ): CompletableFuture<Unit> =
-        runtime.executor.transaction { connection ->
-            val existing = findEscrow(connection, snapshot.playerId, lock = true)
-            if (existing == null) {
-                insertEscrow(connection, snapshot)
-            } else {
-                check(existing.sameContent(snapshot)) {
-                    "Player ${snapshot.playerId} already has a different pending state escrow"
-                }
-            }
-            val committed = checkNotNull(findEscrow(connection, snapshot.playerId, lock = false))
-            check(committed.sameContent(snapshot)) { "Committed escrow verification failed for ${snapshot.playerId}" }
-            validateEscrow(committed)
-        }.handle { result, failure ->
-            if (failure == null) {
-                CompletableFuture.completedFuture(result)
-            } else {
-                val cause = failure.unwrapCompletion()
-                if (attempt < MAX_TRANSACTION_RETRIES && cause.isRetryableMySqlTransactionFailure()) {
-                    CompletableFuture.runAsync(
-                        {},
-                        CompletableFuture.delayedExecutor(RETRY_BASE_DELAY_MS shl attempt, TimeUnit.MILLISECONDS),
-                    ).thenCompose { saveWithRetry(snapshot, attempt + 1) }
-                } else {
-                    CompletableFuture.failedFuture(cause)
-                }
-            }
-        }.thenCompose { it }
 
     private fun saveAllTransaction(
         connection: Connection,
@@ -637,27 +601,6 @@ class MySqlStatisticsRepository(
             "Escrow payload checksum does not match its contents"
         }
     }
-
-    private fun recordWithRetry(
-        outcome: MatchOutcome,
-        attempt: Int,
-    ): CompletableFuture<PersistedMatchResult> =
-        runtime.executor.transaction { connection -> recordTransaction(connection, outcome) }
-            .handle { result, failure ->
-                if (failure == null) {
-                    CompletableFuture.completedFuture(result)
-                } else {
-                    val cause = failure.unwrapCompletion()
-                    if (attempt < MAX_TRANSACTION_RETRIES && cause.isRetryableMySqlTransactionFailure()) {
-                        CompletableFuture.runAsync(
-                            {},
-                            CompletableFuture.delayedExecutor(RETRY_BASE_DELAY_MS shl attempt, TimeUnit.MILLISECONDS),
-                        ).thenCompose { recordWithRetry(outcome, attempt + 1) }
-                    } else {
-                        CompletableFuture.failedFuture(cause)
-                    }
-                }
-            }.thenCompose { it }
 
     private fun recordTransaction(
         connection: Connection,
@@ -992,13 +935,6 @@ class MySqlStatisticsRepository(
     }
 
     private companion object {
-        // A four-connection pool can produce several consecutive InnoDB victims
-        // when many servers deliver the same match receipt at once. Eight
-        // bounded retries (nine total attempts) still fail fast for
-        // non-rollback errors while the exponential delay drains that
-        // duplicate burst safely.
-        const val MAX_TRANSACTION_RETRIES = 8
-        const val RETRY_BASE_DELAY_MS = 10L
         const val PURGE_BATCH_SIZE = 1_000
         const val MAX_ESCROW_PAYLOAD_BYTES = 8 * 1024 * 1024
         const val MIGRATION_NAMESPACE = "arcduels"
@@ -1015,17 +951,4 @@ class MySqlStatisticsRepository(
                 "`ender_pearls`, `natural_regeneration`, `sudden_death_seconds`, `koth_capture_seconds`, " +
                 "`boxing_hits_to_win`, `combo_hits_to_win`, `selected_arena_server`, `selected_arena_id`, `updated_at`"
     }
-}
-
-internal fun Throwable.isRetryableMySqlTransactionFailure(): Boolean =
-    generateSequence(this) { it.cause }
-        .filterIsInstance<SQLException>()
-        .any { failure -> failure.sqlState == "40001" || failure.errorCode == 1_213 || failure.errorCode == 1_205 }
-
-private fun Throwable.unwrapCompletion(): Throwable {
-    var current = this
-    while ((current is CompletionException || current is ExecutionException) && current.cause != null) {
-        current = requireNotNull(current.cause)
-    }
-    return current
 }

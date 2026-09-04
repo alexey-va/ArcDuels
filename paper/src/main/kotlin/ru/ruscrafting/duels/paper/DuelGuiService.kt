@@ -95,7 +95,6 @@ class DuelGuiService internal constructor(
     fun openMain(player: Player) {
         val holder = MainMenuHolder()
         val inventory = create(holder, locales.component(player, "menu.main.title"))
-        decorate(inventory)
         inventory.setItem(4, playerHead(player, locales.component(player, "menu.main.stats"), locales.lines(player, "menu.main.stats-lore")))
         inventory.setItem(11, item(player, Material.NETHERITE_SWORD, "menu.main.challenge", "menu.main.challenge-lore"))
         inventory.setItem(15, item(player, Material.PLAYER_HEAD, "menu.main.multiplayer", "menu.main.multiplayer-lore"))
@@ -130,7 +129,6 @@ class DuelGuiService internal constructor(
         val page = pageWindow(availableTargets, requestedPage, CONTENT_SLOTS.size)
         val holder = TargetMenuHolder(page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.targets.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
-        decorate(inventory)
         page.items.forEachIndexed { index, target ->
             val slot = CONTENT_SLOTS[index]
             holder.targets[slot] = target
@@ -160,7 +158,6 @@ class DuelGuiService internal constructor(
         }
         pendingArenaNames.remove(player.uniqueId)
         val inventory = create(AdminMenuHolder(), locales.component(player, "menu.admin.title"))
-        decorate(inventory)
         val arenaIds = arenaIds()
         inventory.setItem(11, item(player, Material.FILLED_MAP, "menu.admin.arenas", "menu.admin.arenas-lore", LocaleService.text("arenas", arenaIds.size)))
         inventory.setItem(
@@ -192,7 +189,6 @@ class DuelGuiService internal constructor(
         val page = pageWindow(ids, requestedPage, CONTENT_SLOTS.size)
         val holder = AdminArenaListHolder(page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.admin-arenas.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
-        decorate(inventory)
         page.items.forEachIndexed { index, id ->
             val slot = CONTENT_SLOTS[index]
             holder.arenas[slot] = id
@@ -232,7 +228,6 @@ class DuelGuiService internal constructor(
         val path = "arenas.$arenaId"
         val enabled = plugin.config.getBoolean("$path.enabled")
         val inventory = create(AdminArenaHolder(arenaId), locales.component(player, "menu.admin-arena.title", LocaleService.text("arena", arenaId)))
-        decorate(inventory)
         inventory.setItem(10, item(player, Material.MAP, "menu.admin-arena.overview", "menu.admin-arena.overview-lore", LocaleService.text("arena", arenaId), LocaleService.component("state", state(player, enabled))))
         inventory.setItem(12, item(player, Material.COMPASS, "menu.admin-arena.spawn1", "menu.admin-arena.point-lore", LocaleService.text("value", locationSummary("$path.first-spawn"))))
         inventory.setItem(14, item(player, Material.COMPASS, "menu.admin-arena.spawn2", "menu.admin-arena.point-lore", LocaleService.text("value", locationSummary("$path.second-spawn"))))
@@ -277,7 +272,6 @@ class DuelGuiService internal constructor(
         val enabled = readArenaAllowedObjectives(section)
         val holder = AdminArenaObjectivesHolder(arenaId)
         val inventory = create(holder, locales.component(player, "menu.admin-objectives.title", LocaleService.text("arena", arenaId)))
-        decorate(inventory)
         OBJECTIVE_SLOTS.forEach { (slot, objective) ->
             holder.objectives[slot] = objective
             inventory.setItem(
@@ -301,7 +295,6 @@ class DuelGuiService internal constructor(
         val page = pageWindow(players, requestedPage, CONTENT_SLOTS.size)
         val holder = RecoveryMenuHolder(page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.admin-recovery.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
-        decorate(inventory)
         page.items.forEachIndexed { index, target ->
             val slot = CONTENT_SLOTS[index]
             holder.players[slot] = target.uniqueId
@@ -325,7 +318,6 @@ class DuelGuiService internal constructor(
                 val page = pageWindow(entries, requestedPage, CONTENT_SLOTS.size)
                 val holder = LeaderboardMenuHolder(page.index, page.hasPrevious, page.hasNext)
                 val inventory = create(holder, locales.component(player, "menu.leaderboard.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
-                decorate(inventory)
                 page.items.forEachIndexed { index, entry ->
                     val slot = CONTENT_SLOTS[index]
                     val name = entry.playerName ?: Bukkit.getOfflinePlayer(entry.playerId.value).name ?: entry.playerId.toString().take(8)
@@ -376,7 +368,6 @@ class DuelGuiService internal constructor(
                             LocaleService.text("pages", page.totalPages),
                         ),
                     )
-                decorate(inventory)
                 page.items.forEachIndexed { index, match ->
                     val slot = CONTENT_SLOTS[index]
                     holder.matches[slot] = match
@@ -407,7 +398,6 @@ class DuelGuiService internal constructor(
                 }
                 val holder = HeadToHeadMenuHolder(opponentId.value, opponentName, historyPage)
                 val inventory = create(holder, locales.component(player, "menu.h2h.title", LocaleService.text("player", opponentName)))
-                decorate(inventory)
                 inventory.setItem(
                     11,
                     playerHead(
@@ -473,7 +463,6 @@ class DuelGuiService internal constructor(
                 }
                 val holder = PresetMenuHolder(draft)
                 val inventory = create(holder, locales.component(player, "menu.presets.title"))
-                decorate(inventory)
                 val bySlot = requireNotNull(saved).associateBy(DuelPreset::slot)
                 PRESET_GUI_SLOTS.forEachIndexed { index, inventorySlot ->
                     val presetSlot = index + 1
@@ -504,7 +493,6 @@ class DuelGuiService internal constructor(
     private fun openObjectives(player: Player, target: DuelTarget) {
         val holder = ObjectiveMenuHolder(target)
         val inventory = create(holder, locales.component(player, "menu.objectives.title", LocaleService.text("player", target.name)))
-        decorate(inventory)
         objectiveItem(player, DuelObjectiveType.ELIMINATION, Material.DIAMOND_SWORD)?.let { inventory.setItem(11, it) }
         objectiveItem(player, DuelObjectiveType.KING_OF_THE_HILL, Material.BEACON)?.let { inventory.setItem(13, it) }
         objectiveItem(player, DuelObjectiveType.SUMO, Material.SLIME_BALL)?.let { inventory.setItem(15, it) }
@@ -527,7 +515,6 @@ class DuelGuiService internal constructor(
         val page = pageWindow(availableKits, requestedPage, kitSlots.size)
         val holder = LoadoutMenuHolder(target, objective, page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.loadouts.title"))
-        decorate(inventory)
         page.items.forEachIndexed { index, kit ->
             val slot = kitSlots[index]
             holder.kits[slot] = kit.id
@@ -552,7 +539,6 @@ class DuelGuiService internal constructor(
         }
         val holder = RulesMenuHolder(draft)
         val inventory = create(holder, locales.component(player, "menu.rules.title", LocaleService.text("player", target.name)))
-        decorate(inventory)
         inventory.setItem(10, toggleItem(player, "menu.rules.ranked", draft.ranked, enabled = draft.mode == DuelMode.KIT))
         inventory.setItem(12, item(player, Material.REPEATER, "menu.rules.best-of", "menu.rules.best-of-lore", LocaleService.text("value", draft.bestOf)))
         if (draft.objective.isHitRace) {
@@ -602,7 +588,6 @@ class DuelGuiService internal constructor(
         val page = pageWindow(choices, requestedPage, slots.size)
         val holder = ArenaMenuHolder(draft, page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.arenas.title"))
-        decorate(inventory)
         inventory.setItem(ARENA_AUTO_SLOT, item(player, Material.COMPASS, "menu.arenas.auto", "menu.arenas.auto-lore"))
         page.items.forEachIndexed { index, choice ->
             val slot = slots[index]
@@ -631,7 +616,6 @@ class DuelGuiService internal constructor(
     private fun openModes(player: Player) {
         val holder = CatalogMenuHolder(CatalogType.MODES)
         val inventory = create(holder, locales.component(player, "menu.modes.title"))
-        decorate(inventory)
         inventory.setItem(11, requireNotNull(objectiveItem(player, DuelObjectiveType.ELIMINATION, Material.DIAMOND_SWORD)))
         inventory.setItem(13, requireNotNull(objectiveItem(player, DuelObjectiveType.KING_OF_THE_HILL, Material.BEACON)))
         inventory.setItem(15, requireNotNull(objectiveItem(player, DuelObjectiveType.SUMO, Material.SLIME_BALL)))
@@ -645,7 +629,6 @@ class DuelGuiService internal constructor(
         val page = pageWindow(kits.all(), requestedPage, CONTENT_SLOTS.size)
         val holder = CatalogMenuHolder(CatalogType.KITS, page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.kits.title"))
-        decorate(inventory)
         page.items.forEachIndexed { index, kit -> inventory.setItem(CONTENT_SLOTS[index], kitItem(player, kit)) }
         navigation(player, inventory, page, MenuBack.MAIN)
         show(player, inventory)
@@ -654,7 +637,6 @@ class DuelGuiService internal constructor(
     private fun openQueue(player: Player) {
         val holder = CatalogMenuHolder(CatalogType.QUEUE)
         val inventory = create(holder, locales.component(player, "menu.queue.title"))
-        decorate(inventory)
         inventory.setItem(12, item(player, Material.IRON_SWORD, "menu.queue.active", "menu.queue.active-lore", LocaleService.text("active", sessions.activeArenaCount())))
         inventory.setItem(14, item(player, Material.CLOCK, "menu.queue.waiting", "menu.queue.waiting-lore", LocaleService.text("waiting", sessions.queueSize())))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
@@ -1170,8 +1152,6 @@ class DuelGuiService internal constructor(
         }
     }
 
-    private fun decorate(@Suppress("UNUSED_PARAMETER") inventory: PaperMenuFrame) = Unit
-
     private fun <T> navigation(player: Player, inventory: PaperMenuFrame, page: PageWindow<T>, back: MenuBack) {
         if (back == MenuBack.MAIN) inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         if (page.hasPrevious) inventory.setItem(PREVIOUS_SLOT, roleItem(player, "previous", Material.ARROW, "menu.common.previous"))
@@ -1320,7 +1300,6 @@ class DuelGuiService internal constructor(
     private enum class PresetAvailability { READY, ARENA_MISSING, KIT_MISSING }
 
     private companion object {
-        const val MENU_SIZE = 45
         const val MAX_LEADERBOARD_ENTRIES = 100
         const val MAX_HISTORY_ENTRIES = 100
         const val BACK_SLOT = 36

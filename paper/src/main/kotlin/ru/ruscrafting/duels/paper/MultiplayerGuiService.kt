@@ -242,7 +242,6 @@ internal class MultiplayerGuiService(
         val shown = page.items
         val holder = SetupHolder(draft.hostId, page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "multiplayer.menu.setup-title"))
-        decorate(inventory)
         shown.forEachIndexed { index, target ->
             val slot = PLAYER_SLOTS[index]
             holder.players[slot] = target.uniqueId
@@ -456,7 +455,6 @@ internal class MultiplayerGuiService(
         if (expireLocalLobbyIfNeeded(lobby)) return
         val holder = LobbyHolder(lobby.id)
         val inventory = create(holder, locales.component(player, "multiplayer.menu.lobby-title"))
-        decorate(inventory)
         lobby.participants.forEachIndexed { index, participant ->
             val playerId = participant.playerId.value
             val slot = PARTICIPANT_SLOTS[index]
@@ -901,7 +899,6 @@ internal class MultiplayerGuiService(
             return
         }
         val inventory = create(RemoteLobbyHolder(message.lobbyId), locales.component(player, "multiplayer.menu.lobby-title"))
-        decorate(inventory)
         message.participants.forEachIndexed { index, participant ->
             inventory.setItem(
                 PARTICIPANT_SLOTS[index],
@@ -1209,8 +1206,6 @@ internal class MultiplayerGuiService(
         }
     }
 
-    private fun decorate(@Suppress("UNUSED_PARAMETER") inventory: PaperMenuFrame) = Unit
-
     private fun show(player: Player, frame: PaperMenuFrame) {
         val holder = requireNotNull(frameHolders.remove(frame)) { "Multiplayer menu frame has no state holder" }
         menuRuntime.open(player, holder.screen.id) {
@@ -1292,7 +1287,6 @@ internal class MultiplayerGuiService(
 
     private companion object {
         val MULTIPLAYER_MENU_CLICKS = DEFAULT_MENU_CLICKS + setOf(ClickType.SHIFT_LEFT, ClickType.SHIFT_RIGHT)
-        const val MENU_SIZE = 45
         const val INVITE_TIMEOUT_TICKS = 900L
         const val MAX_INVITE_TIMEOUT_TICKS = 12_000L
         const val NETWORK_START_POLL_TICKS = 5L
