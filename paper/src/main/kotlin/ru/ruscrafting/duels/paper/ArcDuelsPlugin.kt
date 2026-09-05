@@ -46,6 +46,7 @@ import java.util.concurrent.TimeUnit
 open class ArcDuelsPlugin : JavaPlugin() {
     private var pluginRuntime: PaperPluginRuntime? = null
     private var sessions: DuelSessionManager? = null
+    private var challengeRegistry: ChallengeRegistry? = null
     private var runtimeSettingsState: ArcDuelsRuntimeSettingsState? = null
     private var configReloader: ArcDuelsConfigReloader? = null
 
@@ -77,9 +78,14 @@ open class ArcDuelsPlugin : JavaPlugin() {
             .onFailure { failure -> logger.severe("ArcDuels runtime shutdown failed: ${failure.javaClass.simpleName}: ${failure.message}") }
         pluginRuntime = null
         sessions = null
+        challengeRegistry = null
         configReloader = null
         runtimeSettingsState = null
     }
+
+    /** Returns whether the player currently has an unexpired incoming duel challenge. */
+    fun hasIncomingChallenge(playerId: UUID): Boolean =
+        challengeRegistry?.hasIncomingChallenge(PlayerId(playerId)) == true
 
     private fun bootstrap(lifecycle: PaperPluginRuntime) {
         val restartOnlyEnvironment = ArcDuelsRestartOnlySettingsValidator.validateReloadEnvironment(this, config)
@@ -212,6 +218,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 Clock.systemUTC(),
                 settings.challengeTimeout,
             )
+        challengeRegistry = challenges
         val targets = DuelTargetDirectory(this, serverId, network.players)
         val controller =
             DuelController(

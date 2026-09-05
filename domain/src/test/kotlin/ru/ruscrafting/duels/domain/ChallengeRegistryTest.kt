@@ -25,6 +25,15 @@ class ChallengeRegistryTest : StringSpec({
         registry.resolve(challenge.id, second, ChallengeStatus.ACCEPTED).status shouldBe ChallengeStatus.ACCEPTED
     }
 
+    "reports only active incoming challenges" {
+        val registry = ChallengeRegistry(clock)
+        registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY))
+
+        registry.hasIncomingChallenge(second) shouldBe true
+        registry.hasIncomingChallenge(first) shouldBe false
+        registry.hasIncomingChallenge(PlayerId(UUID.randomUUID())) shouldBe false
+    }
+
     "explicit arena selection is immutable challenge state" {
         val registry = ChallengeRegistry(clock)
         val selection = ArenaSelection(ServerId("spawn"), ArenaId("kit-test"))
@@ -93,6 +102,7 @@ class ChallengeRegistryTest : StringSpec({
 
         registry.register(challenge).status shouldBe ChallengeStatus.EXPIRED
         registry.pendingFor(first) shouldBe emptyList()
+        registry.hasIncomingChallenge(second) shouldBe false
         registry.create(first, second, DuelRules(DuelMode.OWN_INVENTORY)).status shouldBe ChallengeStatus.PENDING
     }
 

@@ -161,6 +161,9 @@ class ChallengeRegistry(
                 .sortedBy(DuelChallenge::createdAt)
         }
 
+    fun hasIncomingChallenge(playerId: PlayerId): Boolean =
+        pendingFor(playerId).any { it.target == playerId }
+
     internal fun retainedChallengeCount(): Int = synchronized(lock) { challenges.size }
 
     private fun expirePending() {
