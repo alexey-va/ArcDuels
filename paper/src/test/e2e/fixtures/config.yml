@@ -3,8 +3,29 @@ locale:
   default: en
   use-client-locale: false
 mysql:
-  enabled: false
+  enabled: true
+  host: 127.0.0.1
+  port: 3306
+  database: arcduels_e2e
+  username: arcduels_e2e
+  password: e2e-password
+  ssl-mode: DISABLED
 redis:
   enabled: false
   import-arc-credentials: false
 challenge-timeout-seconds: 10
+
+player-data-sync:
+  provider: NONE
+arenas:
+  e2e_flat:
+    enabled: true
+    display-name: E2E Flat
+    allowed-loadouts: [OWN_INVENTORY, KIT]
+    allowed-objectives: [ELIMINATION]
+    first-spawn: {world: world, x: 0.5, y: -60.0, z: -2.5, yaw: 0.0, pitch: 0.0}
+    second-spawn: {world: world, x: 0.5, y: -60.0, z: 2.5, yaw: 180.0, pitch: 0.0}
+    post-match-action: RETURN_TO_ORIGIN
+    bounds:
+      min: {x: -30.0, y: -64.0, z: -30.0}
+      max: {x: 30.0, y: -40.0, z: 30.0}

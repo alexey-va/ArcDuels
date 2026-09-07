@@ -1,18 +1,6 @@
 import { test, expect } from '@drownek/plugwright';
 
-async function invite(player, opponent) {
-  const sent = player.messageBuffer.length;
-  const received = opponent.messageBuffer.length;
-  player.chat(`/duel ${opponent.username}`);
-  const objectives = await player.gui({ title: /Objective/ });
-  await objectives.locator(i => i.getDisplayName().includes('Elimination')).click();
-  const loadouts = await player.gui({ title: /Loadout/ });
-  await loadouts.locator(i => i.getDisplayName().includes('Own inventory')).click();
-  const rules = await player.gui({ title: /Rules/ });
-  await rules.locator(i => i.getDisplayName().includes('Send challenge')).click();
-  await expect(player).toHaveReceivedMessage(`Challenge sent to ${opponent.username}`, { since: sent });
-  await expect(opponent).toHaveReceivedMessage(`${player.username} offers you a duel`, { since: received });
-}
+import { invite } from './support.js';
 
 test('GUI invitation reaches the opponent; decline clears both pending challenges', async ({ player, createPlayer }) => {
   const opponent = await createPlayer({ username: 'DuelDecliner' });

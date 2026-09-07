@@ -1,19 +1,33 @@
-# Real Paper invitation tests
+# Real Paper match tests
 
-Run `./gradlew :paper:plugwrightTest` with Java 25. Gradle downloads Paper
-1.21.11, Node 22.14.0 and Plugwright 2.0.4. The temporary server binds to
-127.0.0.1:25565 and is recreated under `paper/build/plugwright` on each run.
-Run local Paper suites sequentially to avoid port conflicts.
+GitHub Actions runs `TEST_TIMEOUT=120000 ./gradlew :paper:plugwrightTest` on
+Java 25 with Paper 1.21.11, Node 22.14.0 and Plugwright 2.0.4. A disposable
+MySQL 8.4 service uses the synthetic credentials in `fixtures/config.yml`.
+The plugin applies its real migrations and persists both inventories before
+starting a match. Redis is unnecessary for these same-server matches.
 
-Two clients exercise objective selection, loadout selection, confirmation,
-delivery to the opponent, decline, cancellation, challenge expiry and a fresh
-invitation after each terminal outcome. Assertions use new messages when
-repeating actions.
+The fixture has one enabled arena on the flat world's grass surface at y=-60.
+Players return to their original locations after the normal countdown and
+celebration. Three invitation scenarios cover decline, cancellation and expiry.
+Three match scenarios cover:
 
-The fixture uses a 10-second challenge timeout so expiry coverage stays fast
-without depending on scheduler timing at the five-second lower bound.
+- Classic kit selection, acceptance, real melee damage and elimination, exact
+  original inventories (including armor and offhand), XP and position recovery.
+- Own-inventory acceptance, consuming a golden apple and forfeiting; recovery
+  preserves the consumption instead of refunding the item.
+- Disconnecting during a kit fight, reconnecting with the original inventory,
+  and reconnecting again without retaining kit equipment or duplicating items.
 
-MySQL and Redis are disabled for these local invitation flows. Match startup,
-inventory restoration and cross-server transfers need durable storage and are
-not claimed as covered here. The existing JVM and storage integration suites
-remain in place. GitHub Actions runs this suite separately and retains logs.
+All matches use the same arena sequentially, proving it becomes available again.
+After Paper shuts down, CI checks three durable results with the corresponding
+end reasons, six archived player snapshots (four with inventory replacement),
+and zero pending snapshots. Skipped or silently failed match tests cannot satisfy
+these database assertions. Fast JVM and MySQL/Redis integration suites remain
+separate jobs; Paper logs are retained on every outcome.
+
+Paper binds to localhost:25565 and recreates its world/plugin data beneath
+`paper/build/plugwright`. The database must also be disposable and empty for
+each full run. Run this stateful fixture in GitHub CI; do not start local
+Docker/Testcontainers or connect it to a managed database. Cross-server
+HuskSync/Redis transfers, server-crash recovery and other objectives are not
+covered by this same-server suite.

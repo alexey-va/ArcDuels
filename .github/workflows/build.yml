@@ -44,9 +44,21 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: e2e-root
+          MYSQL_DATABASE: arcduels_e2e
+          MYSQL_USER: arcduels_e2e
+          MYSQL_PASSWORD: e2e-password
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pe2e-root"
+          --health-interval=5s --health-timeout=5s --health-retries=30
     timeout-minutes: 15
     env:
-      TEST_TIMEOUT: "60000"
+      TEST_TIMEOUT: "120000"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
@@ -61,6 +73,13 @@ jobs:
           mkdir -p paper/build
           ./gradlew --no-daemon :paper:plugwrightTest 2>&1 | tee paper/build/plugwright-e2e.log
           git diff --exit-code -- paper/src/test/e2e/package-lock.json
+      - name: Verify durable match history and archived inventories
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          result=$(docker exec -e MYSQL_PWD=e2e-password "$MYSQL_CONTAINER" mysql -u arcduels_e2e -N -B arcduels_e2e -e "SELECT CONCAT_WS(',', (SELECT COUNT(*) FROM arcduels_matches), (SELECT COUNT(*) FROM arcduels_matches WHERE end_reason='ELIMINATION'), (SELECT COUNT(*) FROM arcduels_matches WHERE end_reason='FORFEIT'), (SELECT COUNT(*) FROM arcduels_matches WHERE end_reason='DISCONNECT'), (SELECT COUNT(*) FROM arcduels_player_state_archive), (SELECT COUNT(*) FROM arcduels_player_state_escrow), (SELECT COUNT(*) FROM arcduels_player_state_archive WHERE inventory_replaced=1));")
+          echo "matches,elimination,forfeit,disconnect,archived,pending,kit_snapshots=$result"
+          test "$result" = "3,1,1,1,6,0,4"
       - name: Upload E2E results and Paper logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
