@@ -31,3 +31,11 @@ each full run. Run this stateful fixture in GitHub CI; do not start local
 Docker/Testcontainers or connect it to a managed database. Cross-server
 HuskSync/Redis transfers, server-crash recovery and other objectives are not
 covered by this same-server suite.
+
+Known client limitation (verified 2026-09-07): minecraft-data 3.116.0 describes
+1.21.11 dust particles as four floats, while the pinned Paper runtime encodes
+an integer color and a float scale (`DustParticleOptions.STREAM_CODEC`). The
+bot logs `PartialReadError` for arena boundary dust. Combat damage, results,
+exact inventory recovery and SQL assertions pass with particles still enabled;
+this suite does not certify particle rendering. Do not suppress other decoder
+errors or weaken gameplay to hide this client protocol mismatch.
