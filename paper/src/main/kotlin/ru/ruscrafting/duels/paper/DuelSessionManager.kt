@@ -1664,6 +1664,9 @@ class DuelSessionManager internal constructor(
         objectiveTasks.remove(match.id)?.cancel()
         matchDisplayTasks.remove(match.id)?.cancel()
         val winnerId = requireNotNull(match.winner)
+        listOf(match.firstPlayer.value, match.secondPlayer.value).forEach { playerId ->
+            ExternalArcDuelTelemetryBridge.completed(playerId, match.id.value.toString())
+        }
         participants(match).forEach { player ->
             val won = player.uniqueId == winnerId.value
             player.showTitle(

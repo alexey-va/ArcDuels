@@ -4,7 +4,7 @@ main: ru.ruscrafting.duels.paper.ArcDuelsPlugin
 api-version: '1.21'
 description: Modern Kotlin duels for RusCrafting
 author: RusCrafting
-softdepend: [BattlePass, CMI, HuskSync, WorldGuard]
+softdepend: [BattlePass, CMI, HuskSync, WorldGuard, ARC]
 commands:
   duel:
     description: Open duels or manage a challenge
