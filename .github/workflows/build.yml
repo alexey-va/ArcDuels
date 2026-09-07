@@ -7,12 +7,6 @@ on:
   pull_request:
     paths-ignore: ['**/*.md', 'docs/**', '.agents/**', '.codex/**', 'paper/src/test/e2e/**']
   workflow_dispatch:
-    inputs:
-      heavy_tests:
-        description: Run Docker integration and real-Paper E2E jobs
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
@@ -36,7 +30,6 @@ jobs:
       - run: ./gradlew --no-daemon --build-cache testAll :paper:shadowJar
 
   integration:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.heavy_tests }}
     name: MySQL and Redis integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -52,7 +45,6 @@ jobs:
       - run: ./gradlew :storage-mysql:integrationTest :network-redis:integrationTest
 
   e2e:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.heavy_tests }}
     runs-on: ubuntu-latest
     services:
       mysql:
