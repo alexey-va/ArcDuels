@@ -6,8 +6,12 @@ Run `./gradlew :paper:plugwrightTest` with Java 25. Gradle downloads Paper
 Run local Paper suites sequentially to avoid port conflicts.
 
 Two clients exercise objective selection, loadout selection, confirmation,
-delivery to the opponent, decline, cancellation and a fresh invitation after
-cancellation. Assertions use new messages when repeating actions.
+delivery to the opponent, decline, cancellation, challenge expiry and a fresh
+invitation after each terminal outcome. Assertions use new messages when
+repeating actions.
+
+The fixture uses a 10-second challenge timeout so expiry coverage stays fast
+without depending on scheduler timing at the five-second lower bound.
 
 MySQL and Redis are disabled for these local invitation flows. Match startup,
 inventory restoration and cross-server transfers need durable storage and are
