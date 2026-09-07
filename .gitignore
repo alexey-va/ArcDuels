@@ -6,3 +6,5 @@ run/
 paper/run/
 *.log
 .DS_Store
+
+node_modules/

@@ -1,4 +1,5 @@
 plugins {
+    id("io.github.drownek.plugwright") version "2.0.4"
     kotlin("jvm")
     id("com.gradleup.shadow")
 }
@@ -37,4 +38,19 @@ tasks.shadowJar {
 
 tasks.assemble {
     dependsOn(tasks.shadowJar)
+}
+
+// Isolated real-Paper tests run separately from the fast JVM suite.
+plugwright {
+    minecraftVersion.set("1.21.11")
+    runDir.set(layout.buildDirectory.dir("plugwright"))
+    testsDir.set(layout.projectDirectory.dir("src/test/e2e"))
+    downloadNode.set(true)
+    nodeVersion.set("22.14.0")
+    acceptEula.set(true)
+    jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
+    writeFiles {
+        file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
+        file("plugins/ArcDuels/config.yml", projectDir.resolve("src/test/e2e/fixtures/config.yml"))
+    }
 }

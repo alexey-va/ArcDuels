@@ -1,0 +1,9 @@
+server-id: e2e
+locale:
+  default: en
+  use-client-locale: false
+mysql:
+  enabled: false
+redis:
+  enabled: false
+  import-arc-credentials: false
