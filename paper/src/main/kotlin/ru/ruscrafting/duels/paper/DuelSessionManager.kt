@@ -1249,6 +1249,7 @@ class DuelSessionManager internal constructor(
                         cancel()
                         return
                     }
+                    if (!checkParticipantPresence(match)) return
                     val players = participants(match)
                     if (seconds > 0) {
                         showCountdownDisplay(match, seconds)
@@ -1426,12 +1427,31 @@ class DuelSessionManager internal constructor(
                         matchDisplayTasks.remove(match.id)?.cancel()
                         return@Runnable
                     }
-                    updateMatchDisplay(current)
+                    if (checkParticipantPresence(current)) updateMatchDisplay(current)
                 },
                 20L,
                 20L,
             )
         matchDisplayTasks[match.id] = task
+    }
+
+    /** Confirms actual presence even when another plugin bypasses movement/quit listeners. */
+    internal fun checkParticipantPresence(match: DuelMatch): Boolean {
+        if (match.state !in setOf(MatchState.COUNTDOWN, MatchState.ACTIVE)) return true
+        val bounds = arenas.get(match.arenaId).bounds
+        val absent = listOf(match.firstPlayer, match.secondPlayer).firstOrNull { playerId ->
+            val player = plugin.server.getPlayer(playerId.value)
+            player == null || !player.isOnline || !bounds.contains(player.location)
+        } ?: return true
+        val player = plugin.server.getPlayer(absent.value)
+        val reason = if (player == null || !player.isOnline) MatchEndReason.DISCONNECT else MatchEndReason.FORFEIT
+        DuelLog.info("arena-participant-left", match.id, "player={} reason={}", currentName(absent), reason)
+        coordinator.forfeit(match.id, absent, reason).whenComplete { completed, failure ->
+            runSync {
+                if (failure != null) announcePersistenceFailure(match.id, unwrap(failure)) else finish(completed)
+            }
+        }
+        return false
     }
 
     private fun showCountdownDisplay(match: DuelMatch, seconds: Int) {

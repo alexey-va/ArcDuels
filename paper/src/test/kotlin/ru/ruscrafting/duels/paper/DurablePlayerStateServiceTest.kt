@@ -584,6 +584,45 @@ class DurablePlayerStateServiceTest : StringSpec({
         snapshot.nonInventoryStateMismatches(player) shouldNotContain "health"
     }
 
+    "an actual arena departure forfeits the match even without a movement listener" {
+        val repository = GatedEscrowRepository().apply { commit.complete(Unit) }
+        val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
+        val first = server.addPlayer("AbsentFirst")
+        val second = server.addPlayer("PresentSecond")
+        plugin.config.set("arenas.example.enabled", true)
+        val arenas = PaperArenaCatalog.load(plugin)
+        val manager = DuelSessionManager(
+            plugin,
+            MatchCoordinator(ServerId("duels-1"), arenas, InMemoryStatisticsRepository()),
+            arenas,
+            KitRegistry.load(plugin),
+            service,
+            LocaleService.load(plugin),
+            countdownSeconds = 0,
+            teleportStabilizationTicks = 0L,
+            playerDataSaver = {},
+        )
+        val now = Instant.parse("2026-09-09T18:00:00Z")
+        val challenge = DuelChallenge.create(
+            PlayerId(first.uniqueId), PlayerId(second.uniqueId),
+            DuelRules(DuelMode.KIT, ru.ruscrafting.duels.domain.KitId("classic")),
+            now, Duration.ofSeconds(30),
+        ).resolve(ChallengeStatus.ACCEPTED, now.plusSeconds(1))
+        try {
+            manager.start(challenge).get()
+            paper.performTicks(2)
+            requireNotNull(manager.matchFor(first)).state shouldBe ru.ruscrafting.duels.domain.MatchState.ACTIVE
+            first.teleport(first.location.clone().add(1000.0, 0.0, 0.0))
+            paper.performTicks(20)
+            val completed = requireNotNull(manager.matchFor(first))
+            completed.winner shouldBe PlayerId(second.uniqueId)
+            completed.endReason shouldBe ru.ruscrafting.duels.domain.MatchEndReason.FORFEIT
+        } finally {
+            manager.shutdown()
+            plugin.config.set("arenas.example.enabled", false)
+        }
+    }
+
     "a 1v1 start pins its runtime policy before the durable snapshot commit finishes" {
         val repository = GatedEscrowRepository()
         val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
