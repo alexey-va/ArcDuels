@@ -72,6 +72,31 @@ class CrossServerGroupBusTest : StringSpec({
         }
     }
 
+    "remote arena routing carries objective and every kit while preserving the invitation owner" {
+        val codec = GroupMessageCodec()
+        val prepare = offer.copy(
+            messageId = "group:remote-prepare", type = GroupLobbyMessageType.PREPARE, targetId = null,
+            arenaServer = ServerId("arena"), objective = ru.ruscrafting.duels.domain.DuelObjectiveType.KING_OF_THE_HILL,
+            participantKits = offer.participants.associate { it.playerId to KitId("classic") },
+        )
+        codec.decode(codec.encode(prepare)) shouldBe prepare
+        val started = prepare.copy(messageId = "group:started", type = GroupLobbyMessageType.STARTED, sourceServer = ServerId("arena"))
+        codec.decode(codec.encode(started)) shouldBe started
+        shouldThrow<IllegalArgumentException> { started.copy(sourceServer = ServerId("spawn")) }
+        shouldThrow<IllegalArgumentException> { prepare.copy(participantKits = emptyMap()) }
+    }
+
+    "version one group messages decode with the original host as arena" {
+        val codec = GroupMessageCodec()
+        val legacy = JsonParser.parseString(codec.encode(offer)).asJsonObject.apply {
+            addProperty("version", 1)
+            remove("arenaServer")
+            remove("objective")
+            remove("participantKits")
+        }
+        codec.decode(legacy.toString()) shouldBe offer
+    }
+
     "bus authenticates embedded origins and deduplicates group messages" {
         val redis = InMemoryRedis(ServerIdentity { "parkour" })
         val bus = CrossServerGroupBus(redis, ServerId("parkour"), clock = clock)

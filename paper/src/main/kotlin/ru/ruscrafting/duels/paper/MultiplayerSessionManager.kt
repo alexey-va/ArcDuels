@@ -12,6 +12,7 @@ import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.util.Vector
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.ScheduledTask
 import ru.arc.core.whenCompleteSync
 import ru.arc.paper.audience.NativePaperAudienceEffects
 import ru.arc.paper.audience.PaperAudienceEffects
@@ -29,7 +30,11 @@ import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MultiplayerMatch
 import ru.ruscrafting.duels.domain.MultiplayerMatchRepository
 import ru.ruscrafting.duels.domain.MultiplayerMatchState
+import ru.ruscrafting.duels.domain.MultiplayerObjectiveFrame
+import ru.ruscrafting.duels.domain.MultiplayerObjectiveDecision
+import ru.ruscrafting.duels.domain.MultiplayerScoreObjective
 import ru.ruscrafting.duels.domain.MultiplayerRoster
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.outcome
@@ -54,6 +59,7 @@ internal class MultiplayerSessionManager(
     private val playerData: PaperPlayerDataPersistence = NativePaperPlayerDataPersistence,
     private val externalCombatTagClear: (Player, MatchId, String) -> Unit = { _, _, _ -> },
     private val networkReturn: (Player, ServerId) -> Unit = { _, _ -> },
+    private val syncProvider: PlayerDataSyncProvider = PlayerDataSyncProvider.NONE,
     private val clock: Clock = Clock.systemUTC(),
     private val countdownSeconds: Int = 3,
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
@@ -65,11 +71,16 @@ internal class MultiplayerSessionManager(
         val anchors: Map<UUID, Location>,
         val leases: List<PaperChunkTicketLease>,
         val origins: Map<PlayerId, ServerId>? = null,
+        val arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
         val countdownSeconds: Int,
         val finishDelayTicks: Long,
         var restoreInFlight: Boolean = false,
         var arrivals: CompletableFuture<Void>? = null,
         var waitingForArrivals: Boolean = false,
+        var objectiveTask: ScheduledTask? = null,
+        var objectiveTicks: Long = 0,
+        val hillCapture: MultiplayerHillCaptureTracker = MultiplayerHillCaptureTracker(),
+        val hitRace: HitRaceTracker = HitRaceTracker(),
     )
 
     private data class RuntimePolicy(
@@ -127,6 +138,7 @@ internal class MultiplayerSessionManager(
         roster: MultiplayerRoster,
         onlinePlayers: Map<PlayerId, Player>,
         origins: Map<PlayerId, ServerId>,
+        mayStart: () -> Boolean = { true },
     ): CompletableFuture<MatchId> {
         check(Bukkit.isPrimaryThread()) { "Network multiplayer matches must start on the Paper primary thread" }
         require(onlinePlayers.keys == roster.playerIds) { "Every roster participant must be online on this Paper node" }
@@ -145,17 +157,28 @@ internal class MultiplayerSessionManager(
             }
             val (reserved, escrows) = prepared
             runCatching {
+                check(mayStart()) { "Network group preparation was cancelled" }
                 val stored = onlinePlayers.mapValues { (playerId, player) ->
                     playerStates.decodeForArena(escrows.getValue(playerId), player)
                 }.mapKeys { it.key.value }
-                createSession(matchId, roster, onlinePlayers, reserved, stored, origins, policy)
+                val baselines = onlinePlayers.mapValues { (_, player) -> PlayerSnapshot.capture(player) }.mapKeys { it.key.value }
+                createSession(matchId, roster, onlinePlayers, reserved, stored, origins, policy, baselines)
             }.onSuccess {
                 completion.complete(matchId)
             }.onFailure { startFailure ->
+                reserved.close()
                 completion.completeExceptionally(startFailure)
             }
         }
         return completion
+    }
+
+    internal fun cancelStartingMatch(matchId: MatchId): Boolean {
+        val session = sessions[matchId] ?: return false
+        if (session.match.state in setOf(MultiplayerMatchState.COMPLETING, MultiplayerMatchState.COMPLETED, MultiplayerMatchState.CANCELLED)) return false
+        session.match = session.match.cancel(clock.instant(), MatchEndReason.ADMIN_CANCEL)
+        finishRestore(session)
+        return true
     }
 
     fun matchFor(player: Player): MultiplayerMatch? = byPlayer[player.uniqueId]?.let(sessions::get)?.match
@@ -169,10 +192,50 @@ internal class MultiplayerSessionManager(
     fun isInsideArena(player: Player, destination: Location): Boolean =
         matchFor(player)?.let { arenas.get(it.arenaId).bounds.contains(destination) } ?: true
 
+    fun isSumoRingOut(player: Player, destination: Location): Boolean {
+        val match = matchFor(player) ?: return false
+        if (match.roster.rules.objective != DuelObjectiveType.SUMO) return false
+        val arena = arenas.get(match.arenaId)
+        return destination.y < minOf(arena.firstSpawn.y, arena.secondSpawn.y) - 1.5
+    }
+
     fun boundaryDistance(player: Player, location: Location): Double? =
         matchFor(player)?.let { arenas.get(it.arenaId).bounds.distanceToEdge(location) }
 
     fun isKitHealthCapApplied(player: Player): Boolean = kitHealth.isApplied(player)
+
+    fun isSumo(player: Player): Boolean = matchFor(player)?.roster?.rules?.objective == DuelObjectiveType.SUMO
+
+    fun isHitRace(player: Player): Boolean = matchFor(player)?.roster?.rules?.objective?.isHitRace == true
+
+    fun allowsProjectiles(player: Player): Boolean = matchFor(player)?.roster?.rules?.modifiers?.projectiles ?: true
+
+    fun allowsConsumables(player: Player): Boolean = matchFor(player)?.roster?.rules?.modifiers?.consumables ?: true
+
+    fun allowsEnderPearls(player: Player): Boolean = matchFor(player)?.roster?.rules?.modifiers?.enderPearls ?: true
+
+    fun recordMeleeHit(attacker: Player, victim: Player) {
+        val session = byPlayer[attacker.uniqueId]?.let(sessions::get) ?: return
+        val match = session.match
+        if (match.state != MultiplayerMatchState.ACTIVE || !match.roster.rules.objective.isHitRace) return
+        if (byPlayer[victim.uniqueId] != match.id || !match.isEnemy(PlayerId(attacker.uniqueId), PlayerId(victim.uniqueId))) return
+        val progress = session.hitRace.record(
+            match.roster.rules.objective,
+            representative(match, PlayerId(attacker.uniqueId)),
+            representative(match, PlayerId(victim.uniqueId)),
+        )
+        showHitRaceProgress(session, progress.scores)
+        val target = when (match.roster.rules.objective) {
+            DuelObjectiveType.BOXING -> match.roster.rules.modifiers.boxingHitsToWin
+            DuelObjectiveType.COMBO -> match.roster.rules.modifiers.comboHitsToWin
+            else -> return
+        }
+        when (val decision = MultiplayerScoreObjective(match.roster.rules.objective, match.roster.rules.modifiers.kingOfTheHillCaptureSeconds, target)
+            .evaluate(match, MultiplayerObjectiveFrame(session.objectiveTicks, emptySet(), progress.scores))) {
+            MultiplayerObjectiveDecision.Continue -> Unit
+            is MultiplayerObjectiveDecision.Complete -> completeObjective(session, decision)
+        }
+    }
 
     fun anchor(player: Player): Location? =
         byPlayer[player.uniqueId]?.let(sessions::get)?.anchors?.get(player.uniqueId)?.clone()
@@ -220,6 +283,16 @@ internal class MultiplayerSessionManager(
                 locales.component(player, "multiplayer.eliminated.subtitle"),
             ),
         )
+        if (reason == MatchEndReason.FORFEIT) {
+            audience.sendMessage(
+                player,
+                locales.notice(
+                    player,
+                    "multiplayer.forfeit-result",
+                    LocaleService.component("mode", multiplayerModeComponent(player, session.match.roster)),
+                ),
+            )
+        }
         if (session.match.state == MultiplayerMatchState.COMPLETING) complete(session)
     }
 
@@ -278,6 +351,7 @@ internal class MultiplayerSessionManager(
         snapshots: Map<UUID, StoredPlayerSnapshot>,
         origins: Map<PlayerId, ServerId>? = null,
         policy: RuntimePolicy,
+        arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
     ) {
         val leases = mutableListOf<PaperChunkTicketLease>()
         var session: Session? = null
@@ -293,6 +367,7 @@ internal class MultiplayerSessionManager(
                     anchors,
                     leases,
                     origins,
+                    arenaBaselines,
                     countdownSeconds = policy.countdownSeconds,
                     finishDelayTicks = policy.finishDelayTicks,
                 )
@@ -338,7 +413,7 @@ internal class MultiplayerSessionManager(
                 finishRestore(session)
             } else {
                 leases.forEach { runCatching { it.close() } }
-                abortBeforeStart(reservation, snapshots, onlinePlayers.values)
+                abortBeforeStart(reservation, snapshots, onlinePlayers.values, origins, arenaBaselines)
             }
             throw failure
         }
@@ -348,6 +423,7 @@ internal class MultiplayerSessionManager(
         if (session.match.state != MultiplayerMatchState.COUNTDOWN) return
         if (seconds <= 0) {
             session.match = session.match.activate(clock.instant())
+            startObjectiveLoop(session)
             participants(session).forEach { player ->
                 audience.showTitle(player, Title.title(locales.component(player, "multiplayer.start.title"), Component.empty()))
             }
@@ -363,6 +439,110 @@ internal class MultiplayerSessionManager(
             )
         }
         tasks.runLater(20L) { scheduleCountdown(session, seconds - 1) }
+    }
+
+    private fun startObjectiveLoop(session: Session) {
+        session.objectiveTask?.cancel()
+        session.objectiveTask = tasks.runTimer(1L, 1L) {
+            if (sessions[session.match.id] !== session || session.match.state != MultiplayerMatchState.ACTIVE) {
+                session.objectiveTask?.cancel()
+                return@runTimer
+            }
+            session.objectiveTicks++
+            val arena = arenas.get(session.match.arenaId)
+            participants(session).forEach { player ->
+                if (PlayerId(player.uniqueId) in session.match.activePlayers && !arena.bounds.contains(player.location)) {
+                    eliminate(player, MatchEndReason.FORFEIT)
+                }
+            }
+            if (session.match.state != MultiplayerMatchState.ACTIVE) return@runTimer
+            if (session.match.roster.rules.objective != DuelObjectiveType.KING_OF_THE_HILL) return@runTimer
+            val hill = arena.hill ?: return@runTimer
+            val contenders = participants(session).filter { it.gameMode != GameMode.SPECTATOR && hill.contains(it.location) }
+                .mapTo(linkedSetOf()) { PlayerId(it.uniqueId) }
+            val progress = session.hillCapture.tick(
+                contenders,
+                sideOf = { id -> session.match.roster.participant(id).team?.toString() ?: id.value.toString() },
+                elapsedTicks = 1L,
+            )
+            if (session.objectiveTicks % 20L == 0L) showHillProgress(session, contenders, progress)
+            when (val decision = MultiplayerScoreObjective(DuelObjectiveType.KING_OF_THE_HILL, session.match.roster.rules.modifiers.kingOfTheHillCaptureSeconds, 1)
+                .evaluate(session.match, MultiplayerObjectiveFrame(session.objectiveTicks, contenders, progress))) {
+                MultiplayerObjectiveDecision.Continue -> Unit
+                is MultiplayerObjectiveDecision.Complete -> completeObjective(session, decision)
+            }
+        }
+    }
+
+    private fun representative(match: MultiplayerMatch, player: PlayerId): PlayerId {
+        val participant = match.roster.participant(player)
+        return participant.team?.let { team ->
+            match.roster.participants.filter { it.team == team }.minBy { it.playerId.value }.playerId
+        } ?: player
+    }
+
+    private fun showHillProgress(session: Session, contenders: Set<PlayerId>, progress: Map<PlayerId, Long>) {
+        val target = session.match.roster.rules.modifiers.kingOfTheHillCaptureSeconds
+        session.match.roster.playerIds.mapNotNull { Bukkit.getPlayer(it.value)?.takeIf(Player::isOnline) }.forEach { player ->
+            val own = (progress[representative(session.match, PlayerId(player.uniqueId))] ?: 0L) / 20L
+            audience.sendActionBar(player, locales.component(
+                player,
+                "multiplayer.objective-progress",
+                LocaleService.component("objective", locales.component(player, objectiveLocaleKey(DuelObjectiveType.KING_OF_THE_HILL))),
+                LocaleService.text("own", own),
+                LocaleService.text("target", target),
+                LocaleService.component("unit", locales.component(player, "multiplayer.progress-seconds")),
+            ))
+        }
+    }
+
+    private fun showHitRaceProgress(session: Session, progress: Map<PlayerId, Long>) {
+        val match = session.match
+        val target = when (match.roster.rules.objective) {
+            DuelObjectiveType.BOXING -> match.roster.rules.modifiers.boxingHitsToWin
+            DuelObjectiveType.COMBO -> match.roster.rules.modifiers.comboHitsToWin
+            else -> return
+        }
+        match.roster.playerIds.mapNotNull { Bukkit.getPlayer(it.value)?.takeIf(Player::isOnline) }.forEach { player ->
+            val own = progress[representative(match, PlayerId(player.uniqueId))] ?: 0L
+            audience.sendActionBar(player, locales.component(
+                player,
+                "multiplayer.objective-progress",
+                LocaleService.component("objective", locales.component(player, objectiveLocaleKey(match.roster.rules.objective))),
+                LocaleService.text("own", own),
+                LocaleService.text("target", target),
+                LocaleService.component("unit", locales.component(player, "multiplayer.progress-hits")),
+            ))
+        }
+    }
+
+    private fun objectiveLocaleKey(objective: DuelObjectiveType): String = "objective.${objective.name.lowercase().replace("king_of_the_hill", "koth")}.name"
+
+    private fun multiplayerModeComponent(player: Player, roster: MultiplayerRoster): Component {
+        val rules = roster.rules
+        val objective = locales.component(player, objectiveLocaleKey(rules.objective))
+        val participant = roster.participant(PlayerId(player.uniqueId))
+        val kit = locales.component(player, "kit.${participant.kitId.value}.name")
+        val loadoutKey = if (rules.kitPolicy == ru.ruscrafting.duels.domain.MultiplayerKitPolicy.SHARED) {
+            "multiplayer.loadout-shared"
+        } else {
+            "multiplayer.loadout-personal"
+        }
+        val loadout = locales.component(player, loadoutKey, LocaleService.component("kit", kit))
+        return locales.component(
+            player,
+            "multiplayer.mode",
+            LocaleService.component("objective", objective),
+            LocaleService.component("loadout", loadout),
+        )
+    }
+
+    private fun completeObjective(session: Session, decision: MultiplayerObjectiveDecision.Complete) {
+        if (session.match.state != MultiplayerMatchState.ACTIVE) return
+        session.objectiveTask?.cancel()
+        session.match = session.match.completeObjective(decision.winners, decision.winningTeam, clock.instant())
+        participants(session).filter { PlayerId(it.uniqueId) !in session.match.winners }.forEach { it.gameMode = GameMode.SPECTATOR }
+        complete(session)
     }
 
     private fun complete(session: Session) {
@@ -391,7 +571,19 @@ internal class MultiplayerSessionManager(
                     player,
                     Title.title(
                         locales.component(player, if (won) "multiplayer.victory.title" else "multiplayer.defeat.title"),
-                        locales.component(player, "multiplayer.finish.subtitle"),
+                        locales.component(
+                            player,
+                            "multiplayer.finish.subtitle",
+                            LocaleService.component("mode", multiplayerModeComponent(player, session.match.roster)),
+                        ),
+                    ),
+                )
+                audience.sendMessage(
+                    player,
+                    locales.notice(
+                        player,
+                        if (won) "multiplayer.result-win" else "multiplayer.result-loss",
+                        LocaleService.component("mode", multiplayerModeComponent(player, session.match.roster)),
                     ),
                 )
             }
@@ -415,7 +607,7 @@ internal class MultiplayerSessionManager(
         val players = participants(session)
         if (players.isEmpty()) return releaseSession(session)
         val applyFailure = players.firstNotNullOfOrNull { player ->
-            runCatching { applyRestoredState(player, requireNotNull(session.snapshots[player.uniqueId])) }.exceptionOrNull()
+            runCatching { restoreOwnedState(session, player) }.exceptionOrNull()
         }
         if (applyFailure != null) {
             DuelLog.warn(
@@ -429,7 +621,8 @@ internal class MultiplayerSessionManager(
             return
         }
         session.restoreInFlight = true
-        val retentions = players.map { player -> playerStates.retain(requireNotNull(session.snapshots[player.uniqueId])) }
+        val retentions = players.filter { ownsEscrow(session, it.uniqueId) }
+            .map { player -> playerStates.retain(requireNotNull(session.snapshots[player.uniqueId])) }
         CompletableFuture.allOf(*retentions.toTypedArray()).whenCompleteSync(tasks) { _, failure ->
             if (sessions[session.match.id] !== session) return@whenCompleteSync
             if (failure == null) {
@@ -463,10 +656,36 @@ internal class MultiplayerSessionManager(
         playerData.persist(player)
     }
 
+    private fun restoreOwnedState(session: Session, player: Player) {
+        if (ownsEscrow(session, player.uniqueId)) {
+            applyRestoredState(player, requireNotNull(session.snapshots[player.uniqueId]))
+        } else {
+            val baseline = requireNotNull(session.arenaBaselines[player.uniqueId])
+            check(player.isOnline) { "Cannot restore an offline multiplayer participant" }
+            externalCombatTagClear(player, session.match.id, "multiplayer-foreign-restore")
+            kitHealth.clear(player)
+            baseline.restoreState(player)
+            playerData.persist(player)
+        }
+    }
+
+    private fun ownsEscrow(session: Session, playerId: UUID): Boolean =
+        session.origins?.get(PlayerId(playerId))?.let { it == serverId } ?: true
+
     private fun restoreDeparting(player: Player, stored: StoredPlayerSnapshot?) {
         if (stored == null || !player.isOnline) return
-        runCatching { applyRestoredState(player, stored) }.onSuccess {
-            playerStates.retain(stored).whenComplete { _, failure ->
+        val session = byPlayer[player.uniqueId]?.let(sessions::get)
+        runCatching {
+            if (session == null || ownsEscrow(session, player.uniqueId)) {
+                applyRestoredState(player, stored)
+            } else {
+                val baseline = requireNotNull(session.arenaBaselines[player.uniqueId])
+                kitHealth.clear(player)
+                baseline.restoreState(player)
+                playerData.persist(player)
+            }
+        }.onSuccess {
+            if (session == null || ownsEscrow(session, player.uniqueId)) playerStates.retain(stored).whenComplete { _, failure ->
                 failure?.let {
                     DuelLog.warn("multiplayer-retain-failed", stored.escrow.matchId, player, "player={} error={}", player.name, it.message)
                 }
@@ -483,6 +702,7 @@ internal class MultiplayerSessionManager(
 
     private fun releaseSession(session: Session) {
         if (!sessions.remove(session.match.id, session)) return
+        session.objectiveTask?.cancel()
         session.match.roster.playerIds.forEach { byPlayer.remove(it.value, session.match.id) }
         session.leases.forEach { runCatching { it.close() } }
         runCatching { session.reservation.close() }
@@ -510,8 +730,25 @@ internal class MultiplayerSessionManager(
         reservation: MultiplayerArenaReservation,
         snapshots: Map<UUID, StoredPlayerSnapshot>,
         players: Collection<Player>,
+        origins: Map<PlayerId, ServerId>? = null,
+        arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
     ) {
-        players.forEach { restoreDeparting(it, snapshots[it.uniqueId]) }
+        players.forEach { player ->
+            val stored = snapshots[player.uniqueId] ?: return@forEach
+            val foreign = origins?.get(PlayerId(player.uniqueId))?.let { it != serverId } == true
+            if (foreign) {
+                runCatching {
+                    val baseline = requireNotNull(arenaBaselines[player.uniqueId])
+                    kitHealth.clear(player)
+                    baseline.restoreState(player)
+                    playerData.persist(player)
+                }.onFailure { failure ->
+                    DuelLog.warn("multiplayer-foreign-restore-failed", stored.escrow.matchId, player, "error_type={} error={}", failure.javaClass.simpleName, failure.message)
+                }
+            } else {
+                restoreDeparting(player, stored)
+            }
+        }
         reservation.close()
     }
 

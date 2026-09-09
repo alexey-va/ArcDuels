@@ -13,6 +13,7 @@ import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.attribute.Attribute
 import org.bukkit.inventory.Inventory
+import org.bukkit.event.inventory.ClickType
 import org.bukkit.Material
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerMoveEvent
@@ -41,6 +42,61 @@ import java.util.Locale
 import java.util.concurrent.CompletableFuture
 
 class MultiplayerMockBukkitIntegrationTest : StringSpec({
+    "setup refresh keeps the same inventory and child kit screen preserves selections" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("GroupHost", "Alpha", "Bravo")).use { harness ->
+                    val gui = harness.registerGui()
+                    val host = harness.players.first().apply { setLocale(Locale.ENGLISH) }
+                    gui.open(host)
+                    host.click(10)
+                    val setupInventory = host.openInventory.topInventory
+                    host.click(28)
+                    host.openInventory.topInventory shouldBe setupInventory
+                    host.click(32)
+                    (host.openInventory.topInventory === setupInventory) shouldBe false
+                    host.click(10)
+                    paper.performTicks(1)
+                    (host.openInventory.topInventory === setupInventory) shouldBe false
+                    host.closeInventory()
+                    paper.performTicks(1)
+                    host.openInventory.topInventory shouldBe null
+                    gui.open(host)
+                    host.openInventory.topInventory.getItem(10).plainLore().contains("selected / ready") shouldBe false
+                }
+            }
+        }
+    }
+
+    "group setup objective child offers every objective and returns to setup on escape" {
+        MockBukkitTestRuntime.open().use { paper ->
+            failOnUnsupportedMockBukkitOperation {
+                multiplayerHarness(paper, listOf("GroupHost", "Alpha", "Bravo")).use { harness ->
+                    val gui = harness.registerGui()
+                    val host = harness.players.first().apply { setLocale(Locale.ENGLISH) }
+                    gui.open(host)
+                    host.click(10)
+                    val selectedLore = host.openInventory.topInventory.getItem(10).plainLore()
+                    host.click(29)
+                    val objectiveNames = listOf(10, 11, 12, 13, 14).map { slot -> host.openInventory.topInventory.getItem(slot).plainName() }
+                    objectiveNames.shouldHaveSize(5)
+                    objectiveNames.toSet().shouldHaveSize(5)
+                    host.closeInventory()
+                    paper.performTicks(1)
+                    host.openInventory.topInventory.getItem(10).plainLore() shouldBe selectedLore
+                    host.openInventory.topInventory.getItem(29)?.type shouldBe Material.TARGET
+                    host.click(29)
+                    host.click(12)
+                    paper.performTicks(1)
+                    host.openInventory.topInventory.getItem(32)?.type shouldBe Material.SLIME_BALL
+                    host.openInventory.topInventory.getItem(30)?.type shouldBe Material.CHEST
+                    host.click(30)
+                    host.openInventory.topInventory.getItem(30)?.type shouldBe Material.CHEST
+                }
+            }
+        }
+    }
+
     "six players configure three teams and personal kits through the GUI before starting" {
         MockBukkitTestRuntime.open().use { paper ->
             failOnUnsupportedMockBukkitOperation {
@@ -61,6 +117,8 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                     host.click(28)
                     host.click(30)
                     host.click(32)
+                    host.click(15)
+                    paper.performTicks(1)
                     host.click(34)
 
                     val members = harness.players.drop(1)
@@ -77,9 +135,9 @@ class MultiplayerMockBukkitIntegrationTest : StringSpec({
                         lobbyId
                     }
                     lobbyIds.distinct().size shouldBe 1
-                    members[0].click(32)
-                    members[1].click(32)
-                    members[1].click(32)
+                    members[0].click(32, ClickType.RIGHT)
+                    members[1].click(32, ClickType.RIGHT)
+                    members[1].click(32, ClickType.RIGHT)
                     members.forEach { member ->
                         member.click(34).isCancelled shouldBe true
                     }

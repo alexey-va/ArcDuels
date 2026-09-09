@@ -2,6 +2,7 @@ package ru.ruscrafting.duels.paper
 
 import org.bukkit.entity.Player
 import org.bukkit.entity.Projectile
+import org.bukkit.entity.EnderPearl
 import org.bukkit.event.Event
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
@@ -10,6 +11,7 @@ import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDamageEvent
+import org.bukkit.event.entity.ProjectileLaunchEvent
 import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.inventory.InventoryClickEvent
 import org.bukkit.event.inventory.InventoryDragEvent
@@ -18,6 +20,7 @@ import org.bukkit.event.player.PlayerBucketFillEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerDropItemEvent
 import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.event.player.PlayerItemConsumeEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerSwapHandItemsEvent
@@ -40,7 +43,21 @@ internal class MultiplayerGameplayListener(
             victimMatch.state != MultiplayerMatchState.ACTIVE || !sessions.isEnemy(attacker, victim)
         ) {
             event.isCancelled = true
+        } else if (victimMatch.roster.rules.objective == ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO ||
+            victimMatch.roster.rules.objective.isHitRace
+        ) {
+            event.damage = 0.0
         }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onAcceptedMeleeHit(event: EntityDamageByEntityEvent) {
+        val victim = event.entity as? Player ?: return
+        val attacker = event.damager as? Player ?: return
+        val match = sessions.matchFor(attacker) ?: return
+        if (match.state != MultiplayerMatchState.ACTIVE || sessions.matchFor(victim)?.id != match.id || !sessions.isEnemy(attacker, victim)) return
+        if (match.roster.rules.objective == ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO) SumoCombat.afterHit(victim)
+        if (sessions.isHitRace(attacker)) sessions.recordMeleeHit(attacker, victim)
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -69,7 +86,10 @@ internal class MultiplayerGameplayListener(
                     pitch = event.to.pitch
                 }
             }
-            MultiplayerMatchState.ACTIVE -> if (!sessions.isInsideArena(event.player, event.to)) {
+            MultiplayerMatchState.ACTIVE -> if (sessions.isSumoRingOut(event.player, event.to)) {
+                event.to = event.from
+                sessions.eliminate(event.player)
+            } else if (!sessions.isInsideArena(event.player, event.to)) {
                 event.to = event.from
                 sessions.eliminate(event.player)
             }
@@ -82,7 +102,24 @@ internal class MultiplayerGameplayListener(
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onTeleport(event: PlayerTeleportEvent) {
+        if (event.cause == PlayerTeleportEvent.TeleportCause.ENDER_PEARL && !sessions.allowsEnderPearls(event.player)) {
+            event.isCancelled = true
+            return
+        }
         if (!sessions.isTeleportAllowed(event.player, event.to, event.cause)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    fun onConsume(event: PlayerItemConsumeEvent) {
+        if (!sessions.allowsConsumables(event.player)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    fun onProjectileLaunch(event: ProjectileLaunchEvent) {
+        val player = (event.entity.shooter as? Player) ?: return
+        val blocked = (event.entity is EnderPearl && !sessions.allowsEnderPearls(player)) ||
+            (event.entity !is EnderPearl && !sessions.allowsProjectiles(player))
+        if (blocked) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

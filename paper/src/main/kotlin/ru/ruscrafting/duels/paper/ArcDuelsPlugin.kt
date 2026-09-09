@@ -190,6 +190,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 shutdownRecoveryTimeoutMillis = settings.shutdownRecoveryTimeout.toMillis(),
                 defaultPostMatchReturnPolicy = settings.defaultPostMatchReturnPolicy,
                 runtimeSettings = { liveRuntime.snapshot().settings },
+                findRecordedMatch = persistence.statistics::findMatch,
             )
         sessions = sessionManager
         lifecycle.own(AutoCloseable { sessionManager.shutdown() })
@@ -207,10 +208,15 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 countdownSeconds = settings.countdownSeconds,
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 externalCombatTagClear = cmiCombatTags::clear,
+                syncProvider = syncProvider,
                 networkReturn = { player, destination ->
                     requireBackendTransferSent(transfer?.connect(player, destination), destination)
                 },
             )
+        network.groups?.let { groupBus ->
+            lifecycle.own(RemoteGroupArena(serverId, groupBus, multiplayerSessions, sessionManager, kits,
+                lifecycle.tasks, server::getPlayer, playerDataSync::isReady))
+        }
         sessionManager.attachExternalEngagement(multiplayerSessions::isEngaged)
         lifecycle.own(multiplayerSessions)
         val challenges =
@@ -260,6 +266,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 localServer = serverId,
                 serverNames = serverNames,
                 groupBus = network.groups,
+                arenaDirectory = network.arenas,
                 transfer = transfer,
                 playerDataReady = playerDataSync::isReady,
                 runtimeSettings = { liveRuntime.snapshot().settings },
@@ -523,6 +530,14 @@ open class ArcDuelsPlugin : JavaPlugin() {
                                         } else {
                                             net.kyori.adventure.text.Component.text(loser)
                                         }
+                                    val modeComponent =
+                                        if (recipient is org.bukkit.entity.Player) {
+                                            duelModeComponent(locales, recipient, event.mode, event.objective, event.kitId)
+                                        } else {
+                                            net.kyori.adventure.text.Component.text(
+                                                "${event.objective.name.lowercase().replace("king_of_the_hill", "koth")} / ${event.mode.name.lowercase()}",
+                                            )
+                                        }
                                     recipient.sendMessage(
                                         locales.notice(
                                             recipient,
@@ -530,6 +545,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                                             LocaleService.component("winner", winnerComponent),
                                             LocaleService.component("loser", loserComponent),
                                             LocaleService.text("rating", event.winnerRating),
+                                            LocaleService.component("mode", modeComponent),
                                         ),
                                     )
                                 }

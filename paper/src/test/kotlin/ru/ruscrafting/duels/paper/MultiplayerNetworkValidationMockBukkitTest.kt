@@ -14,6 +14,9 @@ import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.MultiplayerLayout
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
@@ -29,6 +32,77 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
 class MultiplayerNetworkValidationMockBukkitTest : StringSpec({
+    "three local group members use a compatible parkour arena when survival has no local capacity" {
+        withNetworkScenario { paper ->
+            multiplayerHarness(paper, listOf("GroupHost", "Alpha", "Bravo"), enableArena = false).use { harness ->
+                val redis = InMemoryRedis(ServerIdentity { "group-test" })
+                val localDirectory = ru.ruscrafting.duels.redis.NetworkArenaDirectory(redis, ServerId("group-test"))
+                val parkourRedis = InMemoryRedis(ServerIdentity { "parkour" })
+                val parkourDirectory = ru.ruscrafting.duels.redis.NetworkArenaDirectory(parkourRedis, ServerId("parkour"))
+                parkourDirectory.publish(
+                    ru.ruscrafting.duels.redis.ArenaNodeStatus(
+                        server = ServerId("parkour"),
+                        arenas = setOf(
+                            ru.ruscrafting.duels.redis.ArenaAdvertisement(
+                                id = ArenaId("parkour-sumo"),
+                                displayName = "Parkour Sumo",
+                                loadouts = setOf(DuelMode.KIT),
+                                objectives = setOf(DuelObjectiveType.ELIMINATION),
+                                available = true,
+                            ),
+                        ).toList(),
+                        kitFingerprints = mapOf(KitId("classic") to requireNotNull(harness.kits.fingerprint(KitId("classic")))),
+                        queuedPairs = 0,
+                    ),
+                )
+                val arenaPayload = parkourRedis.getPublishedMessages().last().message
+                redis.simulateExternalMessage(
+                    ru.ruscrafting.duels.redis.NetworkArenaDirectory.CHANNEL,
+                    arenaPayload,
+                    "parkour",
+                )
+                localDirectory.activeNodes().map { it.server } shouldBe listOf(ServerId("parkour"))
+                val bus = CrossServerGroupBus(redis, ServerId("group-test"))
+                val sent = mutableListOf<CrossServerGroupMessage>()
+                val observation = bus.subscribe(sent::add)
+                val gui = harness.registerGui(
+                    groupBus = bus,
+                    transfer = PlayerTransfer { _, _ -> BackendTransferResult.SENT },
+                    arenaDirectory = localDirectory,
+                )
+                try {
+                    val host = harness.players.first()
+                    gui.open(host)
+                    host.click(10)
+                    host.click(11)
+                    host.click(34)
+
+                    val members = harness.players.drop(1)
+                    val lobbyIds = members.map { member ->
+                        val invitation = requireNotNull(member.nextComponentMessage())
+                        val lobbyId = UUID.fromString(
+                            invitation.runCommands().first { it.startsWith("/duel group open ") }.substringAfterLast(' '),
+                        )
+                        gui.openInvitation(member, lobbyId)
+                        member.click(34)
+                        lobbyId
+                    }
+                    lobbyIds.distinct().size shouldBe 1
+
+                    val prepare = sent.single { it.type == GroupLobbyMessageType.PREPARE }
+                    prepare.arenaServer shouldBe ServerId("parkour")
+                    prepare.participants.size shouldBe 3
+                } finally {
+                    gui.close()
+                    observation.close()
+                    bus.close()
+                    localDirectory.close()
+                    parkourDirectory.close()
+                }
+            }
+        }
+    }
+
     "mismatched response participants do not mutate the local lobby" {
         withNetworkScenario { paper ->
             multiplayerHarness(paper, listOf("GroupHost", "LocalMate")).use { harness ->

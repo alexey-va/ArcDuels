@@ -8,6 +8,7 @@ import ru.arc.redis.safety.OriginBoundRedisBus
 import ru.arc.redis.safety.RecentMessageDeduplicator
 import ru.arc.redis.safety.RedisMessageRejection
 import ru.arc.redis.safety.RedisWireCodec
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
 import ru.ruscrafting.duels.domain.MIN_MULTIPLAYER_PARTICIPANTS
@@ -25,6 +26,8 @@ enum class GroupLobbyMessageType {
     PREPARE,
     READY,
     CANCEL,
+    STARTED,
+    START_FAILED,
 }
 
 enum class GroupLobbyResponse {
@@ -58,6 +61,9 @@ data class CrossServerGroupMessage(
     val targetId: PlayerId? = null,
     val response: GroupLobbyResponse? = null,
     val kitId: KitId? = null,
+    val arenaServer: ServerId = hostServer,
+    val objective: DuelObjectiveType = DuelObjectiveType.ELIMINATION,
+    val participantKits: Map<PlayerId, KitId> = emptyMap(),
 ) {
     init {
         require(messageId.matches(MESSAGE_ID_PATTERN)) { "Unsafe group message id" }
@@ -73,6 +79,10 @@ data class CrossServerGroupMessage(
             "A shared-kit group lobby requires exactly one shared kit"
         }
         require(expiresAtEpochMillis > 0L) { "A group lobby expiry must be positive" }
+        require(participantKits.keys.all { id -> participants.any { it.playerId == id } }) { "Kit assignment references a non-participant" }
+        if (arenaServer != hostServer && type == GroupLobbyMessageType.PREPARE) {
+            require(participantKits.keys == participants.mapTo(mutableSetOf()) { it.playerId }) { "Remote arena preparation requires every selected kit" }
+        }
         when (type) {
             GroupLobbyMessageType.OFFER -> {
                 require(sourceServer == hostServer) { "A group offer must come from the host server" }
@@ -103,6 +113,10 @@ data class CrossServerGroupMessage(
                     "A ready message must come from the participant origin server"
                 }
                 require(response == null && kitId == null) { "A ready message cannot contain a response" }
+            }
+            GroupLobbyMessageType.STARTED, GroupLobbyMessageType.START_FAILED -> {
+                require(sourceServer == arenaServer) { "Only the arena server can report group start status" }
+                require(targetId == null && response == null && kitId == null) { "Group start status cannot target a participant" }
             }
             GroupLobbyMessageType.CANCEL -> {
                 require(sourceServer == hostServer) { "Only the group host can cancel a network lobby" }

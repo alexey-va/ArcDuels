@@ -17,6 +17,42 @@ import ru.ruscrafting.duels.domain.PlayerId
 import java.util.UUID
 
 class MultiplayerSpawnNavigationMockBukkitTest : StringSpec({
+    "sumo platform automatically fits every supported free for all group size" {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcDuelsPlugin>()
+            val world = paper.server.addSimpleWorld("sumo-platform")
+            // Surface of the deployed octagonal platform, world-content/duels/sumo-platform.atelier.json.
+            listOf(intArrayOf(6, 14, 0, 20), intArrayOf(4, 16, 1, 19),
+                intArrayOf(3, 17, 2, 18), intArrayOf(2, 18, 3, 17)).forEach { box ->
+                for (x in box[0]..box[1]) for (z in box[2]..box[3]) {
+                    world.getBlockAt(x, 67, z).type = Material.STONE
+                }
+            }
+            configureArena(plugin, world.name)
+            val path = "arenas.barrier-test"
+            plugin.config.set("$path.allowed-objectives", listOf("SUMO"))
+            configureLocation(plugin, "$path.first-spawn", world.name, 4.5, 68.0, 10.5)
+            configureLocation(plugin, "$path.second-spawn", world.name, 16.5, 68.0, 10.5)
+            plugin.config.set("$path.bounds.min.x", -4.0)
+            plugin.config.set("$path.bounds.min.y", 63.0)
+            plugin.config.set("$path.bounds.min.z", -4.0)
+            plugin.config.set("$path.bounds.max.x", 25.0)
+            plugin.config.set("$path.bounds.max.z", 25.0)
+            val catalog = PaperArenaCatalog.load(plugin)
+            for (size in 3..12) {
+                val roster = MultiplayerRoster(
+                    MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED,
+                        KitId("sumo"), objective = ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO),
+                    (1..size).map { MultiplayerParticipant(PlayerId(UUID(0L, it.toLong())), kitId = KitId("sumo")) },
+                )
+                catalog.reserveMultiplayer(roster).get().use { reservation ->
+                    reservation.spawns.size shouldBe size
+                    reservation.spawns.values.all { it.blockY == 68 && world.getBlockAt(it.blockX, 67, it.blockZ).type.isSolid } shouldBe true
+                }
+            }
+        }
+    }
+
     "procedural placement keeps every player in the duel spawn walkable component" {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcDuelsPlugin>()

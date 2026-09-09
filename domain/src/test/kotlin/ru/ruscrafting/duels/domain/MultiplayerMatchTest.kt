@@ -80,6 +80,60 @@ class MultiplayerMatchTest :
             shouldThrow<IllegalArgumentException> { roster(2) }
             shouldThrow<IllegalArgumentException> { roster(13) }
         }
+
+        "king of the hill shares progress across a team and keeps FFA progress separate" {
+            val players = (1..4).map(::player)
+            val participants = players.mapIndexed { index, playerId ->
+                MultiplayerParticipant(playerId, team = index % 2 + 1, kitId = KitId("classic"))
+            }
+            val roster = MultiplayerRoster(
+                MultiplayerRules(MultiplayerLayout.TWO_TEAMS, MultiplayerKitPolicy.SHARED, KitId("classic"), objective = DuelObjectiveType.KING_OF_THE_HILL),
+                participants,
+            )
+            val match = MultiplayerMatch.reserve(MatchId(UUID.randomUUID()), ArenaId("hill"), ServerId("test"), roster, Instant.EPOCH)
+                .beginCountdown().activate(Instant.EPOCH)
+            val objective = MultiplayerScoreObjective(DuelObjectiveType.KING_OF_THE_HILL, 5, 1)
+            objective.evaluate(
+                match,
+                MultiplayerObjectiveFrame(100, setOf(players[0], players[2]), mapOf(players[0] to 40L, players[2] to 60L)),
+            ) shouldBe MultiplayerObjectiveDecision.Complete(setOf(players[0], players[2]), 1)
+        }
+
+        "boxing uses separate FFA player progress" {
+            val players = (1..3).map(::player)
+            val roster = MultiplayerRoster(
+                MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("classic"), objective = DuelObjectiveType.BOXING, modifiers = CombatModifiers(false, false, false, false)),
+                players.map { MultiplayerParticipant(it, kitId = KitId("classic")) },
+            )
+            val match = MultiplayerMatch.reserve(MatchId(UUID.randomUUID()), ArenaId("boxing"), ServerId("test"), roster, Instant.EPOCH)
+                .beginCountdown().activate(Instant.EPOCH)
+            MultiplayerScoreObjective(DuelObjectiveType.BOXING, 5, 10).evaluate(
+                match,
+                MultiplayerObjectiveFrame(10, emptySet(), mapOf(players[0] to 9L, players[1] to 10L)),
+            ) shouldBe MultiplayerObjectiveDecision.Complete(setOf(players[1]), null)
+        }
+
+        "objective completion records the whole winning team" {
+            val players = (1..4).map(::player)
+            val roster = MultiplayerRoster(
+                MultiplayerRules(MultiplayerLayout.TWO_TEAMS, MultiplayerKitPolicy.SHARED, KitId("classic"), objective = DuelObjectiveType.KING_OF_THE_HILL),
+                players.mapIndexed { index, id -> MultiplayerParticipant(id, index % 2 + 1, KitId("classic")) },
+            )
+            val match = MultiplayerMatch.reserve(MatchId(UUID.randomUUID()), ArenaId("hill"), ServerId("test"), roster, Instant.EPOCH)
+                .beginCountdown().activate(Instant.EPOCH)
+                .completeObjective(setOf(players[0], players[2]), 1, Instant.ofEpochSecond(1))
+            match.state shouldBe MultiplayerMatchState.COMPLETING
+            match.outcome().endReason shouldBe MatchEndReason.OBJECTIVE
+            match.outcome().winners shouldBe setOf(players[0], players[2])
+        }
+
+        "default multiplayer modifiers lock both hit race objectives" {
+            defaultMultiplayerModifiers(DuelObjectiveType.BOXING).projectiles shouldBe false
+            defaultMultiplayerModifiers(DuelObjectiveType.BOXING).consumables shouldBe false
+            defaultMultiplayerModifiers(DuelObjectiveType.COMBO).enderPearls shouldBe false
+            defaultMultiplayerModifiers(DuelObjectiveType.COMBO).naturalRegeneration shouldBe false
+            defaultMultiplayerModifiers(DuelObjectiveType.KING_OF_THE_HILL).projectiles shouldBe true
+        }
     })
 
 private fun player(index: Int): PlayerId = PlayerId(UUID(0L, index.toLong()))

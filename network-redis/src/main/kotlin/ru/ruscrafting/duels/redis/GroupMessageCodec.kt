@@ -6,6 +6,7 @@ import ru.arc.redis.safety.JsonArrayContract
 import ru.arc.redis.safety.JsonObjectContract
 import ru.arc.redis.safety.JsonResourceBounds
 import ru.arc.redis.safety.RedisWireCodec
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
@@ -36,7 +37,7 @@ internal class GroupMessageCodec(
                 ),
             bounds = JsonResourceBounds(MAX_MESSAGE_CHARACTERS, maxStringCharacters = 160),
             validate = { wire ->
-                require(wire.version == WIRE_VERSION) { "Unsupported group lobby wire version ${wire.version}" }
+                require(wire.version in 1..WIRE_VERSION) { "Unsupported group lobby wire version ${wire.version}" }
                 require(wire.messageId.matches(MESSAGE_ID_PATTERN)) { "Unsafe group message id" }
                 ServerId(wire.sourceServer)
                 UUID.fromString(wire.lobbyId)
@@ -61,6 +62,9 @@ internal class GroupMessageCodec(
                 targetId = value.targetId?.toString(),
                 response = value.response?.name,
                 kitId = value.kitId?.value,
+                arenaServer = value.arenaServer.value,
+                objective = value.objective.name,
+                participantKits = value.participantKits.mapKeys { it.key.toString() }.mapValues { it.value.value },
             ),
         )
 
@@ -81,6 +85,9 @@ internal class GroupMessageCodec(
             targetId = wire.targetId?.let { PlayerId(UUID.fromString(it)) },
             response = wire.response?.let(GroupLobbyResponse::valueOf),
             kitId = wire.kitId?.let(::KitId),
+            arenaServer = wire.arenaServer?.let(::ServerId) ?: ServerId(wire.hostServer),
+            objective = wire.objective?.let(DuelObjectiveType::valueOf) ?: DuelObjectiveType.ELIMINATION,
+            participantKits = wire.participantKits.orEmpty().mapKeys { PlayerId(UUID.fromString(it.key)) }.mapValues { KitId(it.value) },
         )
     }
 
@@ -106,18 +113,22 @@ internal class GroupMessageCodec(
         val targetId: String? = null,
         val response: String? = null,
         val kitId: String? = null,
+        val arenaServer: String? = null,
+        val objective: String? = null,
+        val participantKits: Map<String, String>? = null,
     )
 
     private companion object {
-        const val WIRE_VERSION = 1
+        const val WIRE_VERSION = 2
         const val MAX_MESSAGE_CHARACTERS = 16_384
         val MESSAGE_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
         val WIRE_FIELDS =
             setOf(
                 "version", "type", "messageId", "sourceServer", "lobbyId", "hostId", "hostServer", "participants",
                 "layout", "kitPolicy", "sharedKitId", "expiresAtEpochMillis", "targetId", "response", "kitId",
+                "arenaServer", "objective", "participantKits",
             )
-        val REQUIRED_WIRE_FIELDS = WIRE_FIELDS - setOf("sharedKitId", "targetId", "response", "kitId")
+        val REQUIRED_WIRE_FIELDS = WIRE_FIELDS - setOf("sharedKitId", "targetId", "response", "kitId", "arenaServer", "objective", "participantKits")
         val PARTICIPANT_FIELDS = setOf("playerId", "name", "originServer")
     }
 }

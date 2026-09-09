@@ -24,6 +24,15 @@ class HitRaceTrackerTest : StringSpec({
         tracker.record(DuelObjectiveType.COMBO, second, first).scores shouldBe mapOf(first to 0L, second to 1L)
     }
 
+    "combo representatives reset the whole struck team streak" {
+        val tracker = HitRaceTracker()
+        val teamOne = PlayerId(UUID.randomUUID())
+        val teamTwo = PlayerId(UUID.randomUUID())
+        tracker.record(DuelObjectiveType.COMBO, teamOne, teamTwo)
+        tracker.record(DuelObjectiveType.COMBO, teamOne, teamTwo)
+        tracker.record(DuelObjectiveType.COMBO, teamTwo, teamOne).scores shouldBe mapOf(teamOne to 0L, teamTwo to 1L)
+    }
+
     "reset clears all round progress" {
         val tracker = HitRaceTracker()
         tracker.record(DuelObjectiveType.BOXING, first, second)

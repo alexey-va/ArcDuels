@@ -14,10 +14,13 @@ import ru.ruscrafting.duels.domain.ChallengeRegistry
 import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.DuelMatch
+import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
 import ru.ruscrafting.duels.redis.ChallengeMessageType
@@ -75,6 +78,7 @@ class DuelController(
     private val returnOffers = ConcurrentHashMap<PlayerId, ReturnOffer>()
     private val networkSubscription = challengeBus?.subscribe(::onNetworkMessage)
     private val completionSubscription = sessions.onCompleted(::onMatchCompleted)
+    private val recoverySubscription = sessions.onRecovered(::onRecoveredMatch)
     private val playerComponents = DuelPlayerComponents(statistics, locales)
 
     /** Accepted challenges retain their original kit and arena ids until routing completes. */
@@ -477,6 +481,7 @@ class DuelController(
     override fun close() {
         networkSubscription?.close()
         completionSubscription.close()
+        recoverySubscription.close()
         acceptedTasks.values.forEach(BukkitTask::cancel)
         challengeExpiryTasks.values.forEach(BukkitTask::cancel)
         returnTasks.values.forEach(BukkitTask::cancel)
@@ -1014,7 +1019,12 @@ class DuelController(
         promptedRoutes?.byPlayer?.forEach { (playerId, destination) ->
             returnOffers[playerId] = ReturnOffer(match.id, destination, promptedRoutes.recoveryMatchId)
         }
-        offerMatchSummary(match, promptedRoutes)
+        // Automatic cross-server returns deliver the durable summary after the player
+        // reaches their origin server. Prompted returns keep the summary and action
+        // together while the player is still here.
+        if (routes == null || effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT) {
+            offerMatchSummary(match, promptedRoutes)
+        }
         if (routes == null) return
         if (effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT) {
             return
@@ -1072,6 +1082,8 @@ class DuelController(
                                     player,
                                     if (playerId == match.winner) "controller.result-win" else "controller.result-loss",
                                     LocaleService.component("player", requireNotNull(opponent)),
+                                    LocaleService.component("mode", duelModeComponent(locales, player, match.rules)),
+                                    LocaleService.component("reason", resultReason(locales, player, playerId, requireNotNull(match.winner), requireNotNull(match.endReason))),
                                 ),
                             ),
                             LocaleService.text("score", viewerScore(match, playerId)),
@@ -1080,6 +1092,51 @@ class DuelController(
                         ),
                     )
                 }
+            }
+        }
+    }
+
+    private fun onRecoveredMatch(player: Player, recorded: RecordedMatch) {
+        if (!player.isOnline || sessions.matchFor(player) != null || sessions.isPreparing(player)) return
+        val playerId = PlayerId(player.uniqueId)
+        val opponentId = recorded.opponentOf(playerId)
+        val opponentName = resolveName(opponentId)
+        playerComponents.load(player, opponentId.value, opponentName).whenComplete { opponent, _ ->
+            runSync {
+                if (!player.isOnline || sessions.matchFor(player) != null || sessions.isPreparing(player)) return@runSync
+                val effectiveRematchWindow = runtimeSettings()?.rematchWindow ?: rematchWindow
+                val action =
+                    locales.component(player, "controller.rematch-action")
+                        .clickEvent(ClickEvent.runCommand("/duel rematch ${recorded.outcome.matchId}"))
+                        .hoverEvent(
+                            HoverEvent.showText(
+                                locales.component(
+                                    player,
+                                    "controller.rematch-hover",
+                                    LocaleService.text("seconds", effectiveRematchWindow.seconds.coerceAtLeast(1L)),
+                                ),
+                            ),
+                        )
+                val rules = recorded.outcome.rules
+                player.sendMessage(
+                    locales.notice(
+                        player,
+                        if (rules.bestOf == 1) "controller.match-summary-single" else "controller.match-summary-series",
+                        LocaleService.component(
+                            "result",
+                            locales.component(
+                                player,
+                                if (recorded.wonBy(playerId)) "controller.result-win" else "controller.result-loss",
+                                LocaleService.component("player", requireNotNull(opponent)),
+                                LocaleService.component("mode", duelModeComponent(locales, player, rules)),
+                                LocaleService.component("reason", resultReason(locales, player, playerId, recorded.outcome.winner, recorded.outcome.endReason)),
+                            ),
+                        ),
+                        LocaleService.text("score", recorded.scoreFor(playerId).let { "${it.first}:${it.second}" }),
+                        LocaleService.component("actions", action),
+                        LocaleService.text("seconds", effectiveRematchWindow.seconds.coerceAtLeast(1L)),
+                    ),
+                )
             }
         }
     }
@@ -1447,6 +1504,52 @@ class DuelController(
         const val MAX_CONTEXTS = 4_096
         val CONTEXT_RETENTION: Duration = Duration.ofMinutes(10)
     }
+}
+
+internal fun duelModeComponent(
+    locales: LocaleService,
+    player: Player,
+    rules: DuelRules,
+): Component =
+    duelModeComponent(locales, player, rules.mode, rules.objective, rules.kitId)
+
+internal fun duelModeComponent(
+    locales: LocaleService,
+    player: Player,
+    mode: DuelMode,
+    objective: DuelObjectiveType,
+    kitId: KitId?,
+): Component {
+    val objectiveKey = objective.name.lowercase().replace("king_of_the_hill", "koth")
+    val objectiveName = locales.component(player, "objective.$objectiveKey.name")
+    val loadout =
+        kitId?.let {
+            val key = "kit.${it.value}.name"
+            val kitName = if (locales.hasKey(locales.language(player), key)) locales.component(player, key) else Component.text(it.value)
+            locales.component(player, "controller.loadout-kit", LocaleService.component("kit", kitName))
+        } ?: locales.component(player, "controller.loadout-own")
+    return locales.component(
+        player,
+        "controller.mode",
+        LocaleService.component("objective", objectiveName),
+        LocaleService.component("loadout", loadout),
+    )
+}
+
+private fun resultReason(
+    locales: LocaleService,
+    player: Player,
+    viewer: PlayerId,
+    winner: PlayerId,
+    reason: ru.ruscrafting.duels.domain.MatchEndReason,
+): Component {
+    val key =
+        if (viewer == winner) {
+            "controller.reason-opponent-${reason.name.lowercase()}"
+        } else {
+            "controller.reason-self-${reason.name.lowercase()}"
+        }
+    return locales.component(player, key)
 }
 
 internal fun selectOriginServer(

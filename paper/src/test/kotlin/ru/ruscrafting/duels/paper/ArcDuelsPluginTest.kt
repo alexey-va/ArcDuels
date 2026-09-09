@@ -602,8 +602,13 @@ class ArcDuelsPluginTest : StringSpec({
 
         val winnerCard = requireNotNull(winner.nextComponentMessage())
         val loserCard = requireNotNull(loser.nextComponentMessage())
-        PlainTextComponentSerializer.plainText().serialize(winnerCard).contains("Победа над SummaryLoser · счёт 2:1") shouldBe true
-        PlainTextComponentSerializer.plainText().serialize(loserCard).contains("Поражение от SummaryWinner · счёт 1:2") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(winnerCard).contains("Победа над SummaryLoser") shouldBe true
+        PlainTextComponentSerializer.plainText().serialize(loserCard).contains("Поражение от SummaryWinner") shouldBe true
+        val winnerText = PlainTextComponentSerializer.plainText().serialize(winnerCard)
+        val loserText = PlainTextComponentSerializer.plainText().serialize(loserCard)
+        winnerText.contains("режим") shouldBe true
+        winnerText.contains("счёт 2:1") shouldBe true
+        loserText.contains("счёт 1:2") shouldBe true
         winnerCard.containsRunCommand("/duel rematch ${match.id}") shouldBe true
         loserCard.containsRunCommand("/duel rematch ${match.id}") shouldBe true
         isMatchParticipant(winner.uniqueId, winner.uniqueId, loser.uniqueId) shouldBe true
@@ -617,7 +622,9 @@ class ArcDuelsPluginTest : StringSpec({
         val singleRoundPlain = PlainTextComponentSerializer.plainText().serialize(singleRoundCard)
         singleRoundPlain.contains("Победа над SummaryLoser") shouldBe true
         singleRoundPlain.contains("счёт") shouldBe false
-        singleRoundPlain.contains("Победа над SummaryLoser\n  [▶] Предложить реванш") shouldBe true
+        singleRoundPlain.contains("\n  [▶] Предложить реванш") shouldBe true
+        singleRoundPlain.contains("режим") shouldBe true
+        singleRoundPlain.contains("\n\n") shouldBe false
         controller.close()
     }
 

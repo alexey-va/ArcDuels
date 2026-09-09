@@ -40,10 +40,13 @@ This repository is under active development. The first vertical slice targets:
   ranked play, sudden death, and per-match combat modifiers;
 - thirteen merge-forward starter kits, exact item/enchantment manifests in every
   kit picker, and Russian/English client-locale presentation;
-- local 3–12-player matches with free-for-all, two-team, or three-team layouts,
-  automatic balanced team assignment, and either one shared kit or an explicit
-  kit choice from every participant;
-- optional countdown titles, action bars, sounds, particles and real damage-free winner fireworks;
+- network-routed 3–12-player matches with free-for-all, two-team, or three-team
+  layouts, automatic balanced teams and spawn placement, all five objectives,
+  and either one shared kit or an explicit kit choice from every participant;
+- group setup with nested objective/kit selection, draft reset on exit, and
+  in-place inventory refresh that preserves the cursor;
+- optional countdown titles, action bars, sounds, particles and damage-free
+  winner fireworks after return and inventory recovery;
 - short server-authoritative arena-teleport stabilization that absorbs stale
   movement packets before combat begins;
 - bounded arenas with per-arena loadout and objective compatibility, scoped

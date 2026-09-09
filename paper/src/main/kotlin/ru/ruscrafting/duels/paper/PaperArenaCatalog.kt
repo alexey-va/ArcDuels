@@ -170,7 +170,8 @@ data class PaperArena(
             (objective != DuelObjectiveType.KING_OF_THE_HILL || hill != null)
 
     fun supports(roster: MultiplayerRoster): Boolean {
-        if (DuelMode.KIT !in allowedLoadouts || DuelObjectiveType.ELIMINATION !in allowedObjectives) return false
+        if (DuelMode.KIT !in allowedLoadouts || roster.rules.objective !in allowedObjectives) return false
+        if (roster.rules.objective == DuelObjectiveType.KING_OF_THE_HILL && hill == null) return false
         return MultiplayerSpawnPlanner.plan(this, roster) != null
     }
 
@@ -187,7 +188,10 @@ class MultiplayerArenaReservation internal constructor(
     val spawns: Map<PlayerId, Location>,
     private val release: () -> Unit,
 ) : AutoCloseable {
-    override fun close() = release()
+    private val closed = java.util.concurrent.atomic.AtomicBoolean()
+    override fun close() {
+        if (closed.compareAndSet(false, true)) release()
+    }
 }
 
 data class HillZone(

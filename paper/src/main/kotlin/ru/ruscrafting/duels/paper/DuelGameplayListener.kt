@@ -103,6 +103,10 @@ internal class DuelGameplayListener(
         val victim = event.entity as? Player ?: return
         val attacker = event.damager as? Player ?: return
         if (sessions.isHitRace(attacker)) sessions.recordMeleeHit(attacker, victim)
+        val match = sessions.matchFor(victim)
+        if (match?.state == MatchState.ACTIVE && match.rules.objective == ru.ruscrafting.duels.domain.DuelObjectiveType.SUMO &&
+            sessions.matchFor(attacker)?.id == match.id && attacker.uniqueId != victim.uniqueId
+        ) SumoCombat.afterHit(victim)
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -195,6 +199,10 @@ internal class DuelGameplayListener(
                 }
             }
             MatchState.ACTIVE -> {
+                if (sessions.hasFallenFromSumoPlatform(event.player, destination)) {
+                    sessions.handleElimination(event.player)
+                    return
+                }
                 if (!sessions.isInsideArena(event.player, destination)) {
                     event.to = event.from
                     warnBoundary(event.player, event.from, reachedBoundary = true, movingCloser = true)

@@ -11,6 +11,7 @@ import io.mockk.verify
 import net.kyori.adventure.text.format.TextDecoration
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
+import org.bukkit.event.inventory.ClickType
 import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.inventory.Inventory
@@ -116,7 +117,7 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
                     host.click(11)
                     host.click(34)
 
-                    host.nextPlainMessage().contains("no suitable group arena") shouldBe true
+                    host.nextPlainMessage().contains("no suitable group arena", ignoreCase = true) shouldBe true
                     harness.players.drop(1).all { it.nextComponentMessage() == null } shouldBe true
                     host.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
                     harness.manager.activeCount() shouldBe 0
@@ -290,11 +291,11 @@ class MultiplayerInvitationMockBukkitTest : StringSpec({
 
                         fixture.gui.openInvitation(player, offer.lobbyId)
                         player.openInventory.topInventory.getItem(32)?.type shouldBe Material.BOW
-                        player.click(32)
-                        player.click(32)
+                        player.click(32, ClickType.RIGHT)
+                        player.click(32, ClickType.RIGHT)
                         player.openInventory.topInventory.getItem(32)?.type shouldBe Material.NETHERITE_AXE
                         player.click(34)
-                        player.click(32)
+                        player.click(32, ClickType.RIGHT)
                         player.click(34)
 
                         player.openInventory.topInventory.getItem(34)?.type shouldBe Material.LIME_DYE

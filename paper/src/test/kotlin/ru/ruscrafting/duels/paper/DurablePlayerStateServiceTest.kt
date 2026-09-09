@@ -18,11 +18,15 @@ import ru.ruscrafting.duels.domain.ChallengeStatus
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.InMemoryStatisticsRepository
+import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchCoordinator
+import ru.ruscrafting.duels.domain.MatchEndReason
+import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
+import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Clock
 import java.time.Duration
@@ -198,6 +202,78 @@ class DurablePlayerStateServiceTest : StringSpec({
 
         stored.getValue(first.uniqueId).escrow.inventoryReplaced shouldBe false
         stored.getValue(second.uniqueId).escrow.inventoryReplaced shouldBe false
+    }
+
+    "recovery celebrates only the winner at the restored origin after retention retry and never on admin replay" {
+        val repository = GatedEscrowRepository().apply {
+            commit.complete(Unit)
+            archival = CompletableFuture()
+        }
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
+        val winner = server.addPlayer()
+        val loser = server.addPlayer()
+        val origin = winner.location.clone().apply { x = 18.5; y = 72.0; z = -3.5 }
+        winner.teleport(origin)
+        val matchId = MatchId.random()
+        service.storePair(matchId, winner, loser, inventoryReplaced = true).get()
+        winner.teleport(origin.clone().add(30.0, 0.0, 30.0))
+        val recorded =
+            RecordedMatch(
+                MatchOutcome(
+                    matchId = matchId,
+                    winner = PlayerId(winner.uniqueId),
+                    loser = PlayerId(loser.uniqueId),
+                    mode = DuelMode.KIT,
+                    kitId = KitId("classic"),
+                    ranked = false,
+                    serverId = ServerId("arena"),
+                    completedAt = Instant.parse("2026-08-15T13:00:00Z"),
+                    endReason = MatchEndReason.FORFEIT,
+                ),
+                winnerRatingAfter = 1_000,
+                loserRatingAfter = 1_000,
+            )
+        val fireworks = mutableListOf<UUID>()
+        val recovered = mutableListOf<UUID>()
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataReady = { true },
+                recoveryApplyDelayTicks = 0L,
+                playerDataSaver = {},
+                findRecordedMatch = { CompletableFuture.completedFuture(recorded) },
+                celebrationPlay = { player, _ -> fireworks += player.uniqueId },
+            )
+        sessions.onRecovered { player, _ -> recovered += player.uniqueId }
+
+        sessions.handleJoin(winner)
+        server.scheduler.performTicks(2)
+        fireworks shouldBe emptyList()
+        repository.archival.complete(false)
+        repository.archival = CompletableFuture.completedFuture(true)
+        server.scheduler.performTicks(60)
+        fireworks shouldBe listOf(winner.uniqueId)
+        recovered shouldBe listOf(winner.uniqueId)
+        winner.location.x shouldBe origin.x
+        winner.location.y shouldBe origin.y
+        winner.location.z shouldBe origin.z
+
+        sessions.handleJoin(loser)
+        server.scheduler.performTicks(2)
+        fireworks shouldBe listOf(winner.uniqueId)
+        recovered shouldBe listOf(winner.uniqueId, loser.uniqueId)
+
+        sessions.adminRecover(winner).get()
+        server.scheduler.performTicks(2)
+        fireworks shouldBe listOf(winner.uniqueId)
+        recovered shouldBe listOf(winner.uniqueId, loser.uniqueId)
+        sessions.shutdown()
     }
 
     "leaving an arena drops only its remote escrow cache before the next network match" {
@@ -617,6 +693,51 @@ class DurablePlayerStateServiceTest : StringSpec({
             val completed = requireNotNull(manager.matchFor(first))
             completed.winner shouldBe PlayerId(second.uniqueId)
             completed.endReason shouldBe ru.ruscrafting.duels.domain.MatchEndReason.FORFEIT
+        } finally {
+            manager.shutdown()
+            plugin.config.set("arenas.example.enabled", false)
+        }
+    }
+
+    "local winner fireworks wait for delayed retention after the session is finalized" {
+        val repository = GatedEscrowRepository().apply {
+            commit.complete(Unit)
+            archival = CompletableFuture()
+        }
+        val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
+        val first = server.addPlayer("DelayedWinner")
+        val second = server.addPlayer("DelayedLoser")
+        plugin.config.set("arenas.example.enabled", true)
+        val arenas = PaperArenaCatalog.load(plugin)
+        val fireworks = mutableListOf<UUID>()
+        val manager = DuelSessionManager(
+            plugin,
+            MatchCoordinator(ServerId("duels-1"), arenas, InMemoryStatisticsRepository()),
+            arenas,
+            KitRegistry.load(plugin),
+            service,
+            LocaleService.load(plugin),
+            countdownSeconds = 0,
+            teleportStabilizationTicks = 0L,
+            celebrationDurationTicks = 0L,
+            playerDataSaver = {},
+            celebrationPlay = { player, _ -> fireworks += player.uniqueId },
+        )
+        val now = Instant.parse("2026-09-09T18:00:00Z")
+        val challenge = DuelChallenge.create(
+            PlayerId(first.uniqueId), PlayerId(second.uniqueId),
+            DuelRules(DuelMode.KIT, KitId("classic")),
+            now, Duration.ofSeconds(30),
+        ).resolve(ChallengeStatus.ACCEPTED, now.plusSeconds(1))
+        try {
+            manager.start(challenge).get()
+            paper.performTicks(4)
+            manager.handleElimination(second)
+            paper.performTicks(10)
+            fireworks shouldBe emptyList()
+            repository.archival.complete(true)
+            paper.performTicks(2)
+            fireworks shouldBe listOf(first.uniqueId)
         } finally {
             manager.shutdown()
             plugin.config.set("arenas.example.enabled", false)

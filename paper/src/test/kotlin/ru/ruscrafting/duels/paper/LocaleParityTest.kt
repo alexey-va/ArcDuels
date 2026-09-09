@@ -145,6 +145,7 @@ private val OPTIONAL_FEEDBACK_KEYS =
     setOf(
         "controller.network-return",
         "session.restored",
+        "session.remote-recovery",
     )
 
 private val MAIN_MENU_DESCRIPTION_KEYS =

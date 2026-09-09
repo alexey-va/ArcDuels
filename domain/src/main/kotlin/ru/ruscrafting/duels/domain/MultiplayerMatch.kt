@@ -22,13 +22,28 @@ data class MultiplayerRules(
     val kitPolicy: MultiplayerKitPolicy,
     val sharedKitId: KitId? = null,
     val modifiers: CombatModifiers = CombatModifiers(),
+    val objective: DuelObjectiveType = DuelObjectiveType.ELIMINATION,
 ) {
     init {
         require((kitPolicy == MultiplayerKitPolicy.SHARED) == (sharedKitId != null)) {
             "A shared-kit match requires exactly one shared kit"
         }
+        require(
+            !objective.isHitRace ||
+                (!modifiers.projectiles && !modifiers.consumables && !modifiers.enderPearls && !modifiers.naturalRegeneration),
+        ) { "Hit-race objectives require locked combat-item modifiers" }
     }
 }
+
+fun defaultMultiplayerModifiers(objective: DuelObjectiveType): CombatModifiers =
+    if (objective.isHitRace || objective == DuelObjectiveType.SUMO) CombatModifiers(
+        projectiles = false,
+        consumables = false,
+        enderPearls = false,
+        naturalRegeneration = false,
+        suddenDeathAfterSeconds = if (objective == DuelObjectiveType.SUMO) 180 else 300,
+    )
+    else CombatModifiers()
 
 data class MultiplayerParticipant(
     val playerId: PlayerId,
@@ -144,6 +159,31 @@ data class MultiplayerMatch(
         }
     }
 
+    fun completeObjective(
+        winners: Set<PlayerId>,
+        winningTeam: Int?,
+        now: Instant,
+    ): MultiplayerMatch {
+        require(state == MultiplayerMatchState.ACTIVE) { "Only an active multiplayer match can complete an objective" }
+        require(winners.isNotEmpty() && winners.all(roster.playerIds::contains)) { "Objective winners must belong to the roster" }
+        require(winningTeam == null || roster.rules.layout != MultiplayerLayout.FREE_FOR_ALL) {
+            "FFA objective outcomes cannot have a winning team"
+        }
+        if (winningTeam != null) require(winners == roster.participants.filter { it.team == winningTeam }.mapTo(linkedSetOf()) { it.playerId }) {
+            "Objective winners must contain the whole winning team"
+        }
+        val losers = roster.playerIds - winners
+        return copy(
+            state = MultiplayerMatchState.COMPLETING,
+            activePlayers = emptySet(),
+            eliminationOrder = losers.toList(),
+            completedAt = now,
+            winners = winners,
+            winningTeam = winningTeam,
+            endReason = MatchEndReason.OBJECTIVE,
+        )
+    }
+
     fun markPersisted(): MultiplayerMatch {
         require(state == MultiplayerMatchState.COMPLETING) { "Only a completing multiplayer match can be finalized" }
         return copy(state = MultiplayerMatchState.COMPLETED)
@@ -233,7 +273,7 @@ data class MultiplayerMatchOutcome(
         require(winners.intersect(eliminationOrder.toSet()).isEmpty() || winningTeam != null) {
             "An FFA winner cannot also be eliminated"
         }
-        require(endReason in setOf(MatchEndReason.ELIMINATION, MatchEndReason.FORFEIT, MatchEndReason.DISCONNECT)) {
+        require(endReason in setOf(MatchEndReason.ELIMINATION, MatchEndReason.OBJECTIVE, MatchEndReason.FORFEIT, MatchEndReason.DISCONNECT)) {
             "A completed multiplayer outcome requires a gameplay reason"
         }
     }

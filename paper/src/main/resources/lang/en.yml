@@ -207,7 +207,7 @@ objective:
     description: ['<gray>Defeat your opponent in direct combat.</gray>', '<gray>Leaving arena bounds is a loss.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
   koth:
     name: '<gold>King of the hill</gold>'
-    description: ['<gray>Hold the marked arena objective.</gray>', '<gray>Capture pauses while both players contest it.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
+    description: ['<gray>Hold the marked arena objective.</gray>', '<gray>Capture pauses while opponents contest it.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
   sumo:
     name: '<gold>Sumo</gold>'
     description: ['<gray>Damage is disabled: knock your opponent</gray>', '<gray>outside the safe arena bounds.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
@@ -264,7 +264,7 @@ multiplayer:
   no-kits: '<red>A group match requires at least one configured kit.</red>'
   network-unavailable: '<red>Network group matches are currently unavailable.</red>'
   invalid-size: '<red>Select 3 to 12 participants and keep every team non-empty.</red>'
-  no-arena-capacity: '<#c42323>A <players>-player match cannot be created.</#c42323> <#8c8c8c>This server has no suitable group arena. Reduce the roster or choose another format.</#8c8c8c>'
+  no-arena-capacity: '<#c42323>A <players>-player match cannot be created.</#c42323> <#8c8c8c>No suitable group arena is available. Reduce the roster or choose another format.</#8c8c8c>'
   arenas-busy: '<#ff9f0f>All suitable group arenas are occupied.</#ff9f0f> <#8c8c8c>Try assembling the match again a little later.</#8c8c8c>'
   player-left: '<red>A participant left or became busy.</red>'
   invited: |-
@@ -299,7 +299,16 @@ multiplayer:
   defeat:
     title: '<red>Defeat</red>'
   finish:
-    subtitle: '<gray>Restoring your protected state</gray>'
+    subtitle: '<mode>'
+  result-win: '<green>Victory</green> <dark_gray>·</dark_gray> <mode>'
+  result-loss: '<red>Defeat</red> <dark_gray>·</dark_gray> <mode>'
+  forfeit-result: '<red>Defeat</red> <dark_gray>·</dark_gray> <gray>you left the arena</gray> <dark_gray>·</dark_gray> <mode>'
+  mode: '<objective> <dark_gray>·</dark_gray> <loadout>'
+  loadout-shared: '<gray>shared kit <white><kit></white></gray>'
+  loadout-personal: '<gray>personal kit <white><kit></white></gray>'
+  objective-progress: '<objective> <dark_gray>•</dark_gray> <white><own>/<target> <unit></white>'
+  progress-seconds: '<gray>seconds</gray>'
+  progress-hits: '<gray>hits</gray>'
   layout:
     free_for_all: '<white>free-for-all</white>'
     two_teams: '<white>two teams</white>'
@@ -320,9 +329,14 @@ multiplayer:
     layout-lore: ['<gray>Free-for-all, two teams, or three</gray>', '<gray>automatically balanced teams.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Cycle</#e6fff3>']
     kit-policy: '<gold>Kits: <value></gold>'
     kit-policy-lore: ['<gray>One kit for everyone or an individual</gray>', '<gray>choice for every participant.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Cycle</#e6fff3>']
+    objective: '<gold>Objective: <value></gold>'
+    objective-title: '<dark_gray>Group match · objective</dark_gray>'
+    objective-lore: ['<gray>Objective for every participant.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Choose</#e6fff3>']
+    objective-choice-lore: ['<gray>Choose this match objective.</gray>']
+    kit-title: '<dark_gray>Group match · kit</dark_gray>'
     readonly-lore: ['<gray>Selected by the host:</gray> <value>']
-    shared-kit-lore: ['<gray>Every participant receives this kit.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Next kit</#e6fff3>']
-    personal-kit-lore: ['<gray>This is your kit for the upcoming match.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Next kit</#e6fff3>']
+    shared-kit-lore: ['<gray>Every participant receives this kit.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Choose a kit</#e6fff3>']
+    personal-kit-lore: ['<gray>This is your kit for the upcoming match.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Choose a kit</#e6fff3>']
     shared-kit-readonly-lore: ['<gray>Every participant receives this kit.</gray>', '<dark_gray>Selected by the host.</dark_gray>']
     personal-kit-readonly-lore: ['<gray>This is your confirmed kit.</gray>', '<dark_gray>It can be changed before accepting.</dark_gray>']
     back-lore: ['', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Return to the main menu</#e6fff3>']
@@ -372,7 +386,7 @@ controller:
   failed: '<red>Could not process the duel challenge.</red>'
   network-unavailable: '<red>Network challenges are currently unavailable.</red>'
   no-network-arena: '<red>The selected arena is unavailable or does not support these rules.</red>'
-  network-transfer: '<#fff4d6>Challenge accepted.</#fff4d6><newline><#9aa7b5>Moving you to arena:</#9aa7b5> <server>'
+  network-transfer: '<#fff4d6>Challenge accepted.</#fff4d6><newline><#9aa7b5>Moving you to the arena…</#9aa7b5>'
   network-return: ''
   rematch-return: '<#2bba43>Rematch accepted.</#2bba43>'
   rematch-unavailable: '<#c42323>This match is unavailable for a rematch.</#c42323>'
@@ -388,12 +402,21 @@ controller:
   match-summary-series: |-
     <result> <dark_gray>·</dark_gray> <gray>score</gray> <#e6fff3><score></#e6fff3>
     <actions>
-  result-win: '<#2bba43>Victory</#2bba43> <gray>over</gray> <player>'
-  result-loss: '<#c42323>Defeat</#c42323> <gray>to</gray> <player>'
+  result-win: '<#2bba43>Victory</#2bba43> <gray>over</gray> <player> <dark_gray>•</dark_gray> <gray>mode</gray> <mode> <dark_gray>•</dark_gray> <reason>'
+  result-loss: '<#c42323>Defeat</#c42323> <gray>to</gray> <player> <dark_gray>•</dark_gray> <gray>mode</gray> <mode> <dark_gray>•</dark_gray> <reason>'
+  mode: '<objective> <dark_gray>·</dark_gray> <loadout>'
+  reason-opponent-elimination: '<gray>won in combat</gray>'
+  reason-opponent-objective: '<gray>completed the objective</gray>'
+  reason-opponent-forfeit: '<gray>opponent left the arena</gray>'
+  reason-opponent-disconnect: '<gray>opponent left the server</gray>'
+  reason-self-elimination: '<gray>lost in combat</gray>'
+  reason-self-objective: '<gray>the objective was completed</gray>'
+  reason-self-forfeit: '<gray>you left the arena</gray>'
+  reason-self-disconnect: '<gray>you left the server</gray>'
   rematch-action: '<#666666>[</#666666><#92bed8>▶</#92bed8><#666666>]</#666666> <#92bed8>Request rematch</#92bed8>'
   rematch-hover: '<#8c8c8c>The same rules and arena remain available for <seconds>s.</#8c8c8c>'
-  return-action: '<#666666>●</#666666> <#92bed8>Return to <server></#92bed8>'
-  return-hover: '<gray>Return to your origin server and verify your inventory</gray>'
+  return-action: '<#666666>●</#666666> <#92bed8>Return back</#92bed8>'
+  return-hover: '<gray>Return and verify your inventory</gray>'
   no-return-offer: '<gray>You have no pending duel return.</gray>'
   network-timeout: '<red>Both players could not be prepared for the duel in time.</red>'
   expired: '<gray>Your duel challenge with</gray> <white><player></white> <gray>expired.</gray>'
@@ -477,8 +500,8 @@ session:
   boundary-left-subtitle: '<#ffb347>You reached the arena boundary</#ffb347>'
   queued: '<yellow>All compatible arenas are busy. Your pair is queue position <white>#<position></white>.</yellow>'
   recovery-check-retry: '<red>The recovery check is temporarily unavailable.</red> <yellow>Your state is locked safely; ArcDuels will retry automatically.</yellow>'
-  remote-recovery: '<gray>Your unfinished recovery belongs to server <white><server></white>. Moving you there…</gray>'
-  remote-recovery-unavailable: '<yellow>Recovery is available on server <white><server></white>, but automatic transfer is currently unavailable.</yellow>'
+  remote-recovery: ''
+  remote-recovery-unavailable: '<yellow>Your duel recovery is ready, but automatic return is currently unavailable.</yellow>'
   recovery-requested: '<gray>Recovery is prepared. Wait for player data to finish loading.</gray>'
   recovering: '<yellow>Restoring your saved state from an unfinished duel…</yellow>'
   recovery-failed: '<red>State recovery failed. Contact an administrator; a protected copy of your inventory remains available.</red>'
@@ -509,7 +532,7 @@ session:
   command-blocked: '<red>This command is unavailable during a duel.</red> <gray>Forfeit with <white>/duel leave</white></gray>'
 
 network:
-  win: '<#32d6ff><winner></#32d6ff> <#9aa7b5>defeated</#9aa7b5> <#ff5ca8><loser></#ff5ca8> <#8795a5>• rating <rating></#8795a5>'
+  win: '<#32d6ff><winner></#32d6ff> <#9aa7b5>defeated</#9aa7b5> <#ff5ca8><loser></#ff5ca8> <#8795a5>• <mode> • rating <rating></#8795a5>'
 
 admin:
   no-permission: '<red>Missing permission <permission>.</red>'

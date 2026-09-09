@@ -26,6 +26,8 @@ import ru.arc.paper.menu.PaperMenuConfiguration
 import ru.arc.paper.menu.PaperMenuFrame
 import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.paper.menu.regionFrame
+import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
@@ -35,12 +37,15 @@ import ru.ruscrafting.duels.domain.MultiplayerLayout
 import ru.ruscrafting.duels.domain.MultiplayerParticipant
 import ru.ruscrafting.duels.domain.MultiplayerRoster
 import ru.ruscrafting.duels.domain.MultiplayerRules
+import ru.ruscrafting.duels.domain.defaultMultiplayerModifiers
+import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.redis.CrossServerGroupBus
 import ru.ruscrafting.duels.redis.CrossServerGroupMessage
 import ru.ruscrafting.duels.redis.GroupLobbyMessageType
 import ru.ruscrafting.duels.redis.GroupLobbyResponse
+import ru.ruscrafting.duels.redis.NetworkArenaDirectory
 import ru.ruscrafting.duels.redis.NetworkGroupParticipant
 import java.time.Clock
 import java.util.UUID
@@ -63,6 +68,7 @@ internal class MultiplayerGuiService(
     private val serverNames: ServerDisplayNames,
     private val groupBus: CrossServerGroupBus? = null,
     private val transfer: PlayerTransfer? = null,
+    private val arenaDirectory: NetworkArenaDirectory? = null,
     private val playerDataReady: (Player) -> Boolean = { true },
     private val clock: Clock = Clock.systemUTC(),
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
@@ -75,6 +81,7 @@ internal class MultiplayerGuiService(
         val selected: LinkedHashSet<UUID> = linkedSetOf(),
         var layout: MultiplayerLayout = MultiplayerLayout.FREE_FOR_ALL,
         var kitPolicy: MultiplayerKitPolicy = MultiplayerKitPolicy.SHARED,
+        var objective: DuelObjectiveType = DuelObjectiveType.ELIMINATION,
         var hostKit: KitId,
         var sharedKit: KitId,
         var page: Int = 0,
@@ -86,16 +93,18 @@ internal class MultiplayerGuiService(
         val members: List<NetworkGroupParticipant>,
         val layout: MultiplayerLayout,
         val kitPolicy: MultiplayerKitPolicy,
+        val objective: DuelObjectiveType,
         val sharedKit: KitId?,
         val acceptedKits: MutableMap<UUID, KitId>,
         val expiresAtEpochMillis: Long,
+        val arenaServer: ServerId = host.originServer,
         val ready: MutableSet<UUID> = mutableSetOf(),
         var phase: LobbyPhase = LobbyPhase.INVITING,
     ) {
         val hostId: UUID get() = host.playerId.value
         val participants: List<NetworkGroupParticipant> get() = listOf(host) + members
         val participantIds: List<UUID> get() = participants.map { it.playerId.value }
-        val networked: Boolean get() = participants.any { it.originServer != host.originServer }
+        val networked: Boolean get() = arenaServer != host.originServer || participants.any { it.originServer != host.originServer }
         fun accepted(playerId: UUID): Boolean = playerId in acceptedKits
     }
 
@@ -120,6 +129,8 @@ internal class MultiplayerGuiService(
     private val menuRuntime by menuRuntimeDelegate
     private val frameHolders = java.util.IdentityHashMap<PaperMenuFrame, MultiplayerHolder>()
     private val activeFrames = mutableMapOf<UUID, MultiplayerHolder>()
+    private val activeContents = mutableMapOf<UUID, ru.arc.paper.menu.PaperMenuContent>()
+    private val menuTransitions = mutableSetOf<UUID>()
 
     internal fun activeFlowCount(): Int {
         val openDrafts =
@@ -199,28 +210,38 @@ internal class MultiplayerGuiService(
         player.sendMessage(locales.notice(player, "multiplayer.invite-unavailable"))
     }
 
-    private fun handleClick(player: Player, holder: MultiplayerHolder, slot: Int) {
+    private fun handleClick(player: Player, holder: MultiplayerHolder, slot: Int, clickType: ClickType = ClickType.LEFT) {
         when (holder) {
-            is SetupHolder -> handleSetupClick(player, holder, slot)
-            is LobbyHolder -> handleLobbyClick(player, holder, slot)
-            is RemoteLobbyHolder -> handleRemoteLobbyClick(player, holder, slot)
+            is SetupHolder -> handleSetupClick(player, holder, slot, clickType)
+            is LobbyHolder -> handleLobbyClick(player, holder, slot, clickType)
+            is RemoteLobbyHolder -> handleRemoteLobbyClick(player, holder, slot, clickType)
+            is ChildHolder -> handleChildClick(player, holder, slot)
         }
     }
 
     @EventHandler
     fun onClose(event: InventoryCloseEvent) {
-        activeFrames.remove(event.player.uniqueId)
+        val holder = activeFrames.remove(event.player.uniqueId)
+        activeContents.remove(event.player.uniqueId)
+        if (holder is SetupHolder && menuTransitions.remove(event.player.uniqueId).not()) drafts.remove(holder.hostId)
+        if (holder is ChildHolder) {
+            plugin.server.scheduler.runTask(plugin, Runnable {
+                plugin.server.getPlayer(holder.hostId)?.let { player -> drafts[holder.hostId]?.let { openSetup(player, it) } }
+            })
+        }
     }
 
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         activeFrames.remove(event.player.uniqueId)
+        activeContents.remove(event.player.uniqueId)
+        menuTransitions.remove(event.player.uniqueId)
         drafts.remove(event.player.uniqueId)
         remoteInvites[event.player.uniqueId]?.let { invite ->
             if (!invite.preparing) publishResponse(invite.message, event.player.uniqueId, GroupLobbyResponse.DECLINED, null)
             remoteInvites.remove(event.player.uniqueId, invite)
         }
-        lobbyByPlayer[event.player.uniqueId]?.let(lobbies::get)?.takeIf { it.phase != LobbyPhase.STARTING }
+        lobbyByPlayer[event.player.uniqueId]?.let(lobbies::get)?.takeIf { it.phase == LobbyPhase.INVITING || (it.phase == LobbyPhase.PREPARING && event.player.uniqueId !in it.ready) }
             ?.let { cancelLobby(it, "multiplayer.player-left") }
     }
 
@@ -258,7 +279,18 @@ internal class MultiplayerGuiService(
         }
         if (shown.isEmpty()) inventory.setItem(22, item(player, Material.BARRIER, "multiplayer.menu.no-players"))
         inventory.setItem(28, item(player, layoutMaterial(draft.layout), "multiplayer.menu.layout", "multiplayer.menu.layout-lore", value(player, layoutKey(draft.layout))))
-        inventory.setItem(30, item(player, policyMaterial(draft.kitPolicy), "multiplayer.menu.kit-policy", "multiplayer.menu.kit-policy-lore", value(player, policyKey(draft.kitPolicy))))
+        val controlledObjective = draft.objective.controlledKit()
+        inventory.setItem(
+            30,
+            item(
+                player,
+                policyMaterial(draft.kitPolicy),
+                "multiplayer.menu.kit-policy",
+                if (controlledObjective == null) "multiplayer.menu.kit-policy-lore" else "multiplayer.menu.readonly-lore",
+                value(player, policyKey(draft.kitPolicy)),
+            ),
+        )
+        inventory.setItem(29, item(player, Material.TARGET, "multiplayer.menu.objective", "multiplayer.menu.objective-lore", value(player, objectiveKey(draft.objective))))
         val selectedKit = if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) draft.sharedKit else draft.hostKit
         inventory.setItem(32, kitButton(player, kits.get(selectedKit), draft.kitPolicy, interactive = true))
         val total = draft.selected.size + 1
@@ -291,7 +323,7 @@ internal class MultiplayerGuiService(
         show(player, inventory)
     }
 
-    private fun handleSetupClick(player: Player, holder: SetupHolder, slot: Int) {
+    private fun handleSetupClick(player: Player, holder: SetupHolder, slot: Int, clickType: ClickType) {
         val draft = drafts[holder.hostId] ?: return open(player)
         holder.players[slot]?.let { playerId ->
             if (!draft.selected.add(playerId)) draft.selected.remove(playerId)
@@ -307,13 +339,18 @@ internal class MultiplayerGuiService(
                 openSetup(player, draft)
             }
             30 -> {
-                draft.kitPolicy = if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) MultiplayerKitPolicy.PER_PLAYER else MultiplayerKitPolicy.SHARED
-                openSetup(player, draft)
+                if (draft.objective.controlledKit() == null) {
+                    draft.kitPolicy = if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) MultiplayerKitPolicy.PER_PLAYER else MultiplayerKitPolicy.SHARED
+                    openSetup(player, draft)
+                }
             }
             32 -> {
-                val next = nextKit(if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) draft.sharedKit else draft.hostKit)
-                if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) draft.sharedKit = next else draft.hostKit = next
-                openSetup(player, draft)
+                menuTransitions += player.uniqueId
+                openKitSelector(player, draft)
+            }
+            29 -> {
+                menuTransitions += player.uniqueId
+                openObjectiveSelector(player, draft)
             }
             34 -> createLobby(player, draft)
             36 -> {
@@ -347,7 +384,8 @@ internal class MultiplayerGuiService(
             return openSetup(host, draft)
         }
         val plannedRoster = roster(draft)
-        if (!sessions.hasArenaCapacity(plannedRoster)) {
+        val arenaServer = selectArenaServer(plannedRoster)
+        if (arenaServer == null) {
             DuelLog.info(
                 "multiplayer-lobby-refused",
                 host,
@@ -379,7 +417,7 @@ internal class MultiplayerGuiService(
             host.sendMessage(locales.notice(host, "multiplayer.player-left"))
             return openSetup(host, draft)
         }
-        if (memberProfiles.any { it.originServer != localServer } && (groupBus == null || transfer == null)) {
+        if ((arenaServer != localServer || memberProfiles.any { it.originServer != localServer }) && (groupBus == null || transfer == null)) {
             host.sendMessage(locales.notice(host, "multiplayer.network-unavailable"))
             return openSetup(host, draft)
         }
@@ -390,9 +428,11 @@ internal class MultiplayerGuiService(
             members = memberProfiles,
             layout = draft.layout,
             kitPolicy = draft.kitPolicy,
+            objective = draft.objective,
             sharedKit = draft.sharedKit.takeIf { draft.kitPolicy == MultiplayerKitPolicy.SHARED },
             acceptedKits = mutableMapOf(host.uniqueId to if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) draft.sharedKit else draft.hostKit),
             expiresAtEpochMillis = clock.millis() + invitationTimeoutMillis,
+            arenaServer = arenaServer,
         )
         lobbies[lobby.id] = lobby
         lobby.participantIds.forEach { lobbyByPlayer[it] = lobby.id }
@@ -418,6 +458,32 @@ internal class MultiplayerGuiService(
         }
         openLobby(host, lobby)
         scheduleLocalLobbyExpiry(lobby)
+    }
+
+    private fun selectArenaServer(roster: MultiplayerRoster): ServerId? {
+        if (sessions.hasArenaCapacity(roster)) return localServer
+        val requiredKits = roster.participants.map { it.kitId }.distinct()
+        return arenaDirectory?.activeNodes()?.asSequence()
+            ?.filter { node -> node.server != localServer && requiredKits.all { node.kitFingerprints[it] == kits.fingerprint(it) } }
+            ?.filter { node -> node.arenas.any { arena ->
+                arena.supports(DuelRules(DuelMode.KIT, requiredKits.first(), objective = roster.rules.objective,
+                    modifiers = if (roster.rules.objective.isHitRace) ru.ruscrafting.duels.domain.CombatModifiers(
+                        projectiles = false, consumables = false, enderPearls = false, naturalRegeneration = false,
+                    ) else ru.ruscrafting.duels.domain.CombatModifiers()))
+            } }
+            ?.sortedWith(compareByDescending<ru.ruscrafting.duels.redis.ArenaNodeStatus> { node -> node.arenas.any { it.available } }
+                .thenBy { it.queuedPairs }.thenBy { it.server.value })
+            ?.firstOrNull()?.server
+    }
+
+    private fun receiveArenaStartStatus(message: CrossServerGroupMessage) {
+        if (message.hostServer != localServer) return
+        val lobby = lobbies[message.lobbyId]?.takeIf { sameLobby(it, message) && it.phase == LobbyPhase.PREPARING } ?: return
+        if (message.type == GroupLobbyMessageType.STARTED) {
+            removeLobby(lobby)
+        } else {
+            cancelLobby(lobby, "multiplayer.start-failed")
+        }
     }
 
     private fun sendInvitation(
@@ -465,6 +531,7 @@ internal class MultiplayerGuiService(
         }
         inventory.setItem(28, item(player, layoutMaterial(lobby.layout), "multiplayer.menu.layout", "multiplayer.menu.readonly-lore", value(player, layoutKey(lobby.layout))))
         inventory.setItem(30, item(player, policyMaterial(lobby.kitPolicy), "multiplayer.menu.kit-policy", "multiplayer.menu.readonly-lore", value(player, policyKey(lobby.kitPolicy))))
+        inventory.setItem(29, item(player, Material.TARGET, "multiplayer.menu.objective", "multiplayer.menu.readonly-lore", value(player, objectiveKey(lobby.objective))))
         val chosen = lobby.sharedKit ?: lobby.acceptedKits[player.uniqueId] ?: provisionalKits[player.uniqueId] ?: kits.all().first().id
         val canChooseKit =
             lobby.kitPolicy == MultiplayerKitPolicy.PER_PLAYER &&
@@ -480,12 +547,15 @@ internal class MultiplayerGuiService(
         show(player, inventory)
     }
 
-    private fun handleLobbyClick(player: Player, holder: LobbyHolder, slot: Int) {
+    private fun handleLobbyClick(player: Player, holder: LobbyHolder, slot: Int, clickType: ClickType) {
         val lobby = lobbies[holder.lobbyId] ?: return open(player)
         if (expireLocalLobbyIfNeeded(lobby)) return
         when (slot) {
             32 -> if (lobby.kitPolicy == MultiplayerKitPolicy.PER_PLAYER && player.uniqueId != lobby.hostId && !lobby.accepted(player.uniqueId)) {
-                provisionalKits[player.uniqueId] = nextKit(provisionalKits[player.uniqueId] ?: kits.all().first().id)
+                provisionalKits[player.uniqueId] = cycleKit(
+                    provisionalKits[player.uniqueId] ?: kits.all().first().id,
+                    if (clickType.isRightClick) 1 else -1,
+                )
                 openLobby(player, lobby)
             }
             34 -> if (player.uniqueId != lobby.hostId && !lobby.accepted(player.uniqueId)) {
@@ -516,7 +586,7 @@ internal class MultiplayerGuiService(
         val online = lobby.participantIds.mapNotNull(plugin.server::getPlayer)
         if (online.size != lobby.participantIds.size || online.any(::busy)) return cancelLobby(lobby, "multiplayer.player-left")
         val roster = MultiplayerRoster(
-            MultiplayerRules(lobby.layout, lobby.kitPolicy, lobby.sharedKit),
+            MultiplayerRules(lobby.layout, lobby.kitPolicy, lobby.sharedKit, modifiers = defaultMultiplayerModifiers(lobby.objective), objective = lobby.objective),
             lobby.participantIds.mapIndexed { index, playerId ->
                 MultiplayerParticipant(
                     playerId = PlayerId(playerId),
@@ -569,7 +639,9 @@ internal class MultiplayerGuiService(
             player.sendMessage(locales.notice(player, "multiplayer.preparing"))
         }
         DuelLog.info("multiplayer-preparing", MatchId(lobby.id), "participants={}", lobby.participantIds.size)
-        duelSessions.expectNetworkPlayers(lobby.participants.filter { it.originServer != localServer }.map(NetworkGroupParticipant::playerId))
+        if (lobby.arenaServer == localServer) {
+            duelSessions.expectNetworkPlayers(lobby.participants.filter { it.originServer != localServer }.map(NetworkGroupParticipant::playerId))
+        }
         if (!publish(groupMessage(lobby, GroupLobbyMessageType.PREPARE))) {
             cancelLobby(lobby, "multiplayer.network-unavailable")
             return
@@ -583,6 +655,10 @@ internal class MultiplayerGuiService(
             if (lobbies[lobby.id] !== lobby || lobby.phase != LobbyPhase.PREPARING) return@runLater
             if (clock.millis() >= lobby.expiresAtEpochMillis) {
                 cancelLobby(lobby, "multiplayer.expired")
+                return@runLater
+            }
+            if (lobby.arenaServer != localServer) {
+                scheduleNetworkStartCheck(lobby)
                 return@runLater
             }
             val online = lobby.participantIds.mapNotNull(plugin.server::getPlayer)
@@ -629,7 +705,7 @@ internal class MultiplayerGuiService(
 
     private fun roster(lobby: Lobby): MultiplayerRoster =
         MultiplayerRoster(
-            MultiplayerRules(lobby.layout, lobby.kitPolicy, lobby.sharedKit),
+            MultiplayerRules(lobby.layout, lobby.kitPolicy, lobby.sharedKit, modifiers = defaultMultiplayerModifiers(lobby.objective), objective = lobby.objective),
             lobby.participantIds.mapIndexed { index, playerId ->
                 MultiplayerParticipant(
                     playerId = PlayerId(playerId),
@@ -646,6 +722,8 @@ internal class MultiplayerGuiService(
                 draft.layout,
                 draft.kitPolicy,
                 draft.sharedKit.takeIf { draft.kitPolicy == MultiplayerKitPolicy.SHARED },
+                modifiers = defaultMultiplayerModifiers(draft.objective),
+                objective = draft.objective,
             ),
             (listOf(draft.hostId) + draft.selected).mapIndexed { index, playerId ->
                 MultiplayerParticipant(
@@ -672,6 +750,7 @@ internal class MultiplayerGuiService(
             GroupLobbyMessageType.PREPARE -> receivePreparation(message)
             GroupLobbyMessageType.READY -> receiveReady(message)
             GroupLobbyMessageType.CANCEL -> receiveCancellation(message)
+            GroupLobbyMessageType.STARTED, GroupLobbyMessageType.START_FAILED -> receiveArenaStartStatus(message)
         }
     }
 
@@ -837,8 +916,8 @@ internal class MultiplayerGuiService(
                         recoverLatePreparation(message, player)
                         return@whenCompleteSync
                     }
-                    if (localServer != message.hostServer) {
-                        val transferResult = transfer?.connect(player, message.hostServer)
+                    if (localServer != message.arenaServer) {
+                        val transferResult = transfer?.connect(player, message.arenaServer)
                         if (transferResult != BackendTransferResult.SENT) {
                             DuelLog.warn(
                                 "multiplayer-transfer-failed",
@@ -913,18 +992,19 @@ internal class MultiplayerGuiService(
         }
         inventory.setItem(28, item(player, layoutMaterial(message.layout), "multiplayer.menu.layout", "multiplayer.menu.readonly-lore", value(player, layoutKey(message.layout))))
         inventory.setItem(30, item(player, policyMaterial(message.kitPolicy), "multiplayer.menu.kit-policy", "multiplayer.menu.readonly-lore", value(player, policyKey(message.kitPolicy))))
+        inventory.setItem(29, item(player, Material.TARGET, "multiplayer.menu.objective", "multiplayer.menu.readonly-lore", value(player, objectiveKey(message.objective))))
         inventory.setItem(32, kitButton(player, selectedKit, message.kitPolicy, interactive = message.kitPolicy == MultiplayerKitPolicy.PER_PLAYER && !invite.accepted))
         inventory.setItem(34, item(player, if (invite.accepted) Material.LIME_DYE else Material.LIME_CONCRETE, if (invite.accepted) "multiplayer.menu.accepted" else "multiplayer.menu.accept", if (invite.accepted) "multiplayer.menu.accepted-lore" else "multiplayer.menu.accept-lore"))
         inventory.setItem(36, item(player, Material.RED_CONCRETE, "multiplayer.menu.decline", "multiplayer.menu.cancel-lore"))
         show(player, inventory)
     }
 
-    private fun handleRemoteLobbyClick(player: Player, holder: RemoteLobbyHolder, slot: Int) {
+    private fun handleRemoteLobbyClick(player: Player, holder: RemoteLobbyHolder, slot: Int, clickType: ClickType) {
         val invite = remoteInvites[player.uniqueId]?.takeIf { it.message.lobbyId == holder.lobbyId } ?: return open(player)
         if (expireRemoteInviteIfNeeded(player, invite)) return
         when (slot) {
             32 -> if (invite.message.kitPolicy == MultiplayerKitPolicy.PER_PLAYER && !invite.accepted) {
-                invite.kitId = nextKit(invite.kitId)
+                invite.kitId = cycleKit(invite.kitId, if (clickType.isRightClick) 1 else -1)
                 openRemoteLobby(player, invite)
             }
             34 -> if (!invite.accepted) {
@@ -959,6 +1039,9 @@ internal class MultiplayerGuiService(
             lobbyId = lobby.id,
             hostId = lobby.host.playerId,
             hostServer = localServer,
+            arenaServer = lobby.arenaServer,
+            objective = lobby.objective,
+            participantKits = if (type == GroupLobbyMessageType.PREPARE) lobby.acceptedKits.mapKeys { PlayerId(it.key) } else emptyMap(),
             participants = lobby.participants,
             layout = lobby.layout,
             kitPolicy = lobby.kitPolicy,
@@ -1057,6 +1140,8 @@ internal class MultiplayerGuiService(
         lobby.id == message.lobbyId &&
             lobby.host.playerId == message.hostId &&
             lobby.host.originServer == message.hostServer &&
+            lobby.arenaServer == message.arenaServer &&
+            lobby.objective == message.objective &&
             lobby.participants == message.participants &&
             lobby.layout == message.layout &&
             lobby.kitPolicy == message.kitPolicy &&
@@ -1067,6 +1152,8 @@ internal class MultiplayerGuiService(
         offer.lobbyId == message.lobbyId &&
             offer.hostId == message.hostId &&
             offer.hostServer == message.hostServer &&
+            offer.arenaServer == message.arenaServer &&
+            offer.objective == message.objective &&
             offer.participants == message.participants &&
             offer.layout == message.layout &&
             offer.kitPolicy == message.kitPolicy &&
@@ -1136,10 +1223,56 @@ internal class MultiplayerGuiService(
     private fun busy(player: Player): Boolean =
         duelSessions.isEngaged(player) || duelSessions.isStateLocked(player) || sessions.isEngaged(player)
 
-    private fun nextKit(current: KitId): KitId {
+    private fun cycleKit(current: KitId, direction: Int): KitId {
         val all = kits.all()
         val index = all.indexOfFirst { it.id == current }
-        return all[(index + 1).mod(all.size)].id
+        return all[Math.floorMod(index + direction, all.size)].id
+    }
+
+    private fun openObjectiveSelector(player: Player, draft: Draft) {
+        val holder = ChildHolder(draft.hostId, ChildKind.OBJECTIVE)
+        val inventory = create(holder, locales.component(player, "multiplayer.menu.objective-title"))
+        DuelObjectiveType.entries.forEachIndexed { index, objective ->
+            val slot = CHILD_SLOTS[index]
+            holder.values[slot] = objective
+            inventory.setItem(slot, item(player, Material.TARGET, objectiveKey(objective), "multiplayer.menu.objective-choice-lore"))
+        }
+        inventory.setItem(36, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        show(player, inventory)
+    }
+
+    private fun openKitSelector(player: Player, draft: Draft) {
+        val holder = ChildHolder(draft.hostId, ChildKind.KIT)
+        val inventory = create(holder, locales.component(player, "multiplayer.menu.kit-title"))
+        kits.all().filter { kit -> draft.objective.controlledKit()?.let(kit.id::equals) ?: true }.take(CHILD_SLOTS.size).forEachIndexed { index, kit ->
+            val slot = CHILD_SLOTS[index]
+            holder.values[slot] = kit.id
+            inventory.setItem(slot, kitButton(player, kit, draft.kitPolicy, interactive = true))
+        }
+        inventory.setItem(36, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
+        show(player, inventory)
+    }
+
+    private fun handleChildClick(player: Player, holder: ChildHolder, slot: Int) {
+        val draft = drafts[holder.hostId] ?: return player.closeInventory()
+        if (slot == 36) return player.closeInventory()
+        when (holder.kind) {
+            ChildKind.OBJECTIVE -> (holder.values[slot] as? DuelObjectiveType)?.let { objective ->
+                val controlledKit = objective.controlledKit()
+                if (controlledKit == null || kits.contains(controlledKit)) {
+                    draft.objective = objective
+                    controlledKit?.let { kit ->
+                        draft.kitPolicy = MultiplayerKitPolicy.SHARED
+                        draft.sharedKit = kit
+                        draft.hostKit = kit
+                    }
+                }
+            }
+            ChildKind.KIT -> (holder.values[slot] as? KitId)?.let { kit ->
+                if (draft.kitPolicy == MultiplayerKitPolicy.SHARED) draft.sharedKit = kit else draft.hostKit = kit
+            }
+        }
+        player.closeInventory()
     }
 
     private fun teamsValid(draft: Draft, size: Int): Boolean = draft.layout.teamCount?.let { size >= it } ?: true
@@ -1208,14 +1341,21 @@ internal class MultiplayerGuiService(
 
     private fun show(player: Player, frame: PaperMenuFrame) {
         val holder = requireNotNull(frameHolders.remove(frame)) { "Multiplayer menu frame has no state holder" }
-        menuRuntime.open(player, holder.screen.id) {
-            val content = frame.content { slot, context -> handleClick(context.player, holder, slot) }
-            content.copy(
-                regions = content.regions.mapValues { (_, entries) ->
-                    entries.map { it.copy(acceptedClicks = MULTIPLAYER_MENU_CLICKS) }
-                },
-            )
+        val rendered = frame.content { slot, context -> handleClick(context.player, holder, slot, context.event.click) }
+        val content = rendered.copy(regions = rendered.regions.mapValues { (_, entries) ->
+                entries.map { it.copy(acceptedClicks = MULTIPLAYER_MENU_CLICKS) }
+            })
+        val current = activeFrames[player.uniqueId]
+        val session = menuRuntime.session(player)
+        if (current?.screen == holder.screen && session?.isOpen == true) {
+            activeFrames[player.uniqueId] = holder
+            activeContents[player.uniqueId] = content
+            session.refresh()
+            return
         }
+        activeContents.remove(player.uniqueId)
+        menuRuntime.open(player, holder.screen.id) { activeContents[player.uniqueId] ?: content }
+        activeContents[player.uniqueId] = content
         activeFrames[player.uniqueId] = holder
     }
 
@@ -1223,6 +1363,8 @@ internal class MultiplayerGuiService(
         menuLayouts.replace(candidate)
         frameHolders.clear()
         activeFrames.clear()
+        activeContents.clear()
+        menuTransitions.clear()
         if (menuRuntimeDelegate.isInitialized()) menuRuntime.replace(candidate)
     }
 
@@ -1230,6 +1372,7 @@ internal class MultiplayerGuiService(
         networkSubscription?.close()
         frameHolders.clear()
         activeFrames.clear()
+        activeContents.clear()
         if (menuRuntimeDelegate.isInitialized()) menuRuntime.close()
         remoteInvites.clear()
         preparationInFlight.clear()
@@ -1265,6 +1408,12 @@ internal class MultiplayerGuiService(
     private fun value(player: Player, key: String): LocaleValue = LocaleService.component("value", locales.component(player, key))
     private fun layoutKey(layout: MultiplayerLayout): String = "multiplayer.layout.${layout.name.lowercase()}"
     private fun policyKey(policy: MultiplayerKitPolicy): String = "multiplayer.kit-policy.${policy.name.lowercase()}"
+    private fun objectiveKey(objective: DuelObjectiveType): String = "objective.${objective.name.lowercase().replace("king_of_the_hill", "koth")}.name"
+    private fun DuelObjectiveType.controlledKit(): KitId? = when (this) {
+        DuelObjectiveType.SUMO -> KitId("sumo")
+        DuelObjectiveType.BOXING, DuelObjectiveType.COMBO -> KitId("boxing")
+        else -> null
+    }
     private fun layoutMaterial(layout: MultiplayerLayout): Material = when (layout) {
         MultiplayerLayout.FREE_FOR_ALL -> Material.TNT
         MultiplayerLayout.TWO_TEAMS -> Material.RED_WOOL
@@ -1284,14 +1433,21 @@ internal class MultiplayerGuiService(
     }
     private class LobbyHolder(val lobbyId: UUID) : MultiplayerHolder(ArcDuelsMenuScreen.MULTIPLAYER_LOBBY)
     private class RemoteLobbyHolder(val lobbyId: UUID) : MultiplayerHolder(ArcDuelsMenuScreen.MULTIPLAYER_REMOTE_LOBBY)
+    private enum class ChildKind { OBJECTIVE, KIT }
+    private class ChildHolder(val hostId: UUID, val kind: ChildKind) : MultiplayerHolder(
+        if (kind == ChildKind.OBJECTIVE) ArcDuelsMenuScreen.CATALOG_MODES else ArcDuelsMenuScreen.CATALOG_KITS,
+    ) {
+        val values = mutableMapOf<Int, Any>()
+    }
 
     private companion object {
         val MULTIPLAYER_MENU_CLICKS = DEFAULT_MENU_CLICKS + setOf(ClickType.SHIFT_LEFT, ClickType.SHIFT_RIGHT)
         const val INVITE_TIMEOUT_TICKS = 900L
         const val MAX_INVITE_TIMEOUT_TICKS = 12_000L
-        const val NETWORK_START_POLL_TICKS = 5L
+        const val NETWORK_START_POLL_TICKS = 1L
         val PLAYER_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22)
         val PARTICIPANT_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23)
+        val CHILD_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28)
     }
 }
 

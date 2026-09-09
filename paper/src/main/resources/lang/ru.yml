@@ -207,7 +207,7 @@ objective:
     description: ['<gray>Победи соперника в прямом бою.</gray>', '<gray>Выход за границу считается поражением.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
   koth:
     name: '<gold>Царь горы</gold>'
-    description: ['<gray>Удерживай отмеченную точку на арене.</gray>', '<gray>Если оба стоят на ней — захват спорный.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
+    description: ['<gray>Удерживай отмеченную точку на арене.</gray>', '<gray>При соперниках на точке захват не идёт.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
   sumo:
     name: '<gold>Сумо</gold>'
     description: ['<gray>Урон отключён: вытолкни соперника</gray>', '<gray>за безопасные границы арены.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
@@ -264,7 +264,7 @@ multiplayer:
   no-kits: '<#c42323>Для группового матча нужен хотя бы один настроенный кит.</#c42323>'
   network-unavailable: '<#c42323>Сетевые групповые матчи сейчас недоступны.</#c42323>'
   invalid-size: '<#c42323>Выбери от 3 до 12 участников и оставь непустые команды.</#c42323>'
-  no-arena-capacity: '<#c42323>Матч на <players> игроков нельзя создать.</#c42323> <#8c8c8c>На этом сервере нет подходящей групповой арены. Уменьши состав или выбери другой формат.</#8c8c8c>'
+  no-arena-capacity: '<#c42323>Матч на <players> игроков нельзя создать.</#c42323> <#8c8c8c>Нет подходящей групповой арены. Уменьши состав или выбери другой формат.</#8c8c8c>'
   arenas-busy: '<#ffb347>Все подходящие групповые арены заняты.</#ffb347> <#8c8c8c>Попробуй собрать матч ещё раз немного позже.</#8c8c8c>'
   player-left: '<#c42323>Один из участников вышел или уже занят.</#c42323>'
   invited: |-
@@ -299,7 +299,16 @@ multiplayer:
   defeat:
     title: '<#c42323>Поражение</#c42323>'
   finish:
-    subtitle: '<#8c8c8c>Возвращаю твоё состояние</#8c8c8c>'
+    subtitle: '<mode>'
+  result-win: '<#2bba43>Победа</#2bba43> <#666666>·</#666666> <mode>'
+  result-loss: '<#c42323>Поражение</#c42323> <#666666>·</#666666> <mode>'
+  forfeit-result: '<#c42323>Поражение</#c42323> <#666666>·</#666666> <#8c8c8c>ты покинул арену</#8c8c8c> <#666666>·</#666666> <mode>'
+  mode: '<objective> <#666666>·</#666666> <loadout>'
+  loadout-shared: '<#8c8c8c>общий кит <#e6fff3><kit></#e6fff3></#8c8c8c>'
+  loadout-personal: '<#8c8c8c>личный кит <#e6fff3><kit></#e6fff3></#8c8c8c>'
+  objective-progress: '<objective> <dark_gray>•</dark_gray> <white><own>/<target> <unit></white>'
+  progress-seconds: '<gray>сек</gray>'
+  progress-hits: '<gray>ударов</gray>'
   layout:
     free_for_all: '<white>каждый за себя</white>'
     two_teams: '<white>две команды</white>'
@@ -320,9 +329,14 @@ multiplayer:
     layout-lore: ['<gray>Каждый за себя, две или три</gray>', '<gray>автоматически сбалансированные команды.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
     kit-policy: '<gold>Киты: <value></gold>'
     kit-policy-lore: ['<gray>Один набор для всех либо личный</gray>', '<gray>выбор каждого участника.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Переключить</#e6fff3>']
+    objective: '<gold>Цель: <value></gold>'
+    objective-title: '<dark_gray>Групповой матч · цель</dark_gray>'
+    objective-lore: ['<gray>Цель для всех участников.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — выбрать</#e6fff3>']
+    objective-choice-lore: ['<gray>Выбрать эту цель матча.</gray>']
+    kit-title: '<dark_gray>Групповой матч · набор</dark_gray>'
     readonly-lore: ['<gray>Выбрано организатором:</gray> <value>']
-    shared-kit-lore: ['<gray>Этот набор получат все участники.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Следующий кит</#e6fff3>']
-    personal-kit-lore: ['<gray>Это твой набор в предстоящем матче.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Следующий кит</#e6fff3>']
+    shared-kit-lore: ['<gray>Этот набор получат все участники.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — выбрать набор</#e6fff3>']
+    personal-kit-lore: ['<gray>Это твой набор в предстоящем матче.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — выбрать набор</#e6fff3>']
     shared-kit-readonly-lore: ['<gray>Этот набор получат все участники.</gray>', '<dark_gray>Выбрано организатором.</dark_gray>']
     personal-kit-readonly-lore: ['<gray>Это твой подтверждённый набор.</gray>', '<dark_gray>Изменить его можно до подтверждения.</dark_gray>']
     back-lore: ['', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Вернуться в главное меню</#e6fff3>']
@@ -372,7 +386,7 @@ controller:
   failed: '<#c42323>Не удалось обработать вызов на дуэль.</#c42323>'
   network-unavailable: '<#c42323>Сетевые вызовы сейчас недоступны.</#c42323>'
   no-network-arena: '<#c42323>Выбранная арена недоступна или не поддерживает эти правила.</#c42323>'
-  network-transfer: '<#fff4d6>Вызов принят.</#fff4d6><newline><#9aa7b5>Перемещаю на арену:</#9aa7b5> <server>'
+  network-transfer: '<#fff4d6>Вызов принят.</#fff4d6><newline><#9aa7b5>Перемещаю на арену…</#9aa7b5>'
   network-return: ''
   rematch-return: '<#2bba43>Реванш принят.</#2bba43>'
   rematch-unavailable: '<#c42323>Этот бой недоступен для реванша.</#c42323>'
@@ -388,12 +402,21 @@ controller:
   match-summary-series: |-
     <result> <#666666>·</#666666> <#8c8c8c>счёт</#8c8c8c> <#e6fff3><score></#e6fff3>
     <actions>
-  result-win: '<#2bba43>Победа</#2bba43> <#8c8c8c>над</#8c8c8c> <player>'
-  result-loss: '<#c42323>Поражение</#c42323> <#8c8c8c>от</#8c8c8c> <player>'
+  result-win: '<#2bba43>Победа</#2bba43> <#8c8c8c>над</#8c8c8c> <player> <#666666>•</#666666> <#8c8c8c>режим</#8c8c8c> <mode> <#666666>•</#666666> <reason>'
+  result-loss: '<#c42323>Поражение</#c42323> <#8c8c8c>от</#8c8c8c> <player> <#666666>•</#666666> <#8c8c8c>режим</#8c8c8c> <mode> <#666666>•</#666666> <reason>'
+  mode: '<objective> <#666666>·</#666666> <loadout>'
+  reason-opponent-elimination: '<#8c8c8c>победа в бою</#8c8c8c>'
+  reason-opponent-objective: '<#8c8c8c>цель выполнена</#8c8c8c>'
+  reason-opponent-forfeit: '<#8c8c8c>соперник покинул арену</#8c8c8c>'
+  reason-opponent-disconnect: '<#8c8c8c>соперник вышел с сервера</#8c8c8c>'
+  reason-self-elimination: '<#8c8c8c>поражение в бою</#8c8c8c>'
+  reason-self-objective: '<#8c8c8c>цель выполнена соперником</#8c8c8c>'
+  reason-self-forfeit: '<#8c8c8c>ты покинул арену</#8c8c8c>'
+  reason-self-disconnect: '<#8c8c8c>ты вышел с сервера</#8c8c8c>'
   rematch-action: '<#666666>[</#666666><#92bed8>▶</#92bed8><#666666>]</#666666> <#92bed8>Предложить реванш</#92bed8>'
   rematch-hover: '<#8c8c8c>Те же правила и арена доступны <seconds> с.</#8c8c8c>'
-  return-action: '<#666666>●</#666666> <#92bed8>Вернуться на <server></#92bed8>'
-  return-hover: '<#8c8c8c>Вернуться на исходный сервер и проверить вещи</#8c8c8c>'
+  return-action: '<#666666>●</#666666> <#92bed8>Вернуться назад</#92bed8>'
+  return-hover: '<#8c8c8c>Вернуться и проверить вещи</#8c8c8c>'
   no-return-offer: '<#8c8c8c>Сейчас нет ожидающего возврата после дуэли.</#8c8c8c>'
   network-timeout: '<#c42323>Не удалось вовремя подготовить обоих игроков к дуэли.</#c42323>'
   expired: '<#8c8c8c>Вызов на дуэль с</#8c8c8c> <#e6fff3><player></#e6fff3> <#8c8c8c>истёк.</#8c8c8c>'
@@ -476,8 +499,8 @@ session:
   boundary-left-subtitle: '<#ffb347>Вы достигли границы арены</#ffb347>'
   queued: '<yellow>Все совместимые арены заняты. Ваша пара в очереди: <white>#<position></white>.</yellow>'
   recovery-check-retry: '<red>Проверка восстановления временно недоступна.</red> <yellow>Состояние надёжно заблокировано; ArcDuels повторит попытку автоматически.</yellow>'
-  remote-recovery: '<gray>Незавершённое восстановление находится на сервере <white><server></white>. Перемещаю тебя туда…</gray>'
-  remote-recovery-unavailable: '<yellow>Восстановление доступно на сервере <white><server></white>, но автоматическое перемещение сейчас недоступно.</yellow>'
+  remote-recovery: ''
+  remote-recovery-unavailable: '<yellow>Восстановление дуэли готово, но автоматический возврат сейчас недоступен.</yellow>'
   recovery-requested: '<gray>Восстановление подготовлено. Дождись полной загрузки данных игрока.</gray>'
   recovering: '<yellow>Восстанавливаю сохранённое состояние после незавершённой дуэли…</yellow>'
   recovery-failed: '<red>Состояние не восстановлено. Обратись к администратору; защищённая копия инвентаря сохранена.</red>'
@@ -508,7 +531,7 @@ session:
   command-blocked: '<red>Эта команда недоступна во время дуэли.</red> <gray>Сдаться: <white>/duel leave</white></gray>'
 
 network:
-  win: '<#32d6ff><winner></#32d6ff> <#9aa7b5>побеждает</#9aa7b5> <#ff5ca8><loser></#ff5ca8> <#8795a5>• рейтинг <rating></#8795a5>'
+  win: '<#32d6ff><winner></#32d6ff> <#9aa7b5>побеждает</#9aa7b5> <#ff5ca8><loser></#ff5ca8> <#8795a5>• <mode> • рейтинг <rating></#8795a5>'
 
 admin:
   no-permission: '<red>Нет права <permission>.</red>'

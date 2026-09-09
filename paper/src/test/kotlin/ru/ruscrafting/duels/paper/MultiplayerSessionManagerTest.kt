@@ -64,7 +64,7 @@ class MultiplayerSessionManagerTest : StringSpec({
                 harness.players.forEachIndexed { index, player ->
                     harness.manager.isEngaged(player) shouldBe false
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.location.blockX shouldBe index
+                    player.world.name shouldBe "world"
                 }
                 harness.results.writes shouldHaveSize 0
             } finally {
@@ -114,7 +114,7 @@ class MultiplayerSessionManagerTest : StringSpec({
                 harness.players.forEachIndexed { index, player ->
                     harness.manager.isEngaged(player) shouldBe false
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.location.blockX shouldBe index
+                    player.world.name shouldBe "world"
                 }
                 harness.results.writes shouldHaveSize 0
             }
@@ -168,7 +168,7 @@ class MultiplayerSessionManagerTest : StringSpec({
                 harness.players.forEachIndexed { index, player ->
                     harness.manager.isEngaged(player) shouldBe false
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.location.blockX shouldBe index
+                    player.world.name shouldBe "world"
                 }
             }
         }
@@ -208,15 +208,15 @@ class MultiplayerSessionManagerTest : StringSpec({
                 paper.performTicks(64)
 
                 harness.manager.activeCount() shouldBe 0
-                repository.pendingCount() shouldBe 0
-                repository.retainedCount() shouldBe harness.players.size
+                repository.pendingCount() shouldBe harness.players.size
+                repository.retainedCount() shouldBe 0
                 returned shouldHaveSize harness.players.size
                 harness.players.forEach { player ->
                     returned.count { it == player.uniqueId to origin } shouldBe 1
                 }
                 harness.players.forEachIndexed { index, player ->
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.location.blockX shouldBe index
+                    player.world.name shouldBe "world"
                 }
             }
         }
@@ -266,8 +266,48 @@ class MultiplayerSessionManagerTest : StringSpec({
                 expectedRemotePlayers.forEach { playerId ->
                     returned.count { it == playerId to remote } shouldBe 1
                 }
-                repository.pendingCount() shouldBe 0
-                repository.retainedCount() shouldBe harness.players.size
+                repository.pendingCount() shouldBe 2
+                repository.retainedCount() shouldBe 2
+            }
+        }
+    }
+
+    "network arena restores its local baseline and never retains foreign escrow" {
+        withManagerScenario { paper ->
+            val repository = InMemoryEscrowRepository()
+            val returned = mutableListOf<Pair<java.util.UUID, ServerId>>()
+            multiplayerHarness(
+                paper,
+                escrowRepository = repository,
+                networkReturn = { player, server -> returned += player.uniqueId to server },
+            ).use { harness ->
+                val matchId = MatchId.random()
+                val local = ServerId("group-test")
+                val remote = ServerId("survival")
+                val roster = ffaRoster(harness.players)
+                val origins = roster.playerIds.mapIndexed { index, playerId ->
+                    playerId to if (index == 0) local else remote
+                }.toMap()
+                harness.players.forEachIndexed { index, player ->
+                    DurablePlayerStateService(harness.plugin, if (index == 0) local else remote, repository)
+                        .store(matchId, player, inventoryReplaced = true)
+                        .get()
+                    player.inventory.setItem(0, org.bukkit.inventory.ItemStack(Material.GOLDEN_APPLE))
+                }
+
+                harness.manager.startNetwork(matchId, roster, harness.players.associateBy { PlayerId(it.uniqueId) }, origins)
+                paper.performTicks(4)
+                harness.teleports.completeAll()
+                paper.performTicks(4)
+                harness.players.dropLast(1).forEach(harness.manager::eliminate)
+                harness.results.completion.complete(true)
+                paper.performTicks(64)
+
+                harness.manager.activeCount() shouldBe 0
+                repository.retainedCount() shouldBe 1
+                repository.pendingCount() shouldBe 3
+                returned shouldHaveSize 3
+                harness.players.drop(1).forEach { it.inventory.getItem(0)?.type shouldBe Material.GOLDEN_APPLE }
             }
         }
     }
@@ -295,7 +335,7 @@ class MultiplayerSessionManagerTest : StringSpec({
                 harness.players.forEachIndexed { index, player ->
                     harness.manager.isEngaged(player) shouldBe false
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.location.blockX shouldBe index
+                    player.world.name shouldBe "world"
                 }
             }
         }
@@ -315,7 +355,7 @@ class MultiplayerSessionManagerTest : StringSpec({
                 harness.manager.activeCount() shouldBe 0
                 harness.players.forEachIndexed { index, player ->
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.location.blockX shouldBe index
+                    player.world.name shouldBe "world"
                 }
             }
         }
@@ -340,7 +380,7 @@ class MultiplayerSessionManagerTest : StringSpec({
                 repository.pendingCount() shouldBe 0
                 harness.players.forEachIndexed { index, player ->
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.location.blockX shouldBe index
+                    player.world.name shouldBe "world"
                 }
             }
         }
@@ -366,6 +406,46 @@ class MultiplayerSessionManagerTest : StringSpec({
                 repository.retainedCount() shouldBe harness.players.size
                 harness.players.forEachIndexed { index, player ->
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
+                }
+            }
+        }
+    }
+
+    "network chunk failure restores the arena baseline without retaining foreign escrow" {
+        withManagerScenario { paper ->
+            val chunks = RecordingChunkTickets(failOnAddCall = 1)
+            val repository = InMemoryEscrowRepository()
+            val returned = mutableListOf<Pair<java.util.UUID, ServerId>>()
+            multiplayerHarness(
+                paper,
+                escrowRepository = repository,
+                chunkTickets = chunks,
+                networkReturn = { player, server -> returned += player.uniqueId to server },
+            ).use { harness ->
+                val matchId = MatchId.random()
+                val origin = ServerId("survival")
+                val roster = ffaRoster(harness.players)
+                val online = harness.players.associateBy { PlayerId(it.uniqueId) }
+                val origins = roster.playerIds.associateWith { origin }
+                DurablePlayerStateService(harness.plugin, origin, repository)
+                    .storeAll(matchId, harness.players, inventoryReplaced = true)
+                    .get()
+                harness.players.forEach { player ->
+                    player.inventory.setItem(0, org.bukkit.inventory.ItemStack(Material.DIRT))
+                }
+
+                val started = harness.manager.startNetwork(matchId, roster, online, origins)
+                paper.performTicks(8)
+
+                started.isCompletedExceptionally shouldBe true
+                harness.manager.activeCount() shouldBe 0
+                harness.arenas.reservedCount() shouldBe 0
+                harness.tickets.activeLeaseCount shouldBe 0
+                repository.pendingCount() shouldBe harness.players.size
+                repository.retainedCount() shouldBe 0
+                returned shouldHaveSize 0
+                harness.players.forEach { player ->
+                    player.inventory.getItem(0)?.type shouldBe Material.DIRT
                 }
             }
         }

@@ -72,6 +72,7 @@ class DuelGuiService internal constructor(
     private val menuRuntime by menuRuntimeDelegate
     private val frameHolders = java.util.IdentityHashMap<PaperMenuFrame, MenuHolder>()
     private val activeFrames = mutableMapOf<UUID, MenuHolder>()
+    private val activeContents = mutableMapOf<UUID, ru.arc.paper.menu.PaperMenuContent>()
 
     /** Visible menus that retain kit or arena ids from one catalog generation. */
     internal fun activeConfigurationFlowCount(): Int =
@@ -815,11 +816,13 @@ class DuelGuiService internal constructor(
         pendingArenaNames.remove(event.player.uniqueId)
         asyncMenuRequests.invalidate(event.player.uniqueId)
         activeFrames.remove(event.player.uniqueId)
+        activeContents.remove(event.player.uniqueId)
     }
 
     @EventHandler
     fun onClose(event: InventoryCloseEvent) {
         if (activeFrames.remove(event.player.uniqueId) != null) asyncMenuRequests.invalidate(event.player.uniqueId)
+        activeContents.remove(event.player.uniqueId)
     }
 
     private fun promptArenaName(player: Player) {
@@ -1163,16 +1166,23 @@ class DuelGuiService internal constructor(
 
     private fun show(player: Player, frame: PaperMenuFrame) {
         val holder = requireNotNull(frameHolders.remove(frame)) { "Duel menu frame has no state holder" }
-        menuRuntime.open(player, holder.screen.id) {
-            val content = frame.content { slot, context ->
-                handleClick(context.player, holder, slot, context.event.isShiftClick, context.event.isRightClick)
-            }
-            content.copy(
-                regions = content.regions.mapValues { (_, entries) ->
-                    entries.map { it.copy(acceptedClicks = DUEL_MENU_CLICKS) }
-                },
-            )
+        val rendered = frame.content { slot, context ->
+            handleClick(context.player, holder, slot, context.event.isShiftClick, context.event.isRightClick)
         }
+        val content = rendered.copy(regions = rendered.regions.mapValues { (_, entries) ->
+                entries.map { it.copy(acceptedClicks = DUEL_MENU_CLICKS) }
+            })
+        val current = activeFrames[player.uniqueId]
+        val session = menuRuntime.session(player)
+        if (current?.screen == holder.screen && session?.isOpen == true) {
+            activeFrames[player.uniqueId] = holder
+            activeContents[player.uniqueId] = content
+            session.refresh()
+            return
+        }
+        activeContents.remove(player.uniqueId)
+        menuRuntime.open(player, holder.screen.id) { activeContents[player.uniqueId] ?: content }
+        activeContents[player.uniqueId] = content
         activeFrames[player.uniqueId] = holder
     }
 
@@ -1186,6 +1196,7 @@ class DuelGuiService internal constructor(
     override fun close() {
         frameHolders.clear()
         activeFrames.clear()
+        activeContents.clear()
         if (menuRuntimeDelegate.isInitialized()) menuRuntime.close()
     }
 
