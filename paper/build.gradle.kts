@@ -14,10 +14,12 @@ dependencies {
     implementation("ru.ruscrafting.arc:arc-core-sql:2.5.0")
     implementation("ru.ruscrafting.arc:arc-core-redis:2.5.0")
     implementation("ru.ruscrafting.arc:arc-core-menu:2.5.0")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("net.william278.husksync:husksync-bukkit:3.8.7+1.21.8")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.5.0")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     testImplementation("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
 }
 
