@@ -384,15 +384,13 @@ controller:
   rematch-pending: '<#8c8c8c>Запрос на реванш уже ожидает ответа соперника.</#8c8c8c>'
   match-summary-single: |-
     <result>
-
     <actions>
   match-summary-series: |-
     <result> <#666666>·</#666666> <#8c8c8c>счёт</#8c8c8c> <#e6fff3><score></#e6fff3>
-
     <actions>
   result-win: '<#2bba43>Победа</#2bba43> <#8c8c8c>над</#8c8c8c> <player>'
   result-loss: '<#c42323>Поражение</#c42323> <#8c8c8c>от</#8c8c8c> <player>'
-  rematch-action: '<#666666>●</#666666> <#92bed8>Предложить реванш</#92bed8>'
+  rematch-action: '<#666666>[</#666666><#92bed8>▶</#92bed8><#666666>]</#666666> <#92bed8>Предложить реванш</#92bed8>'
   rematch-hover: '<#8c8c8c>Те же правила и арена доступны <seconds> с.</#8c8c8c>'
   return-action: '<#666666>●</#666666> <#92bed8>Вернуться на <server></#92bed8>'
   return-hover: '<#8c8c8c>Вернуться на исходный сервер и проверить вещи</#8c8c8c>'

@@ -384,15 +384,13 @@ controller:
   rematch-pending: '<#8c8c8c>Your rematch request is already waiting for the opponent.</#8c8c8c>'
   match-summary-single: |-
     <result>
-
     <actions>
   match-summary-series: |-
     <result> <dark_gray>·</dark_gray> <gray>score</gray> <#e6fff3><score></#e6fff3>
-
     <actions>
   result-win: '<#2bba43>Victory</#2bba43> <gray>over</gray> <player>'
   result-loss: '<#c42323>Defeat</#c42323> <gray>to</gray> <player>'
-  rematch-action: '<#666666>●</#666666> <#92bed8>Request rematch</#92bed8>'
+  rematch-action: '<#666666>[</#666666><#92bed8>▶</#92bed8><#666666>]</#666666> <#92bed8>Request rematch</#92bed8>'
   rematch-hover: '<#8c8c8c>The same rules and arena remain available for <seconds>s.</#8c8c8c>'
   return-action: '<#666666>●</#666666> <#92bed8>Return to <server></#92bed8>'
   return-hover: '<gray>Return to your origin server and verify your inventory</gray>'

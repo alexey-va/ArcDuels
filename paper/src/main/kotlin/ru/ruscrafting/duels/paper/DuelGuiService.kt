@@ -511,7 +511,7 @@ class DuelGuiService internal constructor(
             }
         val availableKits = controlledKit?.let { required -> kits.all().filter { it.id.value == required } } ?: kits.all()
         val controlledOnly = controlledKit != null
-        val kitSlots = if (controlledOnly) CONTENT_SLOTS else CONTENT_SLOTS.filter { it != 32 }
+        val kitSlots = CONTENT_SLOTS
         val page = pageWindow(availableKits, requestedPage, kitSlots.size)
         val holder = LoadoutMenuHolder(target, objective, page.index, page.hasPrevious, page.hasNext)
         val inventory = create(holder, locales.component(player, "menu.loadouts.title"))
@@ -521,8 +521,8 @@ class DuelGuiService internal constructor(
             inventory.setItem(slot, kitItem(player, kit))
         }
         if (!controlledOnly) {
-            holder.ownInventorySlot = 32
-            inventory.setItem(32, item(player, Material.BUNDLE, "menu.loadouts.own", "menu.loadouts.own-lore"))
+            holder.ownInventorySlot = 4
+            inventory.setItem(4, item(player, Material.BUNDLE, "menu.loadouts.own", "menu.loadouts.own-lore"))
         } else if (availableKits.isEmpty()) {
             inventory.setItem(22, item(player, Material.BARRIER, "menu.loadouts.controlled-missing", resolvers = arrayOf(LocaleService.text("kit", controlledKit))))
         }

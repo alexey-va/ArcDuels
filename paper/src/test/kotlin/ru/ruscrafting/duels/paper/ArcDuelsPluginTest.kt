@@ -617,7 +617,7 @@ class ArcDuelsPluginTest : StringSpec({
         val singleRoundPlain = PlainTextComponentSerializer.plainText().serialize(singleRoundCard)
         singleRoundPlain.contains("Победа над SummaryLoser") shouldBe true
         singleRoundPlain.contains("счёт") shouldBe false
-        singleRoundPlain.contains("\n  \n  ● Предложить реванш") shouldBe true
+        singleRoundPlain.contains("Победа над SummaryLoser\n  [▶] Предложить реванш") shouldBe true
         controller.close()
     }
 
@@ -924,6 +924,9 @@ class ArcDuelsPluginTest : StringSpec({
         player.openInventory.topInventory.getItem(13)?.type shouldBe Material.BEACON
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 13)
         player.openInventory.topInventory.getItem(10)?.type shouldBe Material.BOW
+        player.openInventory.topInventory.getItem(4)?.type shouldBe Material.BUNDLE
+        requireNotNull(player.openInventory.topInventory.getItem(4)?.itemMeta?.displayName())
+            .decoration(TextDecoration.ITALIC) shouldBe TextDecoration.State.FALSE
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 10)
         player.openInventory.topInventory.getItem(31)?.type shouldBe Material.BEACON
         player.openInventory.topInventory.getItem(38)?.type shouldBe Material.ENCHANTED_BOOK

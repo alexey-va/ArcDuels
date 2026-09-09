@@ -890,6 +890,7 @@ class DuelSessionManager internal constructor(
         recoveryTokens.remove(player.uniqueId)
         remoteRecoveryTokens.remove(player.uniqueId)
         networkLobbyPlayers -= player.uniqueId
+        playerStates.forgetRemotePending(player.uniqueId)
         pendingStarts[player.uniqueId]?.cancel(false)
         val match = matchFor(player)
         if (match == null) {

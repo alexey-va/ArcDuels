@@ -174,6 +174,12 @@ internal class DurablePlayerStateService(
 
     fun pendingCount(): Int = pending.size
 
+    /** Drops an arena host's borrowed cache on disconnect; the origin keeps durable recovery ownership. */
+    fun forgetRemotePending(playerId: UUID) {
+        val escrow = pending[playerId] ?: return
+        if (!isLocal(escrow)) pending.remove(playerId, escrow)
+    }
+
     fun discover(playerId: UUID): CompletableFuture<PlayerStateEscrow?> {
         val cached = pending[playerId]
         return repository.findPending(PlayerId(playerId)).handle { escrow, failure ->

@@ -200,6 +200,53 @@ class DurablePlayerStateServiceTest : StringSpec({
         stored.getValue(second.uniqueId).escrow.inventoryReplaced shouldBe false
     }
 
+    "leaving an arena drops only its remote escrow cache before the next network match" {
+        val repository = GatedEscrowRepository().apply { commit.complete(Unit) }
+        val origin = DurablePlayerStateService(plugin, ServerId("survival"), repository)
+        val host = DurablePlayerStateService(plugin, ServerId("spawn"), repository)
+        val first = server.addPlayer()
+        val second = server.addPlayer()
+        val priorMatch = MatchId.random()
+        origin.storePair(priorMatch, first, second, inventoryReplaced = false).get()
+        val origins = listOf(first, second).associate { PlayerId(it.uniqueId) to ServerId("survival") }
+        host.findMatchSnapshots(priorMatch, origins).get()
+        val arenas = PaperArenaCatalog.load(plugin)
+        val sessions = DuelSessionManager(
+            plugin,
+            MatchCoordinator(ServerId("spawn"), arenas, InMemoryStatisticsRepository()),
+            arenas,
+            KitRegistry.load(plugin),
+            host,
+            LocaleService.load(plugin),
+            countdownSeconds = 0,
+            playerDataSaver = {},
+        )
+
+        sessions.isStateLocked(first) shouldBe true
+        sessions.handleQuit(first)
+        sessions.handleQuit(second)
+
+        host.pendingCount() shouldBe 0
+        origin.forgetRemotePending(first.uniqueId)
+        origin.isPending(first.uniqueId) shouldBe true
+        repository.findPending(PlayerId(first.uniqueId)).get()?.matchId shouldBe priorMatch
+        repository.retentionCalls shouldBe 0
+        sessions.isStateLocked(first) shouldBe false
+
+        // The next transfer suppresses join recovery; no old cache may block it.
+        sessions.expectNetworkPlayers(origins.keys)
+        sessions.handleJoin(first)
+        sessions.isStateLocked(first) shouldBe false
+        acceptedMatchDecision(listOf(first, second).map {
+            AcceptedParticipantReadiness(
+                stateLocked = sessions.isStateLocked(it),
+                playerDataReady = true,
+                engaged = sessions.isEngaged(it),
+            )
+        }) shouldBe AcceptedMatchDecision.START
+        sessions.shutdown()
+    }
+
     "origin inventory freezes before its asynchronous MySQL commit completes" {
         val repository = GatedEscrowRepository()
         val service = DurablePlayerStateService(plugin, ServerId("origin"), repository)

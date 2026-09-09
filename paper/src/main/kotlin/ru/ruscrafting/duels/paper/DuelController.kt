@@ -721,6 +721,16 @@ class DuelController(
         val accepted = acceptedMatches[challengeId] ?: return stopAcceptedMatch(challengeId)
         val challenge = accepted.challenge
         if (clock.millis() >= accepted.expiresAtMillis) {
+            DuelLog.warn(
+                "match-routing-timeout",
+                MatchId(challenge.id.value),
+                "local_server={} host={} participants={}",
+                localServer.value,
+                accepted.host.value,
+                participants(challenge).joinToString(";") {
+                    "${it.name}:locked=${sessions.isStateLocked(it)},ready=${playerDataReady(it)},engaged=${sessions.isEngaged(it)}"
+                },
+            )
             participants(challenge).forEach { it.sendMessage(locales.notice(it, "controller.network-timeout")) }
             returnAcceptedPlayers(accepted)
             stopAcceptedMatch(challengeId)
@@ -1432,7 +1442,7 @@ class DuelController(
     }
 
     private companion object {
-        const val NETWORK_MATCH_POLL_TICKS = 10L
+        const val NETWORK_MATCH_POLL_TICKS = 1L
         const val RETURN_DELAY_TICKS = 1L
         const val MAX_CONTEXTS = 4_096
         val CONTEXT_RETENTION: Duration = Duration.ofMinutes(10)
