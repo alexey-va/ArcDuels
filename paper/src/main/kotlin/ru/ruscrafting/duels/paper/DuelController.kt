@@ -130,9 +130,21 @@ class DuelController(
             return
         }
         val localTarget = plugin.server.getPlayer(target.uniqueId)
-        if (sessions.isEngaged(challenger) || sessions.isStateLocked(challenger) || PlayerId(challenger.uniqueId) in networkPendingPlayers ||
+        if (sessions.isEngaged(challenger) ||
+            shouldBlockNewChallenge(
+                stateLocked = sessions.isStateLocked(challenger),
+                postMatchWaiting = sessions.isPostMatchWaiting(challenger),
+                hasReturnOffer = hasReturnOffer(challenger),
+            ) ||
+            PlayerId(challenger.uniqueId) in networkPendingPlayers ||
             (localTarget != null &&
-                (sessions.isEngaged(localTarget) || sessions.isStateLocked(localTarget) || PlayerId(localTarget.uniqueId) in networkPendingPlayers))
+                (sessions.isEngaged(localTarget) ||
+                    shouldBlockNewChallenge(
+                        stateLocked = sessions.isStateLocked(localTarget),
+                        postMatchWaiting = sessions.isPostMatchWaiting(localTarget),
+                        hasReturnOffer = hasReturnOffer(localTarget),
+                    ) ||
+                    PlayerId(localTarget.uniqueId) in networkPendingPlayers))
         ) {
             challenger.sendMessage(locales.notice(challenger, "controller.busy"))
             return
@@ -673,7 +685,11 @@ class DuelController(
                 ),
             )
             if (offer.destination == localServer) {
-                if (sessions.requestRecovery(player)) returnOffers.remove(playerId, offer)
+                if (sessions.requestRecovery(player)) {
+                    returnOffers.remove(playerId, offer)
+                } else {
+                    returned = false
+                }
             } else {
                 val result = transferPlayer(player, offer.destination, offer.matchId, "rematch-return-transfer-failed")
                 if (!isSuccessfulBackendTransfer(result)) returned = false
@@ -1143,6 +1159,7 @@ class DuelController(
 
     private fun tickReturn(match: DuelMatch, routes: ReturnRoutes, deadline: Long) {
         if (clock.millis() >= deadline) {
+            retainTimedOutReturnOffers(match, routes)
             stopReturn(match.id)
             return
         }
@@ -1153,7 +1170,22 @@ class DuelController(
             )
         destinations.forEach { (playerId, destination) ->
             if (destination == localServer) {
-                returnRequests += match.id to playerId
+                val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
+                val request = match.id to playerId
+                if (request !in returnRequests && !sessions.requestRecovery(player)) {
+                    if (returnFailureNotifications.add(request)) {
+                        DuelLog.warn(
+                            "automatic-return-recovery-failed",
+                            match.id,
+                            player,
+                            "player={} destination={} result=RECOVERY_NOT_STARTED",
+                            player.name,
+                            destination.value,
+                        )
+                    }
+                } else {
+                    returnRequests += request
+                }
                 return@forEach
             }
             val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
@@ -1182,6 +1214,28 @@ class DuelController(
             }
         }
         if (destinations.keys.all { (match.id to it) in returnRequests }) stopReturn(match.id)
+    }
+
+    private fun retainTimedOutReturnOffers(match: DuelMatch, routes: ReturnRoutes) {
+        val destinations =
+            mapOf(
+                match.firstPlayer to routes.forPlayer(match.firstPlayer),
+                match.secondPlayer to routes.forPlayer(match.secondPlayer),
+            )
+        unresolvedReturnPlayers(match.id, destinations.keys, returnRequests).forEach { playerId ->
+            val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
+            returnOffers[playerId] = ReturnOffer(match.id, destinations.getValue(playerId), routes.recoveryMatchId)
+            DuelLog.warn(
+                "automatic-return-timeout",
+                match.id,
+                player,
+                "player={} destination={} recovery_match_id={}",
+                player.name,
+                destinations.getValue(playerId).value,
+                routes.recoveryMatchId,
+            )
+            player.sendMessage(locales.notice(player, "session.remote-recovery-unavailable"))
+        }
     }
 
     private fun stopReturn(matchId: MatchId) {
@@ -1584,6 +1638,18 @@ internal fun challengeExpiryDelayTicks(nowMillis: Long, expiresAtMillis: Long): 
     val remainingMillis = (expiresAtMillis - nowMillis).coerceAtLeast(1L)
     return ((remainingMillis + 49L) / 50L).coerceAtLeast(1L)
 }
+
+internal fun shouldBlockNewChallenge(
+    stateLocked: Boolean,
+    postMatchWaiting: Boolean,
+    hasReturnOffer: Boolean,
+): Boolean = stateLocked || (postMatchWaiting && !hasReturnOffer)
+
+internal fun unresolvedReturnPlayers(
+    matchId: MatchId,
+    players: Collection<PlayerId>,
+    completedRequests: Set<Pair<MatchId, PlayerId>>,
+): Set<PlayerId> = players.filterTo(linkedSetOf()) { player -> (matchId to player) !in completedRequests }
 
 internal fun continuationRecoveryMatchId(
     completedMatchId: MatchId,

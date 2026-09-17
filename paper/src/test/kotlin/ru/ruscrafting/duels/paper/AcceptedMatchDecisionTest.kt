@@ -2,8 +2,10 @@ package ru.ruscrafting.duels.paper
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.MatchId
+import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.ServerId
+import java.util.UUID
 
 class AcceptedMatchDecisionTest : StringSpec({
     val ready = AcceptedParticipantReadiness(stateLocked = false, playerDataReady = true, engaged = false)
@@ -44,5 +46,20 @@ class AcceptedMatchDecisionTest : StringSpec({
         val originalRecovery = MatchId.random()
         continuationRecoveryMatchId(completed, completed, originalRecovery, completed, originalRecovery) shouldBe originalRecovery
         continuationRecoveryMatchId(completed, completed, originalRecovery, MatchId.random(), originalRecovery) shouldBe null
+    }
+
+    "a player waiting for an automatic origin return cannot start a fresh challenge" {
+        shouldBlockNewChallenge(stateLocked = false, postMatchWaiting = true, hasReturnOffer = false) shouldBe true
+        shouldBlockNewChallenge(stateLocked = false, postMatchWaiting = true, hasReturnOffer = true) shouldBe false
+        shouldBlockNewChallenge(stateLocked = true, postMatchWaiting = false, hasReturnOffer = false) shouldBe true
+        shouldBlockNewChallenge(stateLocked = false, postMatchWaiting = false, hasReturnOffer = false) shouldBe false
+    }
+
+    "a timed-out return keeps only players without a confirmed transfer eligible for recovery offer" {
+        val match = MatchId.random()
+        val first = PlayerId(UUID.randomUUID())
+        val second = PlayerId(UUID.randomUUID())
+
+        unresolvedReturnPlayers(match, listOf(first, second), setOf(match to first)) shouldBe setOf(second)
     }
 })
