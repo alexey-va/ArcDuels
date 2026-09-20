@@ -381,6 +381,7 @@ error:
   presets: '<red>Could not load saved setups.</red>'
 
 controller:
+  kits-only: '<yellow>Only kit duels are available on this server.</yellow>'
   busy: '<red>One of the players is already queued, fighting, or awaiting recovery.</red>'
   sent: '<green>Challenge sent to <white><player></white>.</green>'
   failed: '<red>Could not process the duel challenge.</red>'

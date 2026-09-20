@@ -201,6 +201,67 @@ class ArcDuelsPluginTest : StringSpec({
         }
     }
 
+    "kit-only node rejects own inventory creation and pending acceptance while keeping kits available" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val targets = DuelTargetDirectory(plugin, ServerId("test"), null)
+        val challenger = server.addPlayer("KitOnlySender")
+        val target = server.addPlayer("KitOnlyTarget")
+        var settings = ArcDuelsRuntimeSettings.parse(org.bukkit.configuration.MemoryConfiguration()).settings
+        val registry = ChallengeRegistry(Clock.systemUTC(), Duration.ofSeconds(45))
+        DuelController(
+            plugin, registry, sessions, InMemoryStatisticsRepository(), LocaleService.load(plugin),
+            targets, ServerId("test"), runtimeSettings = { settings },
+        ).use { controller ->
+            controller.challenge(challenger, targets.local(target), DuelRules(DuelMode.OWN_INVENTORY))
+            requireNotNull(target.nextComponentMessage())
+            settings = settings.copy(ownInventoryEnabled = false)
+            controller.accept(target)
+            verify(exactly = 0) { sessions.start(any()) }
+            controller.isLoadoutAllowed(DuelMode.OWN_INVENTORY) shouldBe false
+            controller.isLoadoutAllowed(DuelMode.KIT) shouldBe true
+            val other = server.addPlayer("KitOnlyOther")
+            controller.challenge(challenger, targets.local(other), DuelRules(DuelMode.OWN_INVENTORY))
+            other.nextComponentMessage() shouldBe null
+            other.disconnect()
+            challenger.disconnect()
+            target.disconnect()
+        }
+    }
+
+    "kit-only node denies incoming own inventory offers before invitation or transfer" {
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val listener = slot<(CrossServerChallengeMessage) -> Unit>()
+        val bus = mockk<CrossServerChallengeBus>(relaxed = true)
+        every { bus.subscribe(capture(listener)) } returns AutoCloseable { }
+        val local = ServerId("slimefun")
+        val remote = ServerId("survival")
+        val target = server.addPlayer("IsolatedTarget")
+        val senderId = PlayerId(java.util.UUID.randomUUID())
+        val now = Instant.now()
+        val challenge = DuelChallenge.create(senderId, PlayerId(target.uniqueId), DuelRules(DuelMode.OWN_INVENTORY), now, Duration.ofSeconds(45))
+        val settings = ArcDuelsRuntimeSettings.parse(org.bukkit.configuration.MemoryConfiguration()).settings.copy(ownInventoryEnabled = false)
+        DuelController(
+            plugin, ChallengeRegistry(Clock.systemUTC()), sessions, InMemoryStatisticsRepository(), LocaleService.load(plugin),
+            DuelTargetDirectory(plugin, local, null), local,
+            challengeBus = bus, arenaDirectory = mockk(relaxed = true), transfer = mockk(relaxed = true),
+            runtimeSettings = { settings },
+        ).use {
+            listener.captured(CrossServerChallengeMessage(
+                messageId = "${challenge.id}:offer:survival", sourceServer = remote,
+                type = ChallengeMessageType.OFFER, challenge = challenge, kitFingerprint = null,
+                challengerName = "RemoteSender", targetName = target.name,
+                challengerServer = remote, targetServer = local, matchServer = null,
+            ))
+            server.scheduler.performTicks(2)
+            target.nextComponentMessage() shouldBe null
+            verify(exactly = 1) { bus.publish(match { it.challenge.status == ChallengeStatus.DENIED }) }
+            target.disconnect()
+            verify(exactly = 0) { sessions.startNetwork(any(), any(), any()) }
+        }
+    }
+
     "challenge card is readable and both players are told when it expires" {
         var now = Instant.parse("2026-08-15T00:00:00Z")
         val clock =

@@ -8,6 +8,9 @@ server-display-names:
   survival: '<#55ff8a>Выживание</#55ff8a>'
   parkour: '<#32d6ff>Паркур</#32d6ff>'
 challenge-timeout-seconds: 45
+# Disable on isolated inventory modes: commands, incoming challenges and menus use this policy.
+own-inventory:
+  enabled: true
 
 multiplayer:
   # Time available to accept a group invitation. Existing invitations retain

@@ -13,6 +13,15 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class ArcDuelsRuntimeSettingsTest : StringSpec({
+    "kit-only policy parses strictly and preserves existing node defaults" {
+        val config = MemoryConfiguration()
+        ArcDuelsRuntimeSettings.parse(config).settings.ownInventoryEnabled shouldBe true
+        config.set("own-inventory.enabled", false)
+        ArcDuelsRuntimeSettings.parse(config).settings.ownInventoryEnabled shouldBe false
+        config.set("own-inventory.enabled", "false")
+        shouldThrow<IllegalArgumentException> { ArcDuelsRuntimeSettings.parse(config) }
+    }
+
     "missing runtime keys use documented safe defaults" {
         val candidate = ArcDuelsRuntimeSettings.parse(MemoryConfiguration())
 

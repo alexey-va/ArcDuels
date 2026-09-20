@@ -91,3 +91,11 @@ The plugin JAR is produced under `paper/build/libs/`.
 
 See [configuration](docs/configuration.md), [architecture](docs/architecture.md),
 [testing](docs/testing.md), and the [roadmap](docs/roadmap.md).
+
+### Isolated inventory modes
+
+Set `own-inventory.enabled: false` on an origin that may participate only in KIT duels.
+The live policy hides the own-inventory menu entry and rejects creation, incoming
+offers, acceptance and network activation for that loadout. The default remains
+true. This does not change arena discovery or synchronize player inventories;
+use `player-data-sync.provider: NONE` for backends without HuskSync.

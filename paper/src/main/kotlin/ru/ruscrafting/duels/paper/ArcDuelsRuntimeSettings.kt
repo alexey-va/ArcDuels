@@ -41,6 +41,7 @@ data class ArcDuelsRuntimeSettings(
     val guiArenaNameInputTimeout: Duration,
     val guiLeaderboardLimit: Int,
     val guiHistoryLimit: Int,
+    val ownInventoryEnabled: Boolean = true,
 ) {
     init {
         require(challengeTimeout in MIN_CHALLENGE_TIMEOUT..MAX_CHALLENGE_TIMEOUT) {
@@ -422,6 +423,7 @@ object ArcDuelsRuntimeSettingsParser {
                         ),
                     guiLeaderboardLimit = configuration.int("gui.leaderboard-limit", 100, 1..100),
                     guiHistoryLimit = configuration.int("gui.history-limit", 100, 1..100),
+                    ownInventoryEnabled = configuration.boolean("own-inventory.enabled", true),
                 ),
             restartOnlyFingerprint =
                 ArcDuelsRestartOnlyFingerprint.capture(

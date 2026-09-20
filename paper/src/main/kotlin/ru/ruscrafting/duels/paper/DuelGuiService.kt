@@ -521,10 +521,10 @@ class DuelGuiService internal constructor(
             holder.kits[slot] = kit.id
             inventory.setItem(slot, kitItem(player, kit))
         }
-        if (!controlledOnly) {
+        if (!controlledOnly && (runtimeSettings()?.ownInventoryEnabled ?: true)) {
             holder.ownInventorySlot = 4
             inventory.setItem(4, item(player, Material.BUNDLE, "menu.loadouts.own", "menu.loadouts.own-lore"))
-        } else if (availableKits.isEmpty()) {
+        } else if (controlledKit != null && availableKits.isEmpty()) {
             inventory.setItem(22, item(player, Material.BARRIER, "menu.loadouts.controlled-missing", resolvers = arrayOf(LocaleService.text("kit", controlledKit))))
         }
         navigation(player, inventory, page, MenuBack.MAIN)

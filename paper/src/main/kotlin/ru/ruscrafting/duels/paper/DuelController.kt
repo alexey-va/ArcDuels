@@ -104,6 +104,9 @@ class DuelController(
         arenaSelection: ArenaSelection? = null,
     ) = challengeInternal(challenger, requestedTarget, rules, arenaSelection, null)
 
+    internal fun isLoadoutAllowed(mode: DuelMode): Boolean =
+        mode != DuelMode.OWN_INVENTORY || (runtimeSettings()?.ownInventoryEnabled ?: true)
+
     internal fun hasReturnOffer(player: Player): Boolean = returnOffers.containsKey(PlayerId(player.uniqueId))
 
     private fun challengeInternal(
@@ -124,6 +127,10 @@ class DuelController(
             rules.bestOf,
             arenaSelection?.let { "${it.serverId.value}:${it.arenaId.value}" } ?: "auto",
         )
+        if (!isLoadoutAllowed(rules.mode)) {
+            challenger.sendMessage(locales.notice(challenger, "controller.kits-only"))
+            return
+        }
         val target = targets.find(requestedTarget.uniqueId)
         if (target == null || target.uniqueId == challenger.uniqueId) {
             challenger.sendMessage(locales.notice(challenger, "error.player-left"))
@@ -226,6 +233,10 @@ class DuelController(
         challengeId: ChallengeId? = null,
     ) {
         val challenge = resolveCandidate(player, challengeId, incoming = true) ?: return
+        if (!isLoadoutAllowed(challenge.rules.mode)) {
+            player.sendMessage(locales.notice(player, "controller.kits-only"))
+            return
+        }
         DuelLog.debug("challenge-accept-request", MatchId(challenge.id.value), player, "player={}", player.name)
         if (challenge.challenger in networkPendingPlayers || challenge.target in networkPendingPlayers) {
             player.sendMessage(locales.notice(player, "controller.busy"))
@@ -546,7 +557,7 @@ class DuelController(
                 kitFingerprint = message.kitFingerprint,
             ),
         )
-        if (sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
+        if (!isLoadoutAllowed(message.challenge.rules.mode) || sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
             if (!publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)) {
                 target.sendMessage(locales.notice(target, "controller.network-unavailable"))
             }
@@ -661,6 +672,10 @@ class DuelController(
         }
 
     private fun acceptNetworkMatch(message: CrossServerChallengeMessage) {
+        if (!isLoadoutAllowed(message.challenge.rules.mode)) {
+            participants(message.challenge).forEach { it.sendMessage(locales.notice(it, "controller.kits-only")) }
+            return
+        }
         val host = requireNotNull(message.matchServer)
         if (message.recoveryMatchId == null) {
             if (!returnLobbyPlayersForNewMatch(message.challenge)) return
