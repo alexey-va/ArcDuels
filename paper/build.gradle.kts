@@ -36,6 +36,8 @@ tasks.shadowJar {
     archiveBaseName.set("ArcDuels")
     archiveClassifier.set("")
     mergeServiceFiles()
+    exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
+    exclude("ru/arc/paper/api/**")
 }
 
 tasks.assemble {
