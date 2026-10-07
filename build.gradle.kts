@@ -9,7 +9,7 @@ plugins {
 
 allprojects {
     group = "ru.ruscrafting.duels"
-    version = "0.10.12"
+    version = "0.10.13"
 }
 
 subprojects {
