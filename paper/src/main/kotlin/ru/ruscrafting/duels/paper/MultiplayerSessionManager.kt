@@ -63,6 +63,7 @@ internal class MultiplayerSessionManager(
     private val clock: Clock = Clock.systemUTC(),
     private val countdownSeconds: Int = 3,
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
+    private val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
 ) : AutoCloseable {
     private data class Session(
         var match: MultiplayerMatch,
@@ -72,6 +73,8 @@ internal class MultiplayerSessionManager(
         val leases: List<PaperChunkTicketLease>,
         val origins: Map<PlayerId, ServerId>? = null,
         val arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
+        val returnLocations: Map<UUID, Location> = emptyMap(),
+        val playerStateMode: PlayerStateMode,
         val countdownSeconds: Int,
         val finishDelayTicks: Long,
         var restoreInFlight: Boolean = false,
@@ -93,6 +96,9 @@ internal class MultiplayerSessionManager(
     private val teleportsAuthorized = ScopedTeleportAuthorizer()
     private val kitHealth = KitHealthIsolation(NamespacedKey("arcduels", "multiplayer-kit-health"))
 
+    internal val isDisposablePlayerStateMode: Boolean
+        get() = playerStateMode == PlayerStateMode.DISPOSABLE
+
     init {
         require(countdownSeconds in 0..10) { "Multiplayer countdown must be between 0 and 10 seconds" }
     }
@@ -103,7 +109,9 @@ internal class MultiplayerSessionManager(
         }
         require(onlinePlayers.keys == roster.playerIds) { "Every roster participant must be online on this Paper node" }
         require(onlinePlayers.values.all(Player::isOnline)) { "Every multiplayer participant must remain online" }
-        require(onlinePlayers.values.none { isEngaged(it) || playerStates.isPending(it.uniqueId) }) {
+        require(onlinePlayers.values.none {
+            isEngaged(it) || (playerStateMode == PlayerStateMode.PRESERVE && playerStates.isPending(it.uniqueId))
+        }) {
             "A multiplayer participant is already engaged or awaiting recovery"
         }
         val policy = captureRuntimePolicy()
@@ -114,15 +122,35 @@ internal class MultiplayerSessionManager(
                 completion.completeExceptionally(reservationFailure ?: IllegalStateException("Multiplayer arena reservation failed"))
                 return@whenCompleteSync
             }
-            playerStates.storeAll(matchId, onlinePlayers.values, inventoryReplaced = true)
+            val snapshots =
+                if (playerStateMode == PlayerStateMode.DISPOSABLE) {
+                    CompletableFuture.completedFuture<Map<UUID, StoredPlayerSnapshot>>(emptyMap())
+                } else {
+                    playerStates.storeAll(matchId, onlinePlayers.values, inventoryReplaced = true)
+                }
+            snapshots
                 .whenCompleteSync(tasks) { snapshots, escrowFailure ->
                     if (escrowFailure != null || snapshots == null) {
                         reservation.close()
                         completion.completeExceptionally(escrowFailure ?: IllegalStateException("Multiplayer escrow failed"))
                         return@whenCompleteSync
                     }
+                    val returnLocations =
+                        if (playerStateMode == PlayerStateMode.DISPOSABLE) {
+                            onlinePlayers.mapValues { (_, player) -> player.location.clone() }.mapKeys { it.key.value }
+                        } else {
+                            emptyMap()
+                        }
                     runCatching {
-                        createSession(matchId, roster, onlinePlayers, reservation, snapshots, policy = policy)
+                        createSession(
+                            matchId,
+                            roster,
+                            onlinePlayers,
+                            reservation,
+                            snapshots,
+                            returnLocations = returnLocations,
+                            policy = policy,
+                        )
                     }.onSuccess {
                         completion.complete(matchId)
                     }.onFailure { failure ->
@@ -147,7 +175,14 @@ internal class MultiplayerSessionManager(
         require(onlinePlayers.values.none { isEngaged(it) }) { "A multiplayer participant is already engaged" }
         val policy = captureRuntimePolicy()
         val completion = CompletableFuture<MatchId>()
-        val snapshots = playerStates.findMatchSnapshots(matchId, origins)
+        val snapshotOrigins =
+            if (playerStateMode == PlayerStateMode.DISPOSABLE) origins.filterValues { it != serverId } else origins
+        val snapshots =
+            if (snapshotOrigins.isEmpty()) {
+                CompletableFuture.completedFuture<Map<PlayerId, ru.ruscrafting.duels.domain.PlayerStateEscrow>>(emptyMap())
+            } else {
+                playerStates.findMatchSnapshots(matchId, snapshotOrigins)
+            }
         val reservation = arenas.reserveMultiplayer(roster)
         reservation.thenCombine(snapshots, ::Pair).whenCompleteSync(tasks) { prepared, failure ->
             if (failure != null || prepared == null) {
@@ -158,11 +193,36 @@ internal class MultiplayerSessionManager(
             val (reserved, escrows) = prepared
             runCatching {
                 check(mayStart()) { "Network group preparation was cancelled" }
-                val stored = onlinePlayers.mapValues { (playerId, player) ->
-                    playerStates.decodeForArena(escrows.getValue(playerId), player)
-                }.mapKeys { it.key.value }
-                val baselines = onlinePlayers.mapValues { (_, player) -> PlayerSnapshot.capture(player) }.mapKeys { it.key.value }
-                createSession(matchId, roster, onlinePlayers, reserved, stored, origins, policy, baselines)
+                val stored = escrows.map { (playerId, escrow) ->
+                    val player = requireNotNull(onlinePlayers[playerId])
+                    playerId.value to playerStates.decodeForArena(escrow, player)
+                }.toMap()
+                val baselines =
+                    if (playerStateMode == PlayerStateMode.PRESERVE) {
+                        onlinePlayers.mapValues { (_, player) -> PlayerSnapshot.capture(player) }.mapKeys { it.key.value }
+                    } else {
+                        emptyMap()
+                    }
+                val returnLocations =
+                    if (playerStateMode == PlayerStateMode.DISPOSABLE) {
+                        origins.filterValues { it == serverId }.keys.associate { playerId ->
+                            val player = requireNotNull(onlinePlayers[playerId])
+                            playerId.value to player.location.clone()
+                        }
+                    } else {
+                        emptyMap()
+                    }
+                createSession(
+                    matchId,
+                    roster,
+                    onlinePlayers,
+                    reserved,
+                    stored,
+                    origins = origins,
+                    policy = policy,
+                    arenaBaselines = baselines,
+                    returnLocations = returnLocations,
+                )
             }.onSuccess {
                 completion.complete(matchId)
             }.onFailure { startFailure ->
@@ -318,9 +378,11 @@ internal class MultiplayerSessionManager(
     fun handleQuit(player: Player) {
         val match = matchFor(player) ?: return
         val session = byPlayer[player.uniqueId]?.let(sessions::get) ?: return
+        val disposable = session.playerStateMode == PlayerStateMode.DISPOSABLE
+        if (disposable) restoreDeparting(player, stored = null)
         if (match.state == MultiplayerMatchState.ACTIVE) {
             if (PlayerId(player.uniqueId) in match.activePlayers) eliminate(player, MatchEndReason.DISCONNECT)
-            restoreDeparting(player, session.snapshots[player.uniqueId])
+            if (!disposable) restoreDeparting(player, session.snapshots[player.uniqueId])
             byPlayer.remove(player.uniqueId, match.id)
         } else if (match.state in setOf(MultiplayerMatchState.RESERVED, MultiplayerMatchState.COUNTDOWN)) {
             session.match = session.match.cancel(clock.instant(), MatchEndReason.ADMIN_CANCEL)
@@ -329,7 +391,7 @@ internal class MultiplayerSessionManager(
             }
             finishRestore(session)
         } else if (match.state in setOf(MultiplayerMatchState.COMPLETING, MultiplayerMatchState.COMPLETED, MultiplayerMatchState.CANCELLED)) {
-            restoreDeparting(player, session.snapshots[player.uniqueId])
+            if (!disposable) restoreDeparting(player, session.snapshots[player.uniqueId])
             byPlayer.remove(player.uniqueId, match.id)
         }
     }
@@ -350,8 +412,9 @@ internal class MultiplayerSessionManager(
         reservation: MultiplayerArenaReservation,
         snapshots: Map<UUID, StoredPlayerSnapshot>,
         origins: Map<PlayerId, ServerId>? = null,
-        policy: RuntimePolicy,
         arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
+        returnLocations: Map<UUID, Location> = emptyMap(),
+        policy: RuntimePolicy,
     ) {
         val leases = mutableListOf<PaperChunkTicketLease>()
         var session: Session? = null
@@ -368,6 +431,8 @@ internal class MultiplayerSessionManager(
                     leases,
                     origins,
                     arenaBaselines,
+                    returnLocations,
+                    playerStateMode,
                     countdownSeconds = policy.countdownSeconds,
                     finishDelayTicks = policy.finishDelayTicks,
                 )
@@ -413,7 +478,7 @@ internal class MultiplayerSessionManager(
                 finishRestore(session)
             } else {
                 leases.forEach { runCatching { it.close() } }
-                abortBeforeStart(reservation, snapshots, onlinePlayers.values, origins, arenaBaselines)
+                abortBeforeStart(matchId, reservation, snapshots, onlinePlayers.values, origins, arenaBaselines, returnLocations)
             }
             throw failure
         }
@@ -657,7 +722,18 @@ internal class MultiplayerSessionManager(
     }
 
     private fun restoreOwnedState(session: Session, player: Player) {
-        if (ownsEscrow(session, player.uniqueId)) {
+        if (session.playerStateMode == PlayerStateMode.DISPOSABLE) {
+            check(player.isOnline) { "Cannot clean a disconnected multiplayer participant" }
+            externalCombatTagClear(player, session.match.id, "multiplayer-disposable-cleanup")
+            kitHealth.clear(player)
+            clearDisposableCombatState(player)
+            session.returnLocations[player.uniqueId]?.let { destination ->
+                check(teleportsAuthorized.authorize(player.uniqueId, destination) {
+                    player.teleport(destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
+                }) { "Could not return ${player.uniqueId} to its disposable match origin" }
+            }
+            playerData.persist(player)
+        } else if (ownsEscrow(session, player.uniqueId)) {
             applyRestoredState(player, requireNotNull(session.snapshots[player.uniqueId]))
         } else {
             val baseline = requireNotNull(session.arenaBaselines[player.uniqueId])
@@ -670,11 +746,28 @@ internal class MultiplayerSessionManager(
     }
 
     private fun ownsEscrow(session: Session, playerId: UUID): Boolean =
-        session.origins?.get(PlayerId(playerId))?.let { it == serverId } ?: true
+        session.playerStateMode == PlayerStateMode.PRESERVE &&
+            (session.origins?.get(PlayerId(playerId))?.let { it == serverId } ?: true)
 
     private fun restoreDeparting(player: Player, stored: StoredPlayerSnapshot?) {
-        if (stored == null || !player.isOnline) return
         val session = byPlayer[player.uniqueId]?.let(sessions::get)
+        if (session?.playerStateMode == PlayerStateMode.DISPOSABLE) {
+            runCatching {
+                externalCombatTagClear(player, session.match.id, "multiplayer-disposable-cleanup")
+                kitHealth.clear(player)
+                clearDisposableCombatState(player)
+                session.returnLocations[player.uniqueId]?.takeIf { player.isOnline }?.let { destination ->
+                    check(teleportsAuthorized.authorize(player.uniqueId, destination) {
+                        player.teleport(destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
+                    }) { "Could not return ${player.uniqueId} to its disposable match origin" }
+                }
+                if (player.isOnline) playerData.persist(player)
+            }.onFailure { failure ->
+                DuelLog.warn("multiplayer-disposable-cleanup-failed", session.match.id, player, "error={}", failure.message)
+            }
+            return
+        }
+        if (stored == null || !player.isOnline) return
         runCatching {
             if (session == null || ownsEscrow(session, player.uniqueId)) {
                 applyRestoredState(player, stored)
@@ -727,13 +820,30 @@ internal class MultiplayerSessionManager(
     }
 
     private fun abortBeforeStart(
+        matchId: MatchId,
         reservation: MultiplayerArenaReservation,
         snapshots: Map<UUID, StoredPlayerSnapshot>,
         players: Collection<Player>,
         origins: Map<PlayerId, ServerId>? = null,
         arenaBaselines: Map<UUID, PlayerSnapshot> = emptyMap(),
+        returnLocations: Map<UUID, Location> = emptyMap(),
     ) {
         players.forEach { player ->
+            if (playerStateMode == PlayerStateMode.DISPOSABLE) {
+                runCatching {
+                    kitHealth.clear(player)
+                    clearDisposableCombatState(player)
+                    returnLocations[player.uniqueId]?.takeIf { player.isOnline }?.let { destination ->
+                        check(teleportsAuthorized.authorize(player.uniqueId, destination) {
+                            player.teleport(destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
+                        }) { "Could not return ${player.uniqueId} to its disposable match origin" }
+                    }
+                    if (player.isOnline) playerData.persist(player)
+                }.onFailure { failure ->
+                    DuelLog.warn("multiplayer-disposable-cleanup-failed", matchId, player, "error={}", failure.message)
+                }
+                return@forEach
+            }
             val stored = snapshots[player.uniqueId] ?: return@forEach
             val foreign = origins?.get(PlayerId(player.uniqueId))?.let { it != serverId } == true
             if (foreign) {

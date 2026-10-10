@@ -77,6 +77,7 @@ internal fun multiplayerHarness(
     networkReturn: (Player, ServerId) -> Unit = { _, _ -> },
     enableArena: Boolean = true,
     runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
+    playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
     configureArena: (ArcDuelsPlugin) -> Unit = {},
 ): MultiplayerHarness {
     val plugin = paper.loadPlugin<ArcDuelsPlugin>()
@@ -117,6 +118,7 @@ internal fun multiplayerHarness(
         networkReturn = networkReturn,
         countdownSeconds = countdownSeconds,
         runtimeSettings = runtimeSettings,
+        playerStateMode = playerStateMode,
     )
     return MultiplayerHarness(
         paper,

@@ -68,6 +68,10 @@ Declare how each node synchronizes player data instead of encoding server names
 in plugin logic:
 
 ```yaml
+player-state:
+  mode: PRESERVE # PRESERVE (default) or DISPOSABLE
+own-inventory:
+  enabled: true
 player-data-sync:
   provider: HUSKSYNC # AUTO, HUSKSYNC, or NONE
   settle-delay-ticks: 40
@@ -78,6 +82,16 @@ post-match:
 `HUSKSYNC` fails startup when HuskSync is absent. `AUTO` detects it. `NONE`
 means inventories are isolated on that backend; such a node can advertise kit
 arenas but ArcDuels suppresses its cross-server own-inventory capacity.
+`player-state.mode: DISPOSABLE` is an explicit policy for a backend whose state
+is temporary. It requires `provider: NONE` and `own-inventory.enabled: false`,
+and permits KIT matches only. ArcDuels captures no local inventory, health, XP,
+or durable recovery row in this mode; it keeps transient participant/return
+location metadata and clears temporary kit/combat state when the match ends.
+Existing local recovery rows are ignored and left unchanged. A disposable arena
+host can use escrow read from remote preserving origins, which remain owned and
+restored by those origins. A disposable remote origin cannot provide the durable
+escrow required for a match hosted elsewhere, so cross-server preparation fails
+closed. Keep normal gameplay backends on the default `PRESERVE` mode.
 
 `PROMPT` keeps players at the arena's configured lobby and offers a return to
 their origin server. If the arena has no lobby, each participant is moved to
@@ -121,7 +135,8 @@ waiting for the next Redis heartbeat.
 
 Connection- and identity-owned settings require a normal server restart:
 `server-id`, MySQL connection/pool/retention settings, Redis endpoint,
-credentials and player-directory settings, and `player-data-sync.provider`.
+credentials and player-directory settings, `player-data-sync.provider`, and
+`player-state.mode`.
 Reload validates their types, ranges, provider availability, and effective
 imported ARC Redis endpoint without opening a new connection. The effective
 Redis credentials participate only in a one-way comparison fingerprint, so an

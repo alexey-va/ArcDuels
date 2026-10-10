@@ -146,7 +146,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             if (huskSyncEnabled) logger.warning("HuskSync is enabled but ArcDuels is explicitly configured with player-data-sync.provider=NONE")
             logger.info("Player data synchronization provider: NONE; this node will host cross-server kit arenas only")
         }
-        if (persistence.durable) {
+        if (persistence.durable && settings.playerStateMode == PlayerStateMode.PRESERVE) {
             val recovered = playerStates.loadPending(config.getLong("mysql.pool.connection-timeout-ms", 10_000L) + 30_000L)
             if (recovered > 0) logger.warning("Loaded $recovered pending player state snapshot(s) for crash recovery")
             val purge = Runnable {
@@ -160,6 +160,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
             }
             purge.run()
             lifecycle.tasks.runTimer(cleanupMinutes * 1_200L, cleanupMinutes * 1_200L, purge::run)
+        } else if (persistence.durable) {
+            logger.info("Player state mode is DISPOSABLE; local pending snapshots will not be loaded or restored")
         } else {
             logger.severe("MySQL is disabled: duel starts are locked because durable player state escrow is mandatory")
         }
@@ -189,6 +191,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 externalCombatTagClear = cmiCombatTags::clear,
                 shutdownRecoveryTimeoutMillis = settings.shutdownRecoveryTimeout.toMillis(),
                 defaultPostMatchReturnPolicy = settings.defaultPostMatchReturnPolicy,
+                playerStateMode = settings.playerStateMode,
+                localServerId = serverId,
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 findRecordedMatch = persistence.statistics::findMatch,
             )
@@ -206,6 +210,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 tasks = lifecycle.tasks,
                 chunkTickets = multiplayerChunkTickets,
                 countdownSeconds = settings.countdownSeconds,
+                playerStateMode = settings.playerStateMode,
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 externalCombatTagClear = cmiCombatTags::clear,
                 syncProvider = syncProvider,
@@ -251,6 +256,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                     network.arenas?.choices(rules, rules.kitId?.let(kits::fingerprint)) ?: arenas.choices(serverId, rules)
                 },
                 runtimeSettings = { liveRuntime.snapshot().settings },
+                playerStateMode = settings.playerStateMode,
             )
         lifecycle.own(controller)
         lateinit var gui: DuelGuiService
@@ -395,7 +401,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
             val redisReady = network.redisReady
             RuntimeHealthContribution(
                 state = if (mysqlReady && redisReady) RuntimeHealthState.UP else RuntimeHealthState.DEGRADED,
-                recoveryBacklog = playerStates.pendingCount(),
+                recoveryBacklog =
+                    if (settings.playerStateMode == PlayerStateMode.PRESERVE) playerStates.pendingCount() else 0,
                 activeLeases = network.activeLeaseCount() + multiplayerChunkTickets.activeLeaseCount,
                 schemas = buildMap {
                     put("player_escrow", DurablePlayerStateService.CORE_ESCROW_FORMAT_VERSION)
@@ -410,18 +417,20 @@ open class ArcDuelsPlugin : JavaPlugin() {
             "multiplayer" to multiplayerSessions.activeCount(),
             "mysql" to persistence.durable,
             "redis" to network.redisReady,
+            "player-state" to settings.playerStateMode.name,
         )
         lifecycle.reportHealthEvery(HEALTH_REPORT_TICKS)
         logger.info("ArcDuels enabled: ${arenas.size()} arenas, ${kits.all().size} kits, MySQL=${config.getBoolean("mysql.enabled")}, Redis=${config.getBoolean("redis.enabled")}")
         DuelLog.info(
             "plugin-ready",
-            "server={} arenas={} kits={} mysql={} redis={} sync_provider={}",
+            "server={} arenas={} kits={} mysql={} redis={} sync_provider={} player_state={}",
             serverId.value,
             arenas.size(),
             kits.all().size,
             config.getBoolean("mysql.enabled"),
             config.getBoolean("redis.enabled"),
             syncProvider,
+            settings.playerStateMode,
         )
         if (arenas.size() == 0) {
             if (hasUsableArenaRoute(arenas.size(), network.arenas != null)) {

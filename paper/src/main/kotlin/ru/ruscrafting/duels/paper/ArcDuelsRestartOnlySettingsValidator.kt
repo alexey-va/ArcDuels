@@ -22,7 +22,8 @@ internal object ArcDuelsRestartOnlySettingsValidator {
         ServerId(configuration.strictString("server-id", "duels-1"))
         validateMySql(configuration)
         validateRedisConfiguration(configuration)
-        validatePlayerDataProvider(configuration, huskSyncEnabled = true)
+        val provider = validatePlayerDataProvider(configuration, huskSyncEnabled = true)
+        validatePlayerStatePolicy(configuration, provider)
     }
 
     /** Adds process/environment checks that cannot be performed by the pure configuration parser. */
@@ -42,8 +43,24 @@ internal object ArcDuelsRestartOnlySettingsValidator {
                 validatePlayerDataProvider(
                     configuration,
                     huskSyncEnabled = plugin.server.pluginManager.isPluginEnabled("HuskSync"),
-                ),
+                ).also { provider -> validatePlayerStatePolicy(configuration, provider) },
         )
+
+    private fun validatePlayerStatePolicy(
+        configuration: Configuration,
+        provider: PlayerDataSyncProvider,
+    ) {
+        if (PlayerStateMode.parse(configuration.strictString("player-state.mode", "PRESERVE")) != PlayerStateMode.DISPOSABLE) return
+        require(configuration.strictString("player-data-sync.provider", "AUTO").trim().equals("NONE", ignoreCase = true)) {
+            "player-state.mode DISPOSABLE requires player-data-sync.provider NONE"
+        }
+        require(!configuration.strictBoolean("own-inventory.enabled", true)) {
+            "player-state.mode DISPOSABLE requires own-inventory.enabled false"
+        }
+        require(provider == PlayerDataSyncProvider.NONE) {
+            "player-state.mode DISPOSABLE requires player-data-sync.provider NONE"
+        }
+    }
 
     private fun validateMySql(configuration: Configuration) {
         val enabled = configuration.strictBoolean("mysql.enabled", false)
@@ -204,6 +221,7 @@ internal object ArcDuelsRestartOnlySettingsValidator {
             "multiplayer",
             "multiplayer.defaults",
             "player-data-sync",
+            "player-state",
             "post-match",
             "series",
             "recovery",

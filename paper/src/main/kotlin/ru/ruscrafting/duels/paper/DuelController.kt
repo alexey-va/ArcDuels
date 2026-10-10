@@ -61,6 +61,7 @@ class DuelController(
             { rules -> directory.choices(rules, rules.kitId?.let(kitFingerprint)) }
         },
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
+    private val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
 ) : AutoCloseable {
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
     private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
@@ -336,6 +337,10 @@ class DuelController(
             return
         }
         if (offer.destination == localServer) {
+            if (playerStateMode == PlayerStateMode.DISPOSABLE) {
+                returnOffers.remove(playerId, offer)
+                return
+            }
             if (sessions.requestRecovery(player)) {
                 returnOffers.remove(playerId, offer)
             } else {
@@ -949,12 +954,33 @@ class DuelController(
         localParticipants: List<Player>,
     ): OriginPreparation {
         val message = requireNotNull(accepted.networkMessage)
-        if (message.recoveryMatchId != null) return OriginPreparation.READY
+        if (playerStateMode == PlayerStateMode.DISPOSABLE && localServer == accepted.host) {
+            // Host-local participants already have an in-process identity and return location.
+            // They must not be turned into durable inventory/health/XP snapshots just to satisfy
+            // the cross-server handshake; remote preserving origins still provide their escrows.
+            return OriginPreparation.READY
+        }
         val localOrigins =
             localParticipants.filter { player ->
                 val playerId = PlayerId(player.uniqueId)
                 originFor(message, playerId) == localServer
             }
+        if (playerStateMode == PlayerStateMode.DISPOSABLE && localOrigins.isNotEmpty()) {
+            localParticipants.forEach { player ->
+                player.sendMessage(
+                    locales.notice(
+                        player,
+                        "controller.start-failed",
+                        LocaleService.component("reason", locales.component(player, "controller.start-internal")),
+                    ),
+                )
+            }
+            plugin.logger.severe(
+                "Disposable origin server ${localServer.value} cannot escrow network challenge ${accepted.challenge.id}; no player will be transferred",
+            )
+            return OriginPreparation.FAILED
+        }
+        if (message.recoveryMatchId != null) return OriginPreparation.READY
         if (localOrigins.any { !playerDataReady(it) || (sessions.isStateLocked(it) && !sessions.hasOriginSnapshot(it, accepted.challenge)) }) {
             return OriginPreparation.WAIT
         }
@@ -1048,6 +1074,7 @@ class DuelController(
                 ?: runtimeSettings()?.defaultPostMatchReturnPolicy ?: returnPolicy
         val promptedRoutes = routes?.takeIf { effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT }
         promptedRoutes?.byPlayer?.forEach { (playerId, destination) ->
+            if (playerStateMode == PlayerStateMode.DISPOSABLE && destination == localServer) return@forEach
             returnOffers[playerId] = ReturnOffer(match.id, destination, promptedRoutes.recoveryMatchId)
         }
         // Automatic cross-server returns deliver the durable summary after the player
@@ -1093,7 +1120,9 @@ class DuelController(
                                 ),
                             )
                     val actions =
-                        routes?.forPlayer(playerId)?.let { destination ->
+                        routes?.forPlayer(playerId)?.takeUnless {
+                            playerStateMode == PlayerStateMode.DISPOSABLE && it == localServer
+                        }?.let { destination ->
                             val returnAction =
                                 locales.component(
                                     player,
@@ -1187,6 +1216,10 @@ class DuelController(
             if (destination == localServer) {
                 val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
                 val request = match.id to playerId
+                if (playerStateMode == PlayerStateMode.DISPOSABLE) {
+                    returnRequests += request
+                    return@forEach
+                }
                 if (request !in returnRequests && !sessions.requestRecovery(player)) {
                     if (returnFailureNotifications.add(request)) {
                         DuelLog.warn(

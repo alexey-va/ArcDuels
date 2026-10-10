@@ -312,6 +312,60 @@ class MultiplayerSessionManagerTest : StringSpec({
         }
     }
 
+    "disposable network groups admit a host-local origin without escrow and leave remote snapshots pending" {
+        withManagerScenario { paper ->
+            val repository = InMemoryEscrowRepository()
+            val returned = mutableListOf<Pair<java.util.UUID, ServerId>>()
+            multiplayerHarness(
+                paper,
+                escrowRepository = repository,
+                networkReturn = { player, server -> returned += player.uniqueId to server },
+                playerStateMode = PlayerStateMode.DISPOSABLE,
+            ).use { harness ->
+                val matchId = MatchId.random()
+                val local = ServerId("group-test")
+                val remote = ServerId("survival")
+                val roster = ffaRoster(harness.players)
+                val origins = roster.playerIds.mapIndexed { index, playerId ->
+                    playerId to if (index == 0) local else remote
+                }.toMap()
+                harness.players.drop(1).forEach { player ->
+                    DurablePlayerStateService(harness.plugin, remote, repository)
+                        .store(matchId, player, inventoryReplaced = true)
+                        .get()
+                }
+
+                val started =
+                    harness.manager.startNetwork(
+                        matchId,
+                        roster,
+                        harness.players.associateBy { PlayerId(it.uniqueId) },
+                        origins,
+                    )
+                paper.performTicks(4)
+                harness.teleports.completeAll()
+                paper.performTicks(4)
+
+                started.get() shouldBe matchId
+                harness.players.dropLast(1).forEach(harness.manager::eliminate)
+                harness.results.writes shouldHaveSize 1
+                harness.results.completion.complete(true)
+                paper.performTicks(64)
+
+                harness.manager.activeCount() shouldBe 0
+                returned shouldHaveSize 3
+                harness.players.drop(1).forEach { player ->
+                    returned.count { it == player.uniqueId to remote } shouldBe 1
+                }
+                returned.none { it.first == harness.players.first().uniqueId } shouldBe true
+                repository.pendingCount() shouldBe 3
+                repository.retainedCount() shouldBe 0
+                harness.players.forEach { it.inventory.isEmpty() shouldBe true }
+                harness.players.first().location.x shouldBe 0.0
+            }
+        }
+    }
+
     "network start with one missing origin snapshot releases the arena without touching players" {
         withManagerScenario { paper ->
             val repository = InMemoryEscrowRepository()

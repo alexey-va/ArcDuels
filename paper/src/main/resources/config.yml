@@ -12,6 +12,12 @@ challenge-timeout-seconds: 45
 own-inventory:
   enabled: true
 
+# PRESERVE keeps and restores durable player state for local matches.
+# DISPOSABLE is for isolated kit-only arenas: it requires provider NONE and
+# own-inventory.enabled false, and does not capture or restore match state.
+player-state:
+  mode: PRESERVE
+
 multiplayer:
   # Time available to accept a group invitation. Existing invitations retain
   # the deadline captured when their lobby was created.

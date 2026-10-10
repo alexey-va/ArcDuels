@@ -11,6 +11,8 @@ import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
+import org.bukkit.potion.PotionEffect
+import org.bukkit.potion.PotionEffectType
 import org.bukkit.event.inventory.ClickType
 import org.mockbukkit.mockbukkit.ServerMock
 import org.bukkit.util.Vector
@@ -40,6 +42,7 @@ import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.MatchScore
 import ru.ruscrafting.duels.domain.MatchState
+import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.PlayerId
@@ -1123,6 +1126,128 @@ class ArcDuelsPluginTest : StringSpec({
         plain.contains("Состояние ArcDuels") shouldBe true
         plain.contains("Сервер: Арена") shouldBe true
         plain.contains("Ожидают восстановления: 0") shouldBe true
+    }
+
+    "disposable kit duels can run twice without storing or replaying stale snapshots" {
+        val world = server.getWorld("world") ?: server.addSimpleWorld("world")
+        val arenaConfig = plugin.config.getConfigurationSection("arenas.example")?.getValues(true).orEmpty()
+        plugin.config.set("arenas.example.enabled", true)
+        plugin.config.set("arenas.example.allowed-loadouts", listOf("KIT"))
+        plugin.config.set("arenas.example.allowed-objectives", listOf("ELIMINATION"))
+        plugin.config.set("arenas.example.post-match-action", "RETURN_TO_ORIGIN")
+        val arenas = PaperArenaCatalog.load(plugin, ArenaEnvironmentInspector { })
+        val serverId = ServerId("disposable-test")
+        val first = server.addPlayer("DispStateOne")
+        val second = server.addPlayer("DispStateTwo")
+        val firstOrigin = Location(world, 30.0, 80.0, 30.0)
+        val secondOrigin = Location(world, 35.0, 80.0, 30.0)
+        first.teleport(firstOrigin)
+        second.teleport(secondOrigin)
+        first.inventory.setItem(0, ItemStack(Material.NETHERITE_SWORD))
+        second.inventory.setItem(0, ItemStack(Material.NETHERITE_AXE))
+
+        val repository = InMemoryEscrowRepository()
+        val oldMatchId = MatchId.random()
+        DurablePlayerStateService(plugin, serverId, repository)
+            .storePair(oldMatchId, first, second, inventoryReplaced = true)
+            .get()
+        val playerStates = DurablePlayerStateService(plugin, serverId, repository)
+        playerStates.loadPending(1_000L)
+        first.inventory.setItem(0, ItemStack(Material.GOLDEN_APPLE))
+        second.inventory.setItem(0, ItemStack(Material.GOLDEN_APPLE))
+
+        val manager =
+            DuelSessionManager(
+                plugin = plugin,
+                coordinator = MatchCoordinator(serverId, arenas, InMemoryStatisticsRepository()),
+                arenas = arenas,
+                kits = KitRegistry.load(plugin),
+                playerStates = playerStates,
+                locales = LocaleService.load(plugin),
+                countdownSeconds = 0,
+                teleportStabilizationTicks = 0L,
+                playerDataSaver = {},
+                celebrationDurationTicks = 0L,
+                seriesRoundIntermissionTicks = 0L,
+                defaultPostMatchReturnPolicy = PostMatchReturnPolicy.AUTOMATIC,
+                playerStateMode = PlayerStateMode.DISPOSABLE,
+                localServerId = serverId,
+            )
+
+        fun startKitMatch(): DuelMatch {
+            val now = Instant.now()
+            val challenge =
+                DuelChallenge.create(
+                    PlayerId(first.uniqueId),
+                    PlayerId(second.uniqueId),
+                    DuelRules(DuelMode.KIT, KitId("classic")),
+                    now,
+                    Duration.ofSeconds(60),
+                ).resolve(ChallengeStatus.ACCEPTED, now)
+            val started = manager.start(challenge)
+            server.scheduler.performTicks(2)
+            return started.get(5, TimeUnit.SECONDS)
+        }
+
+        try {
+            manager.hasPendingRecovery(first) shouldBe false
+            manager.requestRecovery(first) shouldBe false
+            manager.hasOriginSnapshot(first, oldMatchId) shouldBe false
+            manager.adminRecover(first).get().status shouldBe AdminRecoveryStatus.NO_SNAPSHOT
+            manager.handleJoin(first)
+            server.scheduler.performTicks(2)
+            first.inventory.getItem(0)?.type shouldBe Material.GOLDEN_APPLE
+
+            val firstMatch = startKitMatch()
+            manager.matchFor(first)?.id shouldBe firstMatch.id
+            first.allowFlight = true
+            first.isFlying = true
+            first.isInvulnerable = true
+            first.addPotionEffect(PotionEffect(PotionEffectType.SPEED, 200, 1))
+            first.inventory.setItem(5, ItemStack(Material.DIAMOND_SWORD))
+            manager.handleElimination(second)
+            server.scheduler.performTicks(3)
+
+            manager.matchFor(first) shouldBe null
+            first.inventory.isEmpty() shouldBe true
+            first.activePotionEffects.isEmpty() shouldBe true
+            first.allowFlight shouldBe false
+            first.isFlying shouldBe false
+            first.isInvulnerable shouldBe false
+            first.location.x shouldBe firstOrigin.x
+            second.location.x shouldBe secondOrigin.x
+            repository.pendingCount() shouldBe 2
+            repository.retainedCount() shouldBe 0
+
+            val secondMatch = startKitMatch()
+            manager.matchFor(second)?.id shouldBe secondMatch.id
+            second.allowFlight = true
+            second.isFlying = true
+            second.isInvulnerable = true
+            second.addPotionEffect(PotionEffect(PotionEffectType.SPEED, 200, 1))
+            second.inventory.setItem(5, ItemStack(Material.DIAMOND_AXE))
+            manager.handleQuit(second)
+            server.scheduler.performTicks(3)
+
+            manager.matchFor(first) shouldBe null
+            second.inventory.isEmpty() shouldBe true
+            second.activePotionEffects.isEmpty() shouldBe true
+            second.allowFlight shouldBe false
+            second.isFlying shouldBe false
+            second.isInvulnerable shouldBe false
+            repository.pendingCount() shouldBe 2
+            repository.retainedCount() shouldBe 0
+        } finally {
+            if (manager.matchFor(first) != null) manager.handleQuit(first)
+            if (manager.matchFor(second) != null) manager.handleQuit(second)
+            server.scheduler.performTicks(3)
+            first.disconnect()
+            second.disconnect()
+            listOf("enabled", "allowed-loadouts", "allowed-objectives", "post-match-action").forEach { key ->
+                plugin.config.set("arenas.example.$key", null)
+            }
+            arenaConfig.forEach { (key, value) -> plugin.config.set("arenas.example.$key", value) }
+        }
     }
 })
 

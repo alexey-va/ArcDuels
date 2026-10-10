@@ -42,6 +42,7 @@ data class ArcDuelsRuntimeSettings(
     val guiLeaderboardLimit: Int,
     val guiHistoryLimit: Int,
     val ownInventoryEnabled: Boolean = true,
+    val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
 ) {
     init {
         require(challengeTimeout in MIN_CHALLENGE_TIMEOUT..MAX_CHALLENGE_TIMEOUT) {
@@ -132,6 +133,7 @@ enum class ArcDuelsRestartOnlyField(
     MYSQL("mysql"),
     REDIS_CONNECTION("redis.connection"),
     PLAYER_DATA_PROVIDER("player-data-sync.provider"),
+    PLAYER_STATE_MODE("player-state.mode"),
 }
 
 /**
@@ -279,6 +281,8 @@ class ArcDuelsRestartOnlyFingerprint private constructor(
                     ),
                 ArcDuelsRestartOnlyField.PLAYER_DATA_PROVIDER to
                     listOf(RestartInput("player-data-sync.provider", "AUTO", ::uppercaseString)),
+                ArcDuelsRestartOnlyField.PLAYER_STATE_MODE to
+                    listOf(RestartInput("player-state.mode", "PRESERVE", ::uppercaseString)),
             )
 
         private fun uppercaseString(value: Any?): Any? =
@@ -424,6 +428,7 @@ object ArcDuelsRuntimeSettingsParser {
                     guiLeaderboardLimit = configuration.int("gui.leaderboard-limit", 100, 1..100),
                     guiHistoryLimit = configuration.int("gui.history-limit", 100, 1..100),
                     ownInventoryEnabled = configuration.boolean("own-inventory.enabled", true),
+                    playerStateMode = PlayerStateMode.parse(configuration.string("player-state.mode", "PRESERVE")),
                 ),
             restartOnlyFingerprint =
                 ArcDuelsRestartOnlyFingerprint.capture(

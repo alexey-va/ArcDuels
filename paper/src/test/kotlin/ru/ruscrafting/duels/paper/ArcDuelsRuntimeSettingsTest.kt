@@ -22,6 +22,43 @@ class ArcDuelsRuntimeSettingsTest : StringSpec({
         shouldThrow<IllegalArgumentException> { ArcDuelsRuntimeSettings.parse(config) }
     }
 
+    "disposable player state is restart-only and requires a no-sync kit-only node" {
+        val active =
+            ArcDuelsRuntimeSettings.parse(
+                MemoryConfiguration().apply { set("player-data-sync.provider", "NONE") },
+            )
+        val disposableConfig =
+            MemoryConfiguration().apply {
+                set("player-state.mode", "DISPOSABLE")
+                set("player-data-sync.provider", "NONE")
+                set("own-inventory.enabled", false)
+            }
+        val disposable = ArcDuelsRuntimeSettings.parse(disposableConfig)
+
+        disposable.settings.playerStateMode shouldBe PlayerStateMode.DISPOSABLE
+        disposable.restartRequiredComparedTo(active) shouldBe setOf(ArcDuelsRestartOnlyField.PLAYER_STATE_MODE)
+        ArcDuelsRestartOnlySettingsValidator.validateStructure(disposableConfig)
+
+        val invalidConfigs =
+            listOf(
+                MemoryConfiguration().apply {
+                    set("player-state.mode", "DISPOSABLE")
+                    set("player-data-sync.provider", "AUTO")
+                    set("own-inventory.enabled", false)
+                },
+                MemoryConfiguration().apply {
+                    set("player-state.mode", "DISPOSABLE")
+                    set("player-data-sync.provider", "NONE")
+                    set("own-inventory.enabled", true)
+                },
+            )
+        invalidConfigs.forEach { configuration ->
+            shouldThrow<IllegalArgumentException> {
+                ArcDuelsRestartOnlySettingsValidator.validateStructure(configuration)
+            }
+        }
+    }
+
     "missing runtime keys use documented safe defaults" {
         val candidate = ArcDuelsRuntimeSettings.parse(MemoryConfiguration())
 

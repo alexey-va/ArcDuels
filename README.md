@@ -99,3 +99,17 @@ The live policy hides the own-inventory menu entry and rejects creation, incomin
 offers, acceptance and network activation for that loadout. The default remains
 true. This does not change arena discovery or synchronize player inventories;
 use `player-data-sync.provider: NONE` for backends without HuskSync.
+
+Set `player-state.mode: DISPOSABLE` only on a backend whose player state is
+intentionally temporary (for example, an isolated Parkour server). It requires
+`player-data-sync.provider: NONE` and `own-inventory.enabled: false`, and supports
+KIT matches only. ArcDuels then captures no local inventory, health, XP, or
+durable recovery row: it keeps only in-memory participant and return-location
+metadata, clears the temporary kit/combat state on exit, and leaves legacy local
+recovery rows untouched. This is restart-only; switching back to `PRESERVE`
+will make retained rows eligible for normal recovery again, so review those rows
+before changing the mode. A disposable node can host its own network participants
+alongside preserving origins; a disposable remote origin cannot provide the
+durable escrow required by a match on another node, so that preparation fails
+closed. Leave preserving origins on `PRESERVE` so their escrow remains owned and
+applied by the origin backend.

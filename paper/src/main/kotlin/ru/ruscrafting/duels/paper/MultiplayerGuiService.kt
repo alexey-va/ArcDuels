@@ -49,6 +49,7 @@ import ru.ruscrafting.duels.redis.NetworkArenaDirectory
 import ru.ruscrafting.duels.redis.NetworkGroupParticipant
 import java.time.Clock
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 internal interface MultiplayerInvitationActions {
     fun openInvitation(player: Player, lobbyId: UUID)
@@ -880,8 +881,29 @@ internal class MultiplayerGuiService(
                 }
                 return@forEach
             }
+            if (duelSessions.isDisposablePlayerStateMode && localServer != message.arenaServer) {
+                DuelLog.warn(
+                    "multiplayer-disposable-origin-unsupported",
+                    MatchId(message.lobbyId),
+                    player,
+                    "origin_server={} arena_server={} no durable origin escrow was captured",
+                    localServer.value,
+                    message.arenaServer.value,
+                )
+                publishResponse(message, player.uniqueId, GroupLobbyResponse.FAILED, null)
+                return@forEach
+            }
             if (!preparationInFlight.add(key)) return@forEach
-            duelSessions.storeOriginSnapshot(MatchId(message.lobbyId), player, inventoryReplaced = true)
+            val originStatePreparation =
+                if (duelSessions.isDisposablePlayerStateMode) {
+                    // A participant already on the disposable arena host needs only transient
+                    // identity/return routing; capture no inventory, health, or XP state.
+                    CompletableFuture.completedFuture(Unit)
+                } else {
+                    duelSessions.storeOriginSnapshot(MatchId(message.lobbyId), player, inventoryReplaced = true)
+                        .thenApply { Unit }
+                }
+            originStatePreparation
                 .whenCompleteSync(tasks) { _, failure ->
                     preparationInFlight.remove(key)
                     if (failure != null) {
