@@ -34,6 +34,7 @@ import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.MatchEndReason
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchState
+import ru.ruscrafting.duels.domain.MultiplayerMatchResult
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ObjectiveFrame
 import ru.ruscrafting.duels.domain.ScoreRaceObjective
@@ -68,6 +69,7 @@ class DuelSessionManager internal constructor(
     private val defaultPostMatchReturnPolicy: PostMatchReturnPolicy = PostMatchReturnPolicy.PROMPT,
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val findRecordedMatch: (MatchId) -> CompletableFuture<RecordedMatch?> = { CompletableFuture.completedFuture(null) },
+    private val findMultiplayerResult: (MatchId) -> CompletableFuture<MultiplayerMatchResult?> = { CompletableFuture.completedFuture(null) },
     private val celebrationPlay: ((Player, ArcDuelsRuntimeSettings?) -> Unit)? = null,
     private val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
     private val localServerId: ServerId = ServerId("duels-1"),
@@ -701,7 +703,7 @@ class DuelSessionManager internal constructor(
                         player.sendMessage(locales.notice(player, "session.recovering"))
                     }
                     if (restoreAndRetain(player, stored, skipApplyWhenInventoryMatches = true) {
-                            celebrateRecoveredWinner(player, stored)
+                            presentRecoveredResult(player, stored)
                         }) {
                         markRestored(escrow.matchId, player.uniqueId)
                     } else {
@@ -1837,22 +1839,6 @@ class DuelSessionManager internal constructor(
         listOf(match.firstPlayer.value, match.secondPlayer.value).forEach { playerId ->
             ExternalArcDuelTelemetryBridge.completed(playerId, match.id.value.toString())
         }
-        participants(match).forEach { player ->
-            val won = player.uniqueId == winnerId.value
-            player.showTitle(
-                Title.title(
-                    locales.component(player, if (won) "session.match-win" else "session.match-loss"),
-                    scoreLine(match, player),
-                    Title.Times.times(Duration.ofMillis(200), Duration.ofSeconds(2), Duration.ofMillis(500)),
-                ),
-            )
-            player.playSound(
-                player.location,
-                if (won) Sound.UI_TOAST_CHALLENGE_COMPLETE else Sound.ENTITY_WITHER_HURT,
-                if (won) 0.9f else 0.5f,
-                1.0f,
-            )
-        }
         showFinaleDisplay(match, session, winnerId)
         scheduleFinalization(match, session, session.policy.celebrationDurationTicks)
     }
@@ -1910,12 +1896,16 @@ class DuelSessionManager internal constructor(
                 }
             }
             session.returnDestinationReady = true
-            celebrateLocalWinnerIfReady(match, session)
+            presentLocalResultsIfReady(match, session)
         }
         if (session.recoveryOwner == RecoveryOwner.ORIGIN_SERVERS) {
             if (!moveNetworkPlayersToLobby(match, session)) {
                 scheduleFinalization(match, session, 20L)
                 return
+            }
+            if (session.playerStateMode == PlayerStateMode.DISPOSABLE && session.returnLocations.isNotEmpty()) {
+                session.returnDestinationReady = true
+                presentLocalResultsIfReady(match, session, session.returnLocations.keys)
             }
         }
         hideMatchDisplay(session)
@@ -1969,22 +1959,53 @@ class DuelSessionManager internal constructor(
         playCelebration(player, session.policy.runtimeSettings)
     }
 
-    private fun celebrateLocalWinnerIfReady(
+    /** Present only after the return teleport and, where applicable, durable retention. */
+    private fun presentLocalResultsIfReady(
         match: DuelMatch,
         session: PaperSession,
+        playerIds: Set<UUID> = session.participantIds,
     ) {
-        val winner = match.winner ?: return
-        // Retention can finish after finalize removes the session. Keep the
-        // celebration eligible for that returned player, but never let a late
-        // callback affect a player already entering another match.
-        if (sessionByPlayer[winner.value]?.let { it != match.id } == true || winner.value in preparingPlayers) return
-        if (!session.returnDestinationReady || winner.value !in session.retainedPlayers) return
-        if (session.celebratedPlayers.add(winner.value)) {
-            plugin.server.getPlayer(winner.value)?.takeIf(Player::isOnline)?.let { celebrate(it, session) }
+        if (!session.returnDestinationReady) return
+        playerIds.forEach { playerId ->
+            if (sessionByPlayer[playerId]?.let { it != match.id } == true || playerId in preparingPlayers) return@forEach
+            if (session.playerStateMode != PlayerStateMode.DISPOSABLE && playerId !in session.retainedPlayers) return@forEach
+            val player = plugin.server.getPlayer(playerId)?.takeIf(Player::isOnline) ?: return@forEach
+            if (!session.presentedResults.add(playerId)) return@forEach
+            val won = playerId == match.winner?.value
+            presentResultAfterReturn(player, won, scoreLine(match, player)) {
+                if (won) celebrate(player, session)
+            }
         }
     }
 
-    private fun celebrateRecoveredWinner(
+    /** The next tick puts the title after the destination's respawn/teleport packets. */
+    private fun presentResultAfterReturn(
+        player: Player,
+        won: Boolean,
+        score: Component,
+        titleKey: String? = null,
+        afterTitle: () -> Unit = {},
+    ) {
+        val worldId = player.world.uid
+        plugin.server.scheduler.runTask(plugin, Runnable {
+            if (!player.isOnline || plugin.server.getPlayer(player.uniqueId) !== player ||
+                player.world.uid != worldId || isEngaged(player) || isPreparing(player)
+            ) return@Runnable
+            player.showTitle(
+                Title.title(
+                    locales.component(player, titleKey ?: if (won) "session.match-win" else "session.match-loss"),
+                    score,
+                    Title.Times.times(Duration.ofMillis(200), Duration.ofSeconds(2), Duration.ofMillis(500)),
+                ),
+            )
+            player.playSound(player.location,
+                if (won) Sound.UI_TOAST_CHALLENGE_COMPLETE else Sound.ENTITY_WITHER_HURT,
+                if (won) 0.9f else 0.5f, 1.0f)
+            afterTitle()
+        })
+    }
+
+    private fun presentRecoveredResult(
         player: Player,
         stored: StoredPlayerSnapshot,
     ) {
@@ -2001,13 +2022,49 @@ class DuelSessionManager internal constructor(
                     plugin.logger.info("Skipping stale duel recovery effects for ${current.uniqueId}; player entered another duel")
                     return@runSync
                 }
-                if (recorded?.outcome?.winner == PlayerId(stored.escrow.playerId.value) && current?.isOnline == true) {
-                    playCelebration(current, runtimeSettings())
-                }
                 if (recorded != null && current?.isOnline == true) {
+                    val won = recorded.wonBy(PlayerId(current.uniqueId))
+                    val score = recorded.scoreFor(PlayerId(current.uniqueId))
+                    presentResultAfterReturn(current, won,
+                        locales.component(current, "session.score", LocaleService.text("first", score.first),
+                            LocaleService.text("second", score.second))) {
+                        if (won) playCelebration(current, runtimeSettings())
+                    }
                     recoveryListeners.forEach { listener ->
                         runCatching { listener(current, recorded) }
                             .onFailure { plugin.logger.warning("Duel recovery listener failed for ${stored.escrow.matchId}: ${it.message}") }
+                    }
+                } else if (recorded == null) {
+                    findMultiplayerResult(stored.escrow.matchId).whenComplete { multiplayerResult, multiplayerFailure ->
+                        runSync multiplayerRecovery@ {
+                            if (multiplayerFailure != null) {
+                                plugin.logger.warning(
+                                    "Could not verify multiplayer result ${stored.escrow.matchId} before recovery title: ${unwrap(multiplayerFailure).message}",
+                                )
+                                return@multiplayerRecovery
+                            }
+                            val recoveredPlayer = plugin.server.getPlayer(stored.escrow.playerId.value)
+                            if (recoveredPlayer != null &&
+                                (sessionByPlayer.containsKey(recoveredPlayer.uniqueId) || recoveredPlayer.uniqueId in preparingPlayers)
+                            ) {
+                                plugin.logger.info(
+                                    "Skipping stale multiplayer recovery effects for ${recoveredPlayer.uniqueId}; player entered another duel",
+                                )
+                                return@multiplayerRecovery
+                            }
+                            val won =
+                                multiplayerResult
+                                    ?.wonBy(PlayerId(stored.escrow.playerId.value))
+                                    ?: return@multiplayerRecovery
+                            if (recoveredPlayer?.isOnline == true) {
+                                presentResultAfterReturn(
+                                    recoveredPlayer,
+                                    won,
+                                    Component.empty(),
+                                    titleKey = if (won) "multiplayer.victory.title" else "multiplayer.defeat.title",
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -2148,7 +2205,7 @@ class DuelSessionManager internal constructor(
                         player,
                         snapshot,
                         onRetained = completedMatch?.let { match ->
-                            { session.retainedPlayers += uuid; celebrateLocalWinnerIfReady(match, session) }
+                            { session.retainedPlayers += uuid; presentLocalResultsIfReady(match, session) }
                         },
                     )) {
                     restored = false
@@ -2343,7 +2400,7 @@ class DuelSessionManager internal constructor(
         val bossBars: MutableMap<UUID, BossBar> = ConcurrentHashMap(),
         val postMatchMovedPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val retainedPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
-        val celebratedPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
+        val presentedResults: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val modifiedBlocks: MutableMap<BlockKey, BlockState> = LinkedHashMap(),
         var roundElapsedTicks: Long = 0L,
         var suddenDeathStarted: Boolean = false,

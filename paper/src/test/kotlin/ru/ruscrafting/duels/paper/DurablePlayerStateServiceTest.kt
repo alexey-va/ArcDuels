@@ -2,16 +2,19 @@ package ru.ruscrafting.duels.paper
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.collections.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import org.bukkit.Material
+import org.bukkit.entity.Player
 import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.ServerMock
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.duels.domain.DuelChallenge
 import ru.ruscrafting.duels.domain.ChallengeStatus
@@ -23,6 +26,13 @@ import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchCoordinator
 import ru.ruscrafting.duels.domain.MatchEndReason
 import ru.ruscrafting.duels.domain.MatchOutcome
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
+import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.MultiplayerMatchOutcome
+import ru.ruscrafting.duels.domain.MultiplayerParticipant
+import ru.ruscrafting.duels.domain.MultiplayerRoster
+import ru.ruscrafting.duels.domain.MultiplayerRules
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.PlayerStateEscrow
 import ru.ruscrafting.duels.domain.PlayerStateEscrowRepository
@@ -204,7 +214,7 @@ class DurablePlayerStateServiceTest : StringSpec({
         stored.getValue(second.uniqueId).escrow.inventoryReplaced shouldBe false
     }
 
-    "recovery celebrates only the winner at the restored origin after retention retry and never on admin replay" {
+    "recovery presents both results at the restored origin only after retention and never on admin replay" {
         val repository = GatedEscrowRepository().apply {
             commit.complete(Unit)
             archival = CompletableFuture()
@@ -255,11 +265,16 @@ class DurablePlayerStateServiceTest : StringSpec({
         sessions.handleJoin(winner)
         server.scheduler.performTicks(2)
         fireworks shouldBe emptyList()
+        paper.resultTitleLines(winner) shouldBe emptyList()
         repository.archival.complete(false)
         repository.archival = CompletableFuture.completedFuture(true)
         server.scheduler.performTicks(60)
+        // Retention completes on this tick; presentation follows the return on the next.
+        fireworks shouldBe emptyList()
+        server.scheduler.performOneTick()
         fireworks shouldBe listOf(winner.uniqueId)
         recovered shouldBe listOf(winner.uniqueId)
+        paper.resultTitleLines(winner).single().shouldContain("Победа")
         winner.location.x shouldBe origin.x
         winner.location.y shouldBe origin.y
         winner.location.z shouldBe origin.z
@@ -268,11 +283,77 @@ class DurablePlayerStateServiceTest : StringSpec({
         server.scheduler.performTicks(2)
         fireworks shouldBe listOf(winner.uniqueId)
         recovered shouldBe listOf(winner.uniqueId, loser.uniqueId)
+        paper.resultTitleLines(loser).single().shouldContain("Поражение")
 
+        val winnerTitlesBeforeAdminReplay = paper.resultTitleLines(winner)
         sessions.adminRecover(winner).get()
         server.scheduler.performTicks(2)
         fireworks shouldBe listOf(winner.uniqueId)
         recovered shouldBe listOf(winner.uniqueId, loser.uniqueId)
+        paper.resultTitleLines(winner) shouldBe winnerTitlesBeforeAdminReplay
+        sessions.shutdown()
+    }
+
+    "recovery presents a multiplayer result at the restored origin after retention" {
+        val escrowRepository = GatedEscrowRepository().apply {
+            commit.complete(Unit)
+            archival = CompletableFuture()
+        }
+        val service = DurablePlayerStateService(plugin, ServerId("test-node"), escrowRepository)
+        val matchRepository = InMemoryStatisticsRepository()
+        val winner = server.addPlayer("MultiplayerRecoveredWinner")
+        val loser = server.addPlayer("MultiplayerRecoveredLoser")
+        val matchId = MatchId.random()
+        val winnerId = PlayerId(winner.uniqueId)
+        val loserId = PlayerId(loser.uniqueId)
+        val thirdId = PlayerId(UUID.randomUUID())
+        val outcome =
+            MultiplayerMatchOutcome(
+                matchId = matchId,
+                serverId = ServerId("arena"),
+                arenaId = ArenaId("group-one"),
+                roster = MultiplayerRoster(
+                    MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("classic")),
+                    listOf(
+                        MultiplayerParticipant(winnerId, kitId = KitId("classic")),
+                        MultiplayerParticipant(loserId, kitId = KitId("classic")),
+                        MultiplayerParticipant(thirdId, kitId = KitId("classic")),
+                    ),
+                ),
+                winners = setOf(winnerId),
+                winningTeam = null,
+                eliminationOrder = listOf(loserId, thirdId),
+                completedAt = Instant.parse("2026-08-15T13:00:00Z"),
+                endReason = MatchEndReason.ELIMINATION,
+            )
+        matchRepository.record(outcome).get() shouldBe true
+        service.storePair(matchId, winner, loser, inventoryReplaced = true).get()
+        val sessions =
+            DuelSessionManager(
+                plugin,
+                mockk(relaxed = true),
+                PaperArenaCatalog.load(plugin),
+                KitRegistry.load(plugin),
+                service,
+                LocaleService.load(plugin),
+                countdownSeconds = 0,
+                playerDataReady = { true },
+                recoveryApplyDelayTicks = 0L,
+                playerDataSaver = {},
+                findRecordedMatch = { CompletableFuture.completedFuture(null) },
+                findMultiplayerResult = matchRepository::findResult,
+            )
+
+        sessions.handleJoin(winner)
+        server.scheduler.performTicks(2)
+        paper.resultTitleLines(winner) shouldBe emptyList()
+        escrowRepository.archival.complete(true)
+        server.scheduler.performTicks(2)
+        paper.resultTitleLines(winner).single().shouldContain("Победа")
+
+        sessions.handleJoin(loser)
+        server.scheduler.performTicks(2)
+        paper.resultTitleLines(loser).single().shouldContain("Поражение")
         sessions.shutdown()
     }
 
@@ -992,3 +1073,8 @@ private class GatedEscrowRepository : PlayerStateEscrowRepository {
         return purgeResult
     }
 }
+
+private fun MockBukkitTestRuntime.resultTitleLines(player: Player): List<String> =
+    adventureTitles(player)
+        .map { PlainTextComponentSerializer.plainText().serialize(it.title()) }
+        .filter { it.contains("Победа") || it.contains("Поражение") }

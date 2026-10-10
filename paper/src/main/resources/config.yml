@@ -81,7 +81,7 @@ shutdown:
 locale:
   # ru or en. When enabled, Russian Minecraft clients get ru and all others en.
   default: ru
-  use-client-locale: true
+  use-client-locale: false
 
 celebration:
   # Keep both players on the arena for the victory sequence before recovery.
@@ -159,6 +159,12 @@ gui:
 
 # The example is disabled intentionally. Set real isolated coordinates and
 # enable it before accepting production matches.
+# Optional soft preference for automatic local, network, and group arena selection.
+# Leave both values empty for the existing capacity-based selection order.
+arena-selection:
+  preferred-server: ''
+  preferred-arena: ''
+
 arenas:
   example:
     enabled: false
@@ -225,4 +231,3 @@ magic-duel:
   blink:
     distance: 7.0
     recharge-seconds: 8
-    double-shift-millis: 350

@@ -284,6 +284,9 @@ internal class MultiplayerSessionManager(
 
     fun hasArenaCapacity(roster: MultiplayerRoster): Boolean = arenas.hasMultiplayerCapacity(roster)
 
+    fun hasAvailableArenaCapacity(roster: MultiplayerRoster): Boolean =
+        arenas.hasAvailableMultiplayerCapacity(roster)
+
     fun isInsideArena(player: Player, destination: Location): Boolean =
         matchFor(player)?.let { arenas.get(it.arenaId).bounds.contains(destination) } ?: true
 
@@ -676,17 +679,6 @@ internal class MultiplayerSessionManager(
             session.match = session.match.markPersisted()
             participants(session).forEach { player ->
                 val won = PlayerId(player.uniqueId) in session.match.winners
-                audience.showTitle(
-                    player,
-                    Title.title(
-                        locales.component(player, if (won) "multiplayer.victory.title" else "multiplayer.defeat.title"),
-                        locales.component(
-                            player,
-                            "multiplayer.finish.subtitle",
-                            LocaleService.component("mode", multiplayerModeComponent(player, session.match.roster)),
-                        ),
-                    ),
-                )
                 audience.sendMessage(
                     player,
                     locales.notice(
@@ -740,6 +732,7 @@ internal class MultiplayerSessionManager(
             if (sessions[session.match.id] !== session) return@whenCompleteSync
             if (failure == null) {
                 releaseSession(session)
+                presentLocalResultTitles(session)
             } else {
                 session.restoreInFlight = false
                 players.filter(Player::isOnline).forEach { player ->
@@ -868,6 +861,27 @@ internal class MultiplayerSessionManager(
                         }
                 }
             }
+        }
+    }
+
+    private fun presentLocalResultTitles(session: Session) {
+        if (session.match.state != MultiplayerMatchState.COMPLETED) return
+        session.match.roster.playerIds.forEach { playerId ->
+            val origin = session.origins?.get(playerId)
+            if (origin != null && origin != serverId) return@forEach
+            val player = Bukkit.getPlayer(playerId.value)?.takeIf(Player::isOnline) ?: return@forEach
+            val won = playerId in session.match.winners
+            audience.showTitle(
+                player,
+                Title.title(
+                    locales.component(player, if (won) "multiplayer.victory.title" else "multiplayer.defeat.title"),
+                    locales.component(
+                        player,
+                        "multiplayer.finish.subtitle",
+                        LocaleService.component("mode", multiplayerModeComponent(player, session.match.roster)),
+                    ),
+                ),
+            )
         }
     }
 

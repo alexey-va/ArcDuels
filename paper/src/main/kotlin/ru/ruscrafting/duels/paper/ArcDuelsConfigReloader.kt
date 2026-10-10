@@ -82,7 +82,11 @@ internal class ArcDuelsConfigReloader(
             val prepared =
                 PreparedReload(
                     settings = settings,
-                    arenas = PaperArenaCatalog.load(plugin, configuration),
+                    arenas = PaperArenaCatalog.load(
+                        plugin,
+                        configuration,
+                        preferredArenaSelection = settings.settings.preferredArenaSelection,
+                    ),
                     kits =
                         KitRegistry.loadCandidate(
                             plugin,

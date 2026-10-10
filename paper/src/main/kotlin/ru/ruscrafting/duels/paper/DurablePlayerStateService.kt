@@ -144,12 +144,13 @@ internal class DurablePlayerStateService(
             }
         }
     }
+    /** Only preserved origins need escrow; a mixed disposable-host match can have one. */
     fun findMatchSnapshots(
         matchId: MatchId,
         origins: Map<PlayerId, ServerId>,
     ): CompletableFuture<Map<PlayerId, PlayerStateEscrow>> {
-        require(origins.size in 2..MAX_MULTIPLAYER_PARTICIPANTS) {
-            "A network match requires 2..$MAX_MULTIPLAYER_PARTICIPANTS origin snapshots"
+        require(origins.size in 1..MAX_MULTIPLAYER_PARTICIPANTS) {
+            "A network lookup requires 1..$MAX_MULTIPLAYER_PARTICIPANTS origin snapshots"
         }
         val lookups = origins.keys.associateWith(repository::findPending)
         return CompletableFuture.allOf(*lookups.values.toTypedArray())

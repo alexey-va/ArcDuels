@@ -219,10 +219,14 @@ data class ArenaCapacity(
 
 class PaperArenaCatalog private constructor(
     initialArenas: Map<ArenaId, PaperArena>,
+    private val localServer: ServerId,
+    initialPreference: ArenaSelection?,
 ) : ArenaAllocator {
     private val lock = Any()
     @Volatile
     private var arenas: Map<ArenaId, PaperArena> = initialArenas
+    @Volatile
+    private var preferredArenaSelection: ArenaSelection? = initialPreference
     private val reserved = mutableSetOf<ArenaId>()
     private val waiting = ArrayDeque<PendingReservation>()
 
@@ -237,12 +241,7 @@ class PaperArenaCatalog private constructor(
         val future = CompletableFuture<ArenaReservation>()
         synchronized(lock) {
             if (arenas.isEmpty()) return CompletableFuture.failedFuture(IllegalStateException("No enabled duel arenas are configured"))
-            val compatible =
-                if (arenaId == null) {
-                    arenas.values.filter { it.supports(rules) }
-                } else {
-                    listOfNotNull(arenas[arenaId]).filter { it.supports(rules) }
-                }
+            val compatible = compatibleArenas(rules, arenaId)
             if (compatible.isEmpty()) {
                 val reason = if (arenaId == null) "No arena supports the selected objective" else "Selected arena is missing or incompatible"
                 return CompletableFuture.failedFuture(IllegalStateException(reason))
@@ -265,7 +264,7 @@ class PaperArenaCatalog private constructor(
 
     fun reserveMultiplayer(roster: MultiplayerRoster): CompletableFuture<MultiplayerArenaReservation> =
         synchronized(lock) {
-            val compatible = arenas.values.filter { it.supports(roster) }
+            val compatible = preferredFirst(arenas.values.filter { it.supports(roster) })
             if (compatible.isEmpty()) {
                 return@synchronized CompletableFuture.failedFuture(MultiplayerArenaCapacityException())
             }
@@ -279,6 +278,11 @@ class PaperArenaCatalog private constructor(
 
     fun hasMultiplayerCapacity(roster: MultiplayerRoster): Boolean =
         synchronized(lock) { arenas.values.any { it.supports(roster) } }
+
+    fun hasAvailableMultiplayerCapacity(roster: MultiplayerRoster): Boolean =
+        synchronized(lock) { arenas.values.any { it.id !in reserved && it.supports(roster) } }
+
+    fun preferredSelection(): ArenaSelection? = preferredArenaSelection
 
     fun size(): Int = arenas.size
 
@@ -361,6 +365,7 @@ class PaperArenaCatalog private constructor(
                 "Arenas cannot be reloaded while matches or queue entries are active"
             }
             arenas = replacement.arenas
+            preferredArenaSelection = replacement.preferredArenaSelection
         }
         return arenas.size
     }
@@ -370,10 +375,27 @@ class PaperArenaCatalog private constructor(
         synchronized(lock) {
             if (reserved.isNotEmpty() || waiting.any { !it.future.isDone }) return@synchronized null
             arenas = replacement.arenas
+            preferredArenaSelection = replacement.preferredArenaSelection
             arenas.size
         }
 
     private fun reservationFor(id: ArenaId): ArenaReservation = ArenaReservation(id) { release(id) }
+
+    private fun compatibleArenas(rules: DuelRules, exactArenaId: ArenaId?): List<PaperArena> {
+        val compatible =
+            if (exactArenaId == null) {
+                arenas.values.filter { it.supports(rules) }
+            } else {
+                listOfNotNull(arenas[exactArenaId]).filter { it.supports(rules) }
+            }
+        return if (exactArenaId == null) preferredFirst(compatible) else compatible
+    }
+
+    private fun preferredFirst(candidates: List<PaperArena>): List<PaperArena> {
+        val preferred = preferredArenaSelection?.takeIf { it.serverId == localServer }?.arenaId ?: return candidates
+        val first = candidates.firstOrNull { it.id == preferred } ?: return candidates
+        return listOf(first) + candidates.filterNot { it.id == preferred }
+    }
 
     private fun release(id: ArenaId) {
         val assignments = mutableListOf<Pair<CompletableFuture<ArenaReservation>, ArenaReservation>>()
@@ -381,20 +403,12 @@ class PaperArenaCatalog private constructor(
             if (!reserved.remove(id)) return
             while (true) {
                 val next = waiting.firstOrNull { pending ->
-                    !pending.future.isDone && arenas.values.any { arena ->
-                        arena.id !in reserved &&
-                            (pending.arenaId == null || arena.id == pending.arenaId) &&
-                            arena.supports(pending.rules)
-                    }
+                    !pending.future.isDone && compatibleArenas(pending.rules, pending.arenaId).any { it.id !in reserved }
                 } ?: break
                 waiting.remove(next)
                 val arena =
                     requireNotNull(
-                        arenas.values.firstOrNull { arena ->
-                            arena.id !in reserved &&
-                                (next.arenaId == null || arena.id == next.arenaId) &&
-                                arena.supports(next.rules)
-                        },
+                        compatibleArenas(next.rules, next.arenaId).firstOrNull { it.id !in reserved },
                     )
                 reserved += arena.id
                 assignments += next.future to reservationFor(arena.id)
@@ -407,18 +421,50 @@ class PaperArenaCatalog private constructor(
 
     companion object {
         fun load(plugin: JavaPlugin): PaperArenaCatalog =
-            load(plugin, plugin.config, ArenaEnvironmentInspector.create(plugin))
+            load(
+                plugin,
+                plugin.config,
+                ArenaEnvironmentInspector.create(plugin),
+                ArcDuelsRuntimeSettingsParser.parsePreferredArenaSelection(plugin.config),
+            )
+
+        fun load(plugin: JavaPlugin, preferredArenaSelection: ArenaSelection?): PaperArenaCatalog =
+            load(plugin, plugin.config, ArenaEnvironmentInspector.create(plugin), preferredArenaSelection)
 
         internal fun load(
             plugin: JavaPlugin,
             inspector: ArenaEnvironmentInspector,
-        ): PaperArenaCatalog = load(plugin, plugin.config, inspector)
+        ): PaperArenaCatalog =
+            load(
+                plugin,
+                plugin.config,
+                inspector,
+                ArcDuelsRuntimeSettingsParser.parsePreferredArenaSelection(plugin.config),
+            )
 
         internal fun load(
             plugin: JavaPlugin,
             configuration: Configuration,
             inspector: ArenaEnvironmentInspector = ArenaEnvironmentInspector.create(plugin),
-        ): PaperArenaCatalog = PaperArenaCatalog(parse(plugin, configuration, inspector))
+        ): PaperArenaCatalog =
+            load(
+                plugin,
+                configuration,
+                inspector,
+                ArcDuelsRuntimeSettingsParser.parsePreferredArenaSelection(configuration),
+            )
+
+        internal fun load(
+            plugin: JavaPlugin,
+            configuration: Configuration,
+            inspector: ArenaEnvironmentInspector = ArenaEnvironmentInspector.create(plugin),
+            preferredArenaSelection: ArenaSelection?,
+        ): PaperArenaCatalog =
+            PaperArenaCatalog(
+                parse(plugin, configuration, inspector),
+                localServer = ServerId(configuration.getString("server-id", plugin.server.name)!!),
+                initialPreference = preferredArenaSelection,
+            )
 
         private fun parse(
             plugin: JavaPlugin,

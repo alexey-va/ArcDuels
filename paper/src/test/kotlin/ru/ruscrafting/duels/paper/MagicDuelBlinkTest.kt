@@ -8,7 +8,7 @@ import org.bukkit.Material
 import org.bukkit.block.data.type.Slab
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.event.player.PlayerTeleportEvent
-import org.bukkit.event.player.PlayerToggleSneakEvent
+import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.entity.Player
 import org.bukkit.util.BoundingBox
 import org.bukkit.util.Vector
@@ -21,14 +21,6 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 class MagicDuelBlinkTest : StringSpec({
-    "only a second sneak press inside the window triggers, and the third only arms a new pair" {
-        val state = blinkState()
-
-        state.doublePress(0L) shouldBe false
-        state.doublePress(350_000_000L) shouldBe true
-        state.doublePress(500_000_000L) shouldBe false
-    }
-
     "two successful blinks consume two charges and the next attempt does not run" {
         val state = blinkState()
         var teleports = 0
@@ -70,14 +62,13 @@ class MagicDuelBlinkTest : StringSpec({
         delayed.charges shouldBe 2
     }
 
-    "a new match round starts with full charges and fresh double-press input" {
+    "a new match round starts with two fresh charges" {
         val states = MagicDuelBlinkStateStore()
         val playerId = UUID(0L, 1L)
         val firstToken = MagicDuelBlinkRoundToken(UUID(0L, 2L), 1)
         val nextToken = firstToken.copy(round = 2)
         val settings = { MagicDuelBlinkSettings() }
         val first = states.stateFor(playerId, firstToken, settings)
-        first.doublePress(0L) shouldBe false
         first.attemptTeleport(1L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
         first.charges shouldBe 1
 
@@ -87,7 +78,6 @@ class MagicDuelBlinkTest : StringSpec({
         next.token shouldBe nextToken
         (next === first) shouldBe false
         next.charges shouldBe 2
-        next.doublePress(4L) shouldBe false
     }
 
     "settings parse defaults and reject values outside their configured bounds" {
@@ -136,12 +126,12 @@ class MagicDuelBlinkTest : StringSpec({
         ) shouldBe true
     }
 
-    "listener respects cancelled input, wall collision, arena bounds, slab support, and hazards" {
+    "swap hands blinks once in active magic, respects cancellation, and keeps safe bounds" {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcDuelsPlugin>()
             val world = paper.server.getWorld("world") ?: paper.server.addSimpleWorld("world")
             for (x in -1..1) for (z in -1..1) world.getChunkAt(x, z).load()
-            for (x in -4..12) for (z in -4..14) world.getBlockAt(x, 69, z).type = Material.STONE
+            for (x in -4..12) for (z in -4..18) world.getBlockAt(x, 69, z).type = Material.STONE
             for (y in 70..72) for (z in -2..3) world.getBlockAt(3, y, z).type = Material.STONE
             val slab = world.getBlockAt(1, 69, 8)
             slab.type = Material.STONE_SLAB
@@ -152,11 +142,14 @@ class MagicDuelBlinkTest : StringSpec({
             val boundedPlayer = paper.server.addPlayer("BlinkBound")
             val slabPlayer = paper.server.addPlayer("BlinkSlab")
             val hazardPlayer = paper.server.addPlayer("BlinkHazard")
+            val shiftPlayer = paper.server.addPlayer("BlinkShift")
+            val inactivePlayer = paper.server.addPlayer("BlinkFree")
             val players = listOf(
                 wallPlayer to 0.5,
                 boundedPlayer to 4.5,
                 slabPlayer to 8.5,
                 hazardPlayer to 12.5,
+                shiftPlayer to 16.5,
             )
             players.forEach { (player, z) ->
                 player.teleport(Location(world, 0.5, 70.0, z, -90f, 0f), PlayerTeleportEvent.TeleportCause.PLUGIN)
@@ -194,16 +187,19 @@ class MagicDuelBlinkTest : StringSpec({
             )
             try {
                 paper.server.pluginManager.registerEvents(blink, plugin)
-                fun sneak(player: Player, cancelled: Boolean = false) {
-                    paper.server.pluginManager.callEvent(
-                        PlayerToggleSneakEvent(player, true).apply { isCancelled = cancelled },
-                    )
+                fun swap(player: Player, cancelled: Boolean = false): PlayerSwapHandItemsEvent {
+                    val event = PlayerSwapHandItemsEvent(
+                        player,
+                        player.inventory.itemInMainHand,
+                        player.inventory.itemInOffHand,
+                    ).apply { isCancelled = cancelled }
+                    paper.server.pluginManager.callEvent(event)
+                    return event
                 }
 
-                sneak(wallPlayer, cancelled = true)
+                swap(wallPlayer, cancelled = true).isCancelled shouldBe true
                 destinations.containsKey(wallPlayer.uniqueId) shouldBe false
-                sneak(wallPlayer)
-                sneak(wallPlayer)
+                swap(wallPlayer).isCancelled shouldBe true
                 val wallStop = requireNotNull(destinations[wallPlayer.uniqueId]) {
                     "Expected a wall-stop blink destination; origin=${wallPlayer.location}, " +
                         "direction=${wallPlayer.location.direction}, " +
@@ -211,17 +207,21 @@ class MagicDuelBlinkTest : StringSpec({
                 }
                 (wallStop.x in 1.0..<3.0) shouldBe true
 
-                sneak(boundedPlayer)
-                sneak(boundedPlayer)
+                swap(boundedPlayer).isCancelled shouldBe true
                 val boundsStop = destinations[boundedPlayer.uniqueId]
                 (boundsStop != null && boundsStop.x <= 1.75) shouldBe true
 
-                sneak(slabPlayer)
-                sneak(slabPlayer)
-                sneak(hazardPlayer)
-                sneak(hazardPlayer)
+                swap(slabPlayer).isCancelled shouldBe true
+                swap(hazardPlayer).isCancelled shouldBe true
                 destinations.containsKey(slabPlayer.uniqueId) shouldBe false
                 destinations.containsKey(hazardPlayer.uniqueId) shouldBe false
+
+                shiftPlayer.isSneaking = true
+                swap(shiftPlayer).isCancelled shouldBe true
+                destinations.containsKey(shiftPlayer.uniqueId) shouldBe false
+
+                swap(inactivePlayer).isCancelled shouldBe false
+                destinations.containsKey(inactivePlayer.uniqueId) shouldBe false
             } finally {
                 blink.close()
                 tasks.close()

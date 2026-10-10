@@ -141,6 +141,7 @@ class NetworkArenaDirectory(
         rules: DuelRules,
         requiredKitFingerprint: String?,
         selected: ArenaSelection? = null,
+        preferred: ArenaSelection? = null,
     ): ServerId? {
         requireKitFingerprintForMode(rules.mode, requiredKitFingerprint)
         val active = activeNodes()
@@ -154,7 +155,15 @@ class NetworkArenaDirectory(
             .asSequence()
             .filter { it.total(rules, requiredKitFingerprint) > 0 }
             .sortedWith(
-                compareByDescending<ArenaNodeStatus> { it.free(rules, requiredKitFingerprint) > 0 }
+                compareByDescending<ArenaNodeStatus> { status ->
+                    preferred?.let { preference ->
+                        status.server == preference.serverId &&
+                            status.matching(rules, requiredKitFingerprint).any { arena ->
+                                arena.id == preference.arenaId && arena.available
+                            }
+                    } == true
+                }
+                    .thenByDescending { it.free(rules, requiredKitFingerprint) > 0 }
                     .thenBy(ArenaNodeStatus::queuedPairs)
                     .thenBy { status ->
                         status.total(rules, requiredKitFingerprint) - status.free(rules, requiredKitFingerprint)

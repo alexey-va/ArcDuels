@@ -82,6 +82,8 @@ internal fun multiplayerHarness(
 ): MultiplayerHarness {
     val plugin = paper.loadPlugin<ArcDuelsPlugin>()
     HandlerList.unregisterAll(plugin)
+    // This reusable GUI fixture exercises both locale catalogs explicitly.
+    plugin.config.set("locale.use-client-locale", true)
     val world = paper.server.getWorld("world") ?: paper.server.addSimpleWorld("world")
     for (x in -24..24) {
         for (z in -24..24) world.getBlockAt(x, 79, z).type = Material.STONE
@@ -157,6 +159,7 @@ internal fun MultiplayerHarness.registerGui(
     groupBus: CrossServerGroupBus? = null,
     transfer: PlayerTransfer? = null,
     arenaDirectory: ru.ruscrafting.duels.redis.NetworkArenaDirectory? = null,
+    preferredArenaSelection: () -> ru.ruscrafting.duels.domain.ArenaSelection? = { null },
     duelSessions: DuelSessionManager = mockk(relaxed = true),
     playerDataReady: (Player) -> Boolean = { true },
     clock: Clock = Clock.systemUTC(),
@@ -175,6 +178,7 @@ internal fun MultiplayerHarness.registerGui(
         groupBus = groupBus,
         transfer = transfer,
         arenaDirectory = arenaDirectory,
+        preferredArenaSelection = preferredArenaSelection,
         playerDataReady = playerDataReady,
         clock = clock,
         runtimeSettings = runtimeSettings,

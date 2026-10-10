@@ -62,6 +62,7 @@ class DuelController(
         },
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
+    private val preferredArenaSelection: () -> ArenaSelection? = { null },
 ) : AutoCloseable {
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
     private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
@@ -250,7 +251,12 @@ class DuelController(
         }
         val requiredKitFingerprint = contexts[challenge.id]?.kitFingerprint
         val matchServer =
-            arenaDirectory?.select(challenge.rules, requiredKitFingerprint, challenge.arenaSelection)
+            arenaDirectory?.select(
+                challenge.rules,
+                requiredKitFingerprint,
+                challenge.arenaSelection,
+                preferredArenaSelection(),
+            )
                 ?: challenge.arenaSelection?.serverId?.takeIf { arenaDirectory == null && it == localServer }
         if ((arenaDirectory != null || challenge.arenaSelection != null) && matchServer == null) {
             player.sendMessage(locales.notice(player, "controller.no-network-arena"))

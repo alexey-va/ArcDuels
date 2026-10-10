@@ -1,8 +1,11 @@
 package ru.ruscrafting.duels.paper
 
 import org.bukkit.configuration.Configuration
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.ServerId
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Duration
@@ -43,6 +46,7 @@ data class ArcDuelsRuntimeSettings(
     val guiHistoryLimit: Int,
     val ownInventoryEnabled: Boolean = true,
     val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
+    val preferredArenaSelection: ArenaSelection? = null,
 ) {
     init {
         require(challengeTimeout in MIN_CHALLENGE_TIMEOUT..MAX_CHALLENGE_TIMEOUT) {
@@ -429,6 +433,7 @@ object ArcDuelsRuntimeSettingsParser {
                     guiHistoryLimit = configuration.int("gui.history-limit", 100, 1..100),
                     ownInventoryEnabled = configuration.boolean("own-inventory.enabled", true),
                     playerStateMode = PlayerStateMode.parse(configuration.string("player-state.mode", "PRESERVE")),
+                    preferredArenaSelection = parsePreferredArenaSelection(configuration),
                 ),
             restartOnlyFingerprint =
                 ArcDuelsRestartOnlyFingerprint.capture(
@@ -437,6 +442,20 @@ object ArcDuelsRuntimeSettingsParser {
                     effectivePlayerDataProvider,
                 ),
         )
+    }
+
+    internal fun parsePreferredArenaSelection(configuration: Configuration): ArenaSelection? {
+        val server = configuration.string("arena-selection.preferred-server", "").trim()
+        val arena = configuration.string("arena-selection.preferred-arena", "").trim()
+        require(server.isEmpty() == arena.isEmpty()) {
+            "arena-selection.preferred-server and arena-selection.preferred-arena must both be empty or configured together"
+        }
+        if (server.isEmpty()) return null
+        return try {
+            ArenaSelection(ServerId(server), ArenaId(arena.lowercase(Locale.ROOT)))
+        } catch (failure: IllegalArgumentException) {
+            throw IllegalArgumentException("arena-selection preferred server or arena id is invalid", failure)
+        }
     }
 
     private fun Configuration.int(

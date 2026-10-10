@@ -8,6 +8,7 @@ import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelRules
@@ -90,6 +91,84 @@ class PaperArenaQueueTest : StringSpec({
         active.close()
         pinned.get().arenaId shouldBe ArenaId("queue")
         pinned.get().close()
+    }
+
+    "automatic pair and group reservations prefer the configured arena but retain compatible fallbacks" {
+        val previousServer = plugin.config.get("server-id")
+        val queueEnabled = plugin.config.getBoolean("arenas.queue.enabled")
+        try {
+            plugin.config.set("server-id", "parkour")
+            plugin.config.set("arenas.queue.enabled", false)
+            configureArena(plugin, "duel_ruins", "queue-world")
+            configureArena(plugin, "queue-alt", "queue-world")
+            plugin.config.set("arenas.duel_ruins.allowed-loadouts", listOf("KIT"))
+            plugin.config.set("arenas.duel_ruins.allowed-objectives", listOf("ELIMINATION"))
+            plugin.config.set("arenas.queue-alt.allowed-loadouts", listOf("KIT"))
+            plugin.config.set("arenas.queue-alt.allowed-objectives", listOf("ELIMINATION", "BOXING"))
+
+            val preference = ArenaSelection(ServerId("parkour"), ArenaId("duel_ruins"))
+            val catalog = PaperArenaCatalog.load(plugin, preference)
+            val elimination = DuelRules(DuelMode.KIT, KitId("classic"))
+            val activeDefault = catalog.reserve(elimination).get()
+            val fallbackWhileDefaultBusy = catalog.reserve(elimination).get()
+            activeDefault.arenaId shouldBe ArenaId("duel_ruins")
+            fallbackWhileDefaultBusy.arenaId shouldBe ArenaId("queue-alt")
+
+            val explicitFallback = catalog.reserve(elimination, ArenaId("queue-alt"))
+            val automaticWaiter = catalog.reserve(elimination)
+            explicitFallback.isDone shouldBe false
+            automaticWaiter.isDone shouldBe false
+            activeDefault.close()
+            automaticWaiter.get().arenaId shouldBe ArenaId("duel_ruins")
+            explicitFallback.isDone shouldBe false
+            automaticWaiter.get().close()
+            fallbackWhileDefaultBusy.close()
+            explicitFallback.get().arenaId shouldBe ArenaId("queue-alt")
+            explicitFallback.get().close()
+
+            val boxing =
+                DuelRules(
+                    DuelMode.KIT,
+                    KitId("classic"),
+                    objective = DuelObjectiveType.BOXING,
+                    modifiers = CombatModifiers(false, false, false, false),
+                )
+            catalog.reserve(boxing).get().also { reservation ->
+                reservation.arenaId shouldBe ArenaId("queue-alt")
+                reservation.close()
+            }
+
+            val roster =
+                MultiplayerRoster(
+                    MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("classic")),
+                    (0 until 3).map { index ->
+                        MultiplayerParticipant(PlayerId(UUID(0, index + 1L)), kitId = KitId("classic"))
+                    },
+                )
+            val groupDefault = catalog.reserveMultiplayer(roster).get()
+            val groupFallback = catalog.reserveMultiplayer(roster).get()
+            groupDefault.arenaId shouldBe ArenaId("duel_ruins")
+            groupFallback.arenaId shouldBe ArenaId("queue-alt")
+            catalog.hasAvailableMultiplayerCapacity(roster) shouldBe false
+            groupDefault.close()
+            groupFallback.close()
+
+            val updatedCatalog =
+                PaperArenaCatalog.load(
+                    plugin,
+                    ArenaSelection(ServerId("parkour"), ArenaId("queue-alt")),
+                )
+            (catalog.tryReplaceWith(updatedCatalog) != null) shouldBe true
+            catalog.reserve(elimination).get().also { reservation ->
+                reservation.arenaId shouldBe ArenaId("queue-alt")
+                reservation.close()
+            }
+        } finally {
+            plugin.config.set("arenas.duel_ruins.enabled", false)
+            plugin.config.set("arenas.queue-alt.enabled", false)
+            plugin.config.set("arenas.queue.enabled", queueEnabled)
+            plugin.config.set("server-id", previousServer)
+        }
     }
 
     "arena catalog cannot hot reload while a match owns an arena or a pair is queued" {

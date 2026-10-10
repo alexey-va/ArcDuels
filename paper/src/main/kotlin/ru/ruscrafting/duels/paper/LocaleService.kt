@@ -267,7 +267,7 @@ class LocaleService private constructor(
             val bundles = sources.mapValues { (_, source) -> source.first }
             val defaultLanguage = configuration.strictString("locale.default", "ru").lowercase(Locale.ROOT)
             require(defaultLanguage in bundles) { "locale.default must be ru or en" }
-            val useClientLocale = configuration.strictBoolean("locale.use-client-locale", true)
+            val useClientLocale = configuration.strictBoolean("locale.use-client-locale", false)
             val renderer =
                 LocalizedMiniMessage(
                     catalogs = bundles.mapValues { (_, bundle) -> YamlLocaleCatalog(bundle) },

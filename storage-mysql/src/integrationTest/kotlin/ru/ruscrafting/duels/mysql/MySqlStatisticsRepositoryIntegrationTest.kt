@@ -26,6 +26,7 @@ import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
 import ru.ruscrafting.duels.domain.MultiplayerMatchOutcome
+import ru.ruscrafting.duels.domain.MultiplayerMatchResult
 import ru.ruscrafting.duels.domain.MultiplayerParticipant
 import ru.ruscrafting.duels.domain.MultiplayerRoster
 import ru.ruscrafting.duels.domain.MultiplayerRules
@@ -158,6 +159,9 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
 
             repository.record(outcome).get() shouldBe true
             repository.record(outcome).get() shouldBe false
+            repository.findResult(outcome.matchId).get() shouldBe
+                MultiplayerMatchResult(outcome.matchId, players.toSet(), setOf(players.last()))
+            repository.findResult(MatchId(UUID(0, 201L))).get() shouldBe null
             mysql.endpoint.connect().use { connection ->
                 connection.prepareStatement(
                     "SELECT COUNT(*) FROM `arcduels_multiplayer_participants` WHERE `match_id` = ?",

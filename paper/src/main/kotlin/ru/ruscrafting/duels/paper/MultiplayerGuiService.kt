@@ -27,6 +27,7 @@ import ru.arc.paper.menu.PaperMenuFrame
 import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.paper.menu.regionFrame
 import ru.ruscrafting.duels.domain.DuelMode
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
@@ -75,6 +76,7 @@ internal class MultiplayerGuiService(
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val guiItems: GuiItemCatalog = GuiItemCatalog.load(plugin),
     private val menuLayouts: ArcDuelsMenuLayouts = ArcDuelsMenuLayouts.load(plugin),
+    private val preferredArenaSelection: () -> ArenaSelection? = { null },
     private val backAction: (Player) -> Unit,
 ) : Listener, AutoCloseable, MultiplayerInvitationActions {
     private data class Draft(
@@ -462,19 +464,44 @@ internal class MultiplayerGuiService(
     }
 
     private fun selectArenaServer(roster: MultiplayerRoster): ServerId? {
-        if (sessions.hasArenaCapacity(roster)) return localServer
         val requiredKits = roster.participants.map { it.kitId }.distinct()
-        return arenaDirectory?.activeNodes()?.asSequence()
-            ?.filter { node -> node.server != localServer && requiredKits.all { node.kitFingerprints[it] == kits.fingerprint(it) } }
-            ?.filter { node -> node.arenas.any { arena ->
-                arena.supports(DuelRules(DuelMode.KIT, requiredKits.first(), objective = roster.rules.objective,
-                    modifiers = if (roster.rules.objective.isHitRace) ru.ruscrafting.duels.domain.CombatModifiers(
-                        projectiles = false, consumables = false, enderPearls = false, naturalRegeneration = false,
-                    ) else ru.ruscrafting.duels.domain.CombatModifiers()))
-            } }
-            ?.sortedWith(compareByDescending<ru.ruscrafting.duels.redis.ArenaNodeStatus> { node -> node.arenas.any { it.available } }
-                .thenBy { it.queuedPairs }.thenBy { it.server.value })
-            ?.firstOrNull()?.server
+        val rules =
+            DuelRules(
+                DuelMode.KIT,
+                requiredKits.first(),
+                objective = roster.rules.objective,
+                modifiers =
+                    if (roster.rules.objective.isHitRace) {
+                        ru.ruscrafting.duels.domain.CombatModifiers(
+                            projectiles = false,
+                            consumables = false,
+                            enderPearls = false,
+                            naturalRegeneration = false,
+                        )
+                    } else {
+                        ru.ruscrafting.duels.domain.CombatModifiers()
+                    },
+            )
+        val preference = preferredArenaSelection()
+        val candidates =
+            arenaDirectory?.activeNodes().orEmpty().filter { node ->
+                node.server != localServer &&
+                    requiredKits.all { node.kitFingerprints[it] == kits.fingerprint(it) } &&
+                    node.arenas.any { it.available && it.supports(rules) }
+            }
+        val preferredRemote =
+            preference?.takeIf { it.serverId != localServer }?.let { preferred ->
+                candidates.firstOrNull { node ->
+                    node.server == preferred.serverId &&
+                        node.arenas.any { it.id == preferred.arenaId && it.available && it.supports(rules) }
+                }
+            }
+        if (preferredRemote != null) return preferredRemote.server
+        if (sessions.hasAvailableArenaCapacity(roster)) return localServer
+        return candidates
+            .sortedWith(compareBy<ru.ruscrafting.duels.redis.ArenaNodeStatus> { it.queuedPairs }.thenBy { it.server.value })
+            .firstOrNull()
+            ?.server
     }
 
     private fun receiveArenaStartStatus(message: CrossServerGroupMessage) {

@@ -15,6 +15,7 @@ import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.MultiplayerLayout
@@ -44,15 +45,15 @@ class MultiplayerNetworkValidationMockBukkitTest : StringSpec({
                         server = ServerId("parkour"),
                         arenas = setOf(
                             ru.ruscrafting.duels.redis.ArenaAdvertisement(
-                                id = ArenaId("parkour-sumo"),
-                                displayName = "Parkour Sumo",
+                                id = ArenaId("duel_ruins"),
+                                displayName = "Ruins",
                                 loadouts = setOf(DuelMode.KIT),
                                 objectives = setOf(DuelObjectiveType.ELIMINATION),
                                 available = true,
                             ),
                         ).toList(),
                         kitFingerprints = mapOf(KitId("classic") to requireNotNull(harness.kits.fingerprint(KitId("classic")))),
-                        queuedPairs = 0,
+                        queuedPairs = 5,
                     ),
                 )
                 val arenaPayload = parkourRedis.getPublishedMessages().last().message
@@ -61,7 +62,30 @@ class MultiplayerNetworkValidationMockBukkitTest : StringSpec({
                     arenaPayload,
                     "parkour",
                 )
-                localDirectory.activeNodes().map { it.server } shouldBe listOf(ServerId("parkour"))
+                val spawnRedis = InMemoryRedis(ServerIdentity { "spawn" })
+                val spawnDirectory = ru.ruscrafting.duels.redis.NetworkArenaDirectory(spawnRedis, ServerId("spawn"))
+                spawnDirectory.publish(
+                    ru.ruscrafting.duels.redis.ArenaNodeStatus(
+                        server = ServerId("spawn"),
+                        arenas = listOf(
+                            ru.ruscrafting.duels.redis.ArenaAdvertisement(
+                                id = ArenaId("spawn-arena"),
+                                displayName = "Spawn Arena",
+                                loadouts = setOf(DuelMode.KIT),
+                                objectives = setOf(DuelObjectiveType.ELIMINATION),
+                                available = true,
+                            ),
+                        ),
+                        kitFingerprints = mapOf(KitId("classic") to requireNotNull(harness.kits.fingerprint(KitId("classic")))),
+                        queuedPairs = 0,
+                    ),
+                )
+                redis.simulateExternalMessage(
+                    ru.ruscrafting.duels.redis.NetworkArenaDirectory.CHANNEL,
+                    spawnRedis.getPublishedMessages().last().message,
+                    "spawn",
+                )
+                localDirectory.activeNodes().map { it.server } shouldBe listOf(ServerId("parkour"), ServerId("spawn"))
                 val bus = CrossServerGroupBus(redis, ServerId("group-test"))
                 val sent = mutableListOf<CrossServerGroupMessage>()
                 val observation = bus.subscribe(sent::add)
@@ -69,6 +93,7 @@ class MultiplayerNetworkValidationMockBukkitTest : StringSpec({
                     groupBus = bus,
                     transfer = PlayerTransfer { _, _ -> BackendTransferResult.SENT },
                     arenaDirectory = localDirectory,
+                    preferredArenaSelection = { ArenaSelection(ServerId("parkour"), ArenaId("duel_ruins")) },
                 )
                 try {
                     val host = harness.players.first()
@@ -98,6 +123,7 @@ class MultiplayerNetworkValidationMockBukkitTest : StringSpec({
                     bus.close()
                     localDirectory.close()
                     parkourDirectory.close()
+                    spawnDirectory.close()
                 }
             }
         }

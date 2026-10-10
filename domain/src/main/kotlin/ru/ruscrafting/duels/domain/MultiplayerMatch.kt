@@ -279,6 +279,26 @@ data class MultiplayerMatchOutcome(
     }
 }
 
+/** Durable fields required to present a multiplayer result after origin-server recovery. */
+data class MultiplayerMatchResult(
+    val matchId: MatchId,
+    val participants: Set<PlayerId>,
+    val winners: Set<PlayerId>,
+) {
+    init {
+        require(participants.isNotEmpty()) { "A multiplayer result requires participants" }
+        require(winners.isNotEmpty() && winners.all(participants::contains)) {
+            "Multiplayer result winners must belong to its participants"
+        }
+    }
+
+    fun wonBy(playerId: PlayerId): Boolean? = when {
+        playerId !in participants -> null
+        playerId in winners -> true
+        else -> false
+    }
+}
+
 fun MultiplayerMatch.outcome(): MultiplayerMatchOutcome {
     require(state in setOf(MultiplayerMatchState.COMPLETING, MultiplayerMatchState.COMPLETED)) {
         "Only a completing multiplayer match has a durable outcome"
@@ -299,4 +319,8 @@ fun MultiplayerMatch.outcome(): MultiplayerMatchOutcome {
 fun interface MultiplayerMatchRepository {
     /** Stores one complete multiplayer result idempotently by match id. */
     fun record(outcome: MultiplayerMatchOutcome): CompletableFuture<Boolean>
+
+    /** Returns the durable identity and winner set needed for origin recovery presentation. */
+    fun findResult(matchId: MatchId): CompletableFuture<MultiplayerMatchResult?> =
+        CompletableFuture.completedFuture(null)
 }

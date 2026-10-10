@@ -10,7 +10,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerQuitEvent
-import org.bukkit.event.player.PlayerToggleSneakEvent
+import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.util.BoundingBox
 import org.bukkit.util.Vector
 import ru.arc.core.LifecycleTaskScope
@@ -24,7 +24,6 @@ import kotlin.math.hypot
 internal data class MagicDuelBlinkSettings(
     val distance: Double = 7.0,
     val rechargeSeconds: Long = 8L,
-    val doubleShiftMillis: Long = 350L,
 ) {
     init {
         require(distance.isFinite() && distance in 1.0..16.0) {
@@ -33,16 +32,12 @@ internal data class MagicDuelBlinkSettings(
         require(rechargeSeconds in 1L..3_600L) {
             "magic-duel.blink.recharge-seconds must be between 1 and 3600"
         }
-        require(doubleShiftMillis in 100L..1_000L) {
-            "magic-duel.blink.double-shift-millis must be between 100 and 1000"
-        }
     }
 
     companion object {
         fun parse(configuration: Configuration): MagicDuelBlinkSettings = MagicDuelBlinkSettings(
             distance = configuration.strictNumber("magic-duel.blink.distance", 7.0),
             rechargeSeconds = configuration.strictLong("magic-duel.blink.recharge-seconds", 8L),
-            doubleShiftMillis = configuration.strictLong("magic-duel.blink.double-shift-millis", 350L),
         )
     }
 }
@@ -62,17 +57,8 @@ internal class MagicDuelBlinkRoundState(
 ) {
     var charges: Int = MAX_CHARGES
         private set
-    private var lastSneakPressNanos: Long? = null
     private var nextChargeAtNanos: Long? = null
     private var feedbackUntilNanos: Long? = null
-
-    fun doublePress(nowNanos: Long): Boolean {
-        val previous = lastSneakPressNanos
-        lastSneakPressNanos = null
-        if (previous != null && nowNanos - previous in 0L..doublePressWindowNanos) return true
-        lastSneakPressNanos = nowNanos
-        return false
-    }
 
     fun refreshCharges(nowNanos: Long) {
         if (charges >= MAX_CHARGES) return
@@ -106,8 +92,6 @@ internal class MagicDuelBlinkRoundState(
 
     fun mayShowStatus(nowNanos: Long): Boolean = feedbackUntilNanos?.let { nowNanos - it >= 0L } ?: true
 
-    private val doublePressWindowNanos: Long
-        get() = settings.doubleShiftMillis * NANOS_PER_MILLI
     private val rechargeNanos: Long
         get() = settings.rechargeSeconds * NANOS_PER_SECOND
 
@@ -143,7 +127,7 @@ internal class MagicDuelBlinkStateStore {
     }
 }
 
-/** Double-sneak blink for active magic duel rounds. Bukkit access stays on the Paper thread. */
+/** Swap-hand blink for active magic duel rounds. Bukkit access stays on the Paper thread. */
 internal class MagicDuelBlink(
     tasks: LifecycleTaskScope,
     private val locales: LocaleService,
@@ -161,27 +145,24 @@ internal class MagicDuelBlink(
     private var closed = false
     private val statusTask: ScheduledTask? = tasks.runTimer(1L, 20L, ::refreshStatus)
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    fun onSneakToggle(event: PlayerToggleSneakEvent) {
-        if (closed || !event.isSneaking) return
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onSwapHands(event: PlayerSwapHandItemsEvent) {
+        if (closed) return
         val player = event.player
         val playerId = player.uniqueId
-        if (playerId in teleporting) return
-
         val context = activeContext(player)
         val token = context?.roundToken()
         if (token == null) {
             states.remove(playerId)
             return
         }
+        event.isCancelled = true
+        // ARC's Shift+F shortcuts run at LOWEST before this event reaches the duel listeners.
+        if (player.isSneaking || playerId in teleporting) return
 
         val now = nowNanos()
         val state = states.stateFor(playerId, token, settingsForNewRound)
         state.refreshCharges(now)
-        if (!state.doublePress(now)) {
-            showStatus(player, state, now)
-            return
-        }
 
         if (state.charges == 0) {
             state.pauseStatus(now)

@@ -90,7 +90,7 @@ class ArcDuelsGuiLiveConfigMockBukkitTest : StringSpec({
             paper.performTicks(2)
 
             expiredEvent.isCancelled shouldBe true
-            expired.nextPlainMessage().contains("timed out") shouldBe true
+            expired.nextPlainMessage().contains("Время") shouldBe true
             verify(exactly = 0) { fixture.admin.execute(expired, any()) }
 
             val current = paper.server.addPlayer("CurrentArenaAdm").apply {

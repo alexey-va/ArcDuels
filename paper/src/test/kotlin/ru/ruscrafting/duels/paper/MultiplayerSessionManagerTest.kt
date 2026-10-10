@@ -8,6 +8,7 @@ import ru.arc.paper.chunk.PaperChunkKey
 import ru.arc.paper.chunk.PaperChunkTicketAddResult
 import ru.arc.paper.chunk.PaperChunkTicketBackend
 import ru.arc.paper.playerstate.PaperPlayerDataPersistence
+import ru.arc.paper.testing.PaperAudienceEffectObservation
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
 import ru.ruscrafting.duels.domain.MatchEndReason
@@ -32,13 +33,16 @@ class MultiplayerSessionManagerTest : StringSpec({
                 harness.manager.eliminate(harness.players[1])
                 harness.manager.eliminate(harness.players[2], MatchEndReason.FORFEIT)
                 harness.results.writes shouldHaveSize 1
+                harness.audience.clear()
 
                 harness.results.completion.complete(true)
                 paper.server.scheduler.performTicks(4)
                 harness.manager.isLocked(harness.players[3]) shouldBe true
+                harness.audience.observations().filterIsInstance<PaperAudienceEffectObservation.TitleShown>() shouldHaveSize 0
 
                 paper.server.scheduler.performTicks(64)
                 harness.manager.isEngaged(harness.players[3]) shouldBe false
+                harness.audience.observations().filterIsInstance<PaperAudienceEffectObservation.TitleShown>() shouldHaveSize 4
                 harness.players.forEachIndexed { index, player ->
                     player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
                 }
@@ -204,6 +208,7 @@ class MultiplayerSessionManagerTest : StringSpec({
 
                 harness.players.dropLast(1).forEach(harness.manager::eliminate)
                 harness.results.writes shouldHaveSize 1
+                harness.audience.clear()
                 harness.results.completion.complete(true)
                 paper.performTicks(64)
 
@@ -211,6 +216,7 @@ class MultiplayerSessionManagerTest : StringSpec({
                 repository.pendingCount() shouldBe harness.players.size
                 repository.retainedCount() shouldBe 0
                 returned shouldHaveSize harness.players.size
+                harness.audience.observations().filterIsInstance<PaperAudienceEffectObservation.TitleShown>() shouldHaveSize 0
                 harness.players.forEach { player ->
                     returned.count { it == player.uniqueId to origin } shouldBe 1
                 }

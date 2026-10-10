@@ -5,8 +5,11 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.bukkit.configuration.MemoryConfiguration
+import ru.ruscrafting.duels.domain.ArenaId
+import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.ServerId
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -20,6 +23,29 @@ class ArcDuelsRuntimeSettingsTest : StringSpec({
         ArcDuelsRuntimeSettings.parse(config).settings.ownInventoryEnabled shouldBe false
         config.set("own-inventory.enabled", "false")
         shouldThrow<IllegalArgumentException> { ArcDuelsRuntimeSettings.parse(config) }
+    }
+
+    "preferred arena requires a complete valid server and arena pair" {
+        ArcDuelsRuntimeSettings.parse(MemoryConfiguration()).settings.preferredArenaSelection shouldBe null
+
+        val configured =
+            MemoryConfiguration().apply {
+                set("arena-selection.preferred-server", " parkour ")
+                set("arena-selection.preferred-arena", " DUEL_RUINS ")
+            }
+        ArcDuelsRuntimeSettings.parse(configured).settings.preferredArenaSelection shouldBe
+            ArenaSelection(ServerId("parkour"), ArenaId("duel_ruins"))
+
+        listOf(
+            MemoryConfiguration().apply { set("arena-selection.preferred-server", "parkour") },
+            MemoryConfiguration().apply { set("arena-selection.preferred-arena", "duel_ruins") },
+            MemoryConfiguration().apply {
+                set("arena-selection.preferred-server", "parkour")
+                set("arena-selection.preferred-arena", "bad id")
+            },
+        ).forEach { configuration ->
+            shouldThrow<IllegalArgumentException> { ArcDuelsRuntimeSettings.parse(configuration) }
+        }
     }
 
     "disposable player state is restart-only and requires a no-sync kit-only node" {

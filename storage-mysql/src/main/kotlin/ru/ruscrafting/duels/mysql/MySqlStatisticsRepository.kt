@@ -18,6 +18,7 @@ import ru.ruscrafting.duels.domain.MatchOutcome
 import ru.ruscrafting.duels.domain.MatchEndReason
 import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
 import ru.ruscrafting.duels.domain.MultiplayerMatchOutcome
+import ru.ruscrafting.duels.domain.MultiplayerMatchResult
 import ru.ruscrafting.duels.domain.MultiplayerMatchRepository
 import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.PersistedMatchResult
@@ -156,6 +157,9 @@ class MySqlStatisticsRepository(
             true
         }
     }
+
+    override fun findResult(matchId: MatchId): CompletableFuture<MultiplayerMatchResult?> =
+        runtime.executor.read { connection -> findMultiplayerResult(connection, matchId) }
 
     override fun leaderboard(limit: Int): CompletableFuture<List<LeaderboardEntry>> {
         require(limit in 1..100) { "Leaderboard limit must be between 1 and 100" }
@@ -818,6 +822,35 @@ class MySqlStatisticsRepository(
         ).use { statement ->
             statement.setBytes(1, UuidBytes.encode(matchId.value))
             statement.executeQuery().use { result -> if (result.next()) result.toRecordedMatch() else null }
+        }
+
+    private fun findMultiplayerResult(
+        connection: Connection,
+        matchId: MatchId,
+    ): MultiplayerMatchResult? =
+        connection.prepareStatement(
+            """
+            SELECT p.`player_id`, p.`won`
+            FROM `arcduels_multiplayer_matches` m
+            LEFT JOIN `arcduels_multiplayer_participants` p ON p.`match_id` = m.`match_id`
+            WHERE m.`match_id` = ?
+            ORDER BY p.`player_id` ASC
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setBytes(1, UuidBytes.encode(matchId.value))
+            statement.executeQuery().use resultUse@ { result ->
+                if (!result.next()) return@resultUse null
+                val participants = linkedSetOf<PlayerId>()
+                val winners = linkedSetOf<PlayerId>()
+                do {
+                    val playerIdBytes = result.getBytes("player_id")
+                    check(playerIdBytes != null) { "Stored multiplayer match $matchId has no participant rows" }
+                    val playerId = PlayerId(UuidBytes.decode(playerIdBytes))
+                    check(participants.add(playerId)) { "Stored multiplayer match $matchId repeats participant $playerId" }
+                    if (result.getBoolean("won")) winners += playerId
+                } while (result.next())
+                MultiplayerMatchResult(matchId, participants, winners)
+            }
         }
 
     private fun ResultSet.toMatchOutcome(): MatchOutcome =

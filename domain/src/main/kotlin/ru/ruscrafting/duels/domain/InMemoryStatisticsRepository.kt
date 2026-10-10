@@ -177,6 +177,13 @@ class InMemoryStatisticsRepository : StatisticsRepository, DuelPresetRepository,
         return CompletableFuture.completedFuture(newlyRecorded)
     }
 
+    override fun findResult(matchId: MatchId): CompletableFuture<MultiplayerMatchResult?> =
+        CompletableFuture.completedFuture(
+            multiplayerMatches[matchId]?.let { outcome ->
+                MultiplayerMatchResult(outcome.matchId, outcome.roster.playerIds, outcome.winners)
+            },
+        )
+
     private fun PersistedMatchResult.toRecordedMatch(): RecordedMatch =
         RecordedMatch(
             outcome,

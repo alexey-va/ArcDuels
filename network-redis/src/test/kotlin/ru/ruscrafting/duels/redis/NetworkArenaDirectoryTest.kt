@@ -156,6 +156,55 @@ class NetworkArenaDirectoryTest : StringSpec({
         directory.close()
     }
 
+    "automatic routing prefers an available configured arena and falls back when it is busy" {
+        val redis = InMemoryRedis(ServerIdentity { "parkour" })
+        val directory = NetworkArenaDirectory(redis, ServerId("parkour"), clock)
+        val rules = DuelRules(DuelMode.KIT, KitId("classic"))
+        directory.publish(
+            ArenaNodeStatus(
+                ServerId("parkour"),
+                listOf(
+                    arena("duel_ruins", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true),
+                    arena("parkour-fallback", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true),
+                ),
+                kitFingerprints = mapOf(KitId("classic") to CLASSIC_FINGERPRINT),
+                queuedPairs = 5,
+            ),
+        )
+        redis.simulateExternalMessage(
+            NetworkArenaDirectory.CHANNEL,
+            statusJson(
+                "spawn",
+                listOf(arena("spawn-arena", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true)),
+                mapOf(KitId("classic") to CLASSIC_FINGERPRINT),
+            ),
+            "spawn",
+        )
+        val preferred = ArenaSelection(ServerId("parkour"), ArenaId("duel_ruins"))
+
+        directory.select(rules, CLASSIC_FINGERPRINT, preferred = preferred) shouldBe ServerId("parkour")
+        directory.select(
+            rules,
+            CLASSIC_FINGERPRINT,
+            selected = ArenaSelection(ServerId("spawn"), ArenaId("spawn-arena")),
+            preferred = preferred,
+        ) shouldBe ServerId("spawn")
+
+        directory.publish(
+            ArenaNodeStatus(
+                ServerId("parkour"),
+                listOf(
+                    arena("duel_ruins", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = false),
+                    arena("parkour-fallback", setOf(DuelMode.KIT), setOf(DuelObjectiveType.ELIMINATION), available = true),
+                ),
+                kitFingerprints = mapOf(KitId("classic") to CLASSIC_FINGERPRINT),
+                queuedPairs = 5,
+            ),
+        )
+        directory.select(rules, CLASSIC_FINGERPRINT, preferred = preferred) shouldBe ServerId("spawn")
+        directory.close()
+    }
+
     "rejects spoofed nodes and stops routing to stale heartbeats" {
         val redis = InMemoryRedis(ServerIdentity { "spawn" })
         val directory = NetworkArenaDirectory(redis, ServerId("spawn"), clock)

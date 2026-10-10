@@ -2,6 +2,7 @@ package ru.ruscrafting.duels.paper
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import io.mockk.every
@@ -10,6 +11,7 @@ import io.mockk.verify
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
@@ -87,6 +89,11 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.isEnabled shouldBe true
         ArcLogging.disableStructuredEmit shouldBe true
         plugin.pluginMeta.name shouldBe "ArcDuels"
+        plugin.config.getBoolean("locale.use-client-locale") shouldBe false
+        val englishClient = mockk<org.bukkit.entity.Player> {
+            every { locale() } returns java.util.Locale.US
+        }
+        LocaleService.load(plugin).language(englishClient) shouldBe "ru"
         plugin.config.getInt("countdown-seconds") shouldBe 3
         plugin.config.getLong("teleport-stabilization-ticks") shouldBe 3L
         plugin.config.getLong("rematch-window-seconds") shouldBe 180L
@@ -964,7 +971,7 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.set("arenas.example.enabled", false)
     }
 
-    "main hub follows the challenge submenu path and renders the client language" {
+    "main hub follows the challenge submenu path and stays Russian for an English client" {
         val player = server.addPlayer("MenuTester")
         server.addPlayer("Opponent")
         player.setLocale(java.util.Locale.ENGLISH)
@@ -984,9 +991,9 @@ class ArcDuelsPluginTest : StringSpec({
         } shouldBe true
         val challengeItem = requireNotNull(player.openInventory.topInventory.getItem(11))
         val challengeName = requireNotNull(challengeItem.itemMeta.displayName())
-        PlainTextComponentSerializer.plainText().serialize(challengeName) shouldBe "Challenge to a 1v1 duel"
+        PlainTextComponentSerializer.plainText().serialize(challengeName) shouldBe "Вызвать на дуэль 1 на 1"
         challengeName.decoration(TextDecoration.ITALIC) shouldBe TextDecoration.State.FALSE
-        challengeItem.plainLore().lineSequence().last() shouldBe "[▶] Left click — Configure the duel"
+        challengeItem.plainLore().lineSequence().last() shouldBe "[▶] ЛКМ — Настроить дуэль"
 
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 11)
         player.openInventory.topInventory.getItem(10)?.type shouldBe Material.PLAYER_HEAD
@@ -1049,17 +1056,17 @@ class ArcDuelsPluginTest : StringSpec({
         )
         val catalogLore = crossbow.plainLore()
         val catalogTranslations = crossbow.itemMeta.lore().orEmpty().flatMap(Component::translationKeys)
-        catalogLore.contains("Kit contents") shouldBe true
+        catalogLore.contains("Состав набора") shouldBe true
         catalogTranslations.contains("item.minecraft.crossbow") shouldBe true
         catalogTranslations.contains("enchantment.minecraft.quick_charge") shouldBe true
-        catalogLore.contains("unbreakable") shouldBe true
+        catalogLore.contains("неразрушимый") shouldBe true
         catalogTranslations.contains("item.minecraft.arrow") shouldBe true
         catalogLore.contains("×32") shouldBe true
 
         player.performCommand("duel") shouldBe true
         player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 15)
         player.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
-        requireNotNull(player.openInventory.topInventory.getItem(32)).plainLore().contains("Kit contents") shouldBe true
+        requireNotNull(player.openInventory.topInventory.getItem(32)).plainLore().contains("Состав набора") shouldBe true
         player.closeInventory()
     }
 
@@ -1128,6 +1135,86 @@ class ArcDuelsPluginTest : StringSpec({
         plain.contains("Ожидают восстановления: 0") shouldBe true
     }
 
+    "network disposable kit results appear only after returning host-local origins" {
+        val world = server.getWorld("world") ?: server.addSimpleWorld("world")
+        val arenaConfig = plugin.config.getConfigurationSection("arenas.example")?.getValues(true).orEmpty()
+        plugin.config.set("arenas.example.enabled", true)
+        plugin.config.set("arenas.example.allowed-loadouts", listOf("KIT"))
+        plugin.config.set("arenas.example.allowed-objectives", listOf("ELIMINATION"))
+        plugin.config.set("arenas.example.post-match-action", "RETURN_TO_ORIGIN")
+        val arenas = PaperArenaCatalog.load(plugin, ArenaEnvironmentInspector {})
+        val localServer = ServerId("disposable-network")
+        val remoteServer = ServerId("remote-origin")
+        val local = server.addPlayer("DispNetLocal")
+        val remote = server.addPlayer("DispNetRemote")
+        val localOrigin = Location(world, 28.0, 80.0, 28.0)
+        local.teleport(localOrigin)
+        remote.teleport(Location(world, 34.0, 80.0, 28.0))
+        val repository = InMemoryEscrowRepository()
+        val playerStates = DurablePlayerStateService(plugin, localServer, repository)
+        val now = Instant.now()
+        val challenge =
+            DuelChallenge.create(
+                PlayerId(local.uniqueId),
+                PlayerId(remote.uniqueId),
+                DuelRules(DuelMode.KIT, KitId("classic")),
+                now,
+                Duration.ofSeconds(60),
+                ArenaSelection(localServer, ArenaId("example")),
+            ).resolve(ChallengeStatus.ACCEPTED, now)
+        DurablePlayerStateService(plugin, remoteServer, repository)
+            .store(MatchId(challenge.id.value), remote, inventoryReplaced = true)
+            .get(5, TimeUnit.SECONDS)
+        val manager =
+            DuelSessionManager(
+                plugin = plugin,
+                coordinator = MatchCoordinator(localServer, arenas, InMemoryStatisticsRepository()),
+                arenas = arenas,
+                kits = KitRegistry.load(plugin),
+                playerStates = playerStates,
+                locales = LocaleService.load(plugin),
+                countdownSeconds = 0,
+                teleportStabilizationTicks = 0L,
+                playerDataSaver = {},
+                celebrationPlay = { _, _ -> },
+                celebrationDurationTicks = 0L,
+                seriesRoundIntermissionTicks = 0L,
+                defaultPostMatchReturnPolicy = PostMatchReturnPolicy.AUTOMATIC,
+                playerStateMode = PlayerStateMode.DISPOSABLE,
+                localServerId = localServer,
+            )
+
+        try {
+            val origins = mapOf(
+                PlayerId(local.uniqueId) to localServer,
+                PlayerId(remote.uniqueId) to remoteServer,
+            )
+            val started = manager.startNetwork(challenge, origins)
+            server.scheduler.performTicks(2)
+            val match = started.get(5, TimeUnit.SECONDS)
+            manager.matchFor(local)?.id shouldBe match.id
+
+            manager.handleElimination(remote)
+            paper.resultTitleLines(local) shouldBe emptyList()
+            paper.resultTitleLines(remote) shouldBe emptyList()
+            server.scheduler.performTicks(3)
+
+            local.location.x shouldBe localOrigin.x
+            paper.resultTitleLines(local).single().shouldContain("Победа")
+            paper.resultTitleLines(remote) shouldBe emptyList()
+        } finally {
+            if (manager.matchFor(local) != null) manager.handleQuit(local)
+            if (manager.matchFor(remote) != null) manager.handleQuit(remote)
+            server.scheduler.performTicks(3)
+            local.disconnect()
+            remote.disconnect()
+            listOf("enabled", "allowed-loadouts", "allowed-objectives", "post-match-action").forEach { key ->
+                plugin.config.set("arenas.example.$key", null)
+            }
+            arenaConfig.forEach { (key, value) -> plugin.config.set("arenas.example.$key", value) }
+        }
+    }
+
     "disposable kit duels can run twice without storing or replaying stale snapshots" {
         val world = server.getWorld("world") ?: server.addSimpleWorld("world")
         val arenaConfig = plugin.config.getConfigurationSection("arenas.example")?.getValues(true).orEmpty()
@@ -1167,6 +1254,7 @@ class ArcDuelsPluginTest : StringSpec({
                 countdownSeconds = 0,
                 teleportStabilizationTicks = 0L,
                 playerDataSaver = {},
+                celebrationPlay = { _, _ -> },
                 celebrationDurationTicks = 0L,
                 seriesRoundIntermissionTicks = 0L,
                 defaultPostMatchReturnPolicy = PostMatchReturnPolicy.AUTOMATIC,
@@ -1200,15 +1288,24 @@ class ArcDuelsPluginTest : StringSpec({
 
             val firstMatch = startKitMatch()
             manager.matchFor(first)?.id shouldBe firstMatch.id
+            val firstResultTitleCount = paper.resultTitleLines(first).size
+            val secondResultTitleCount = paper.resultTitleLines(second).size
             first.allowFlight = true
             first.isFlying = true
             first.isInvulnerable = true
             first.addPotionEffect(PotionEffect(PotionEffectType.SPEED, 200, 1))
             first.inventory.setItem(5, ItemStack(Material.DIAMOND_SWORD))
             manager.handleElimination(second)
+            // Completion must return first; the result title follows on the next tick.
+            paper.resultTitleLines(first).size shouldBe firstResultTitleCount
+            paper.resultTitleLines(second).size shouldBe secondResultTitleCount
             server.scheduler.performTicks(3)
 
             manager.matchFor(first) shouldBe null
+            paper.resultTitleLines(first).size shouldBe firstResultTitleCount + 1
+            paper.resultTitleLines(first).last().shouldContain("Победа")
+            paper.resultTitleLines(second).size shouldBe secondResultTitleCount + 1
+            paper.resultTitleLines(second).last().shouldContain("Поражение")
             first.inventory.isEmpty() shouldBe true
             first.activePotionEffects.isEmpty() shouldBe true
             first.allowFlight shouldBe false
@@ -1262,6 +1359,11 @@ private fun Component.containsHoverText(fragment: String): Boolean {
 
 private fun ItemStack.plainLore(): String =
     itemMeta.lore().orEmpty().joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+
+private fun MockBukkitTestRuntime.resultTitleLines(player: Player): List<String> =
+    adventureTitles(player)
+        .map { PlainTextComponentSerializer.plainText().serialize(it.title()) }
+        .filter { it.contains("Победа") || it.contains("Поражение") }
 
 private fun Component.translationKeys(): List<String> =
     buildList {

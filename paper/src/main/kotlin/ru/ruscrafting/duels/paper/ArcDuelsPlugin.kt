@@ -105,7 +105,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         serverNames.display(serverId)
         val guiItems = GuiItemCatalog.load(config)
         val menuLayouts = ArcDuelsMenuLayouts.load(this)
-        val arenas = PaperArenaCatalog.load(this)
+        val arenas = PaperArenaCatalog.load(this, settings.preferredArenaSelection)
         val kits = KitRegistry.load(this)
         val persistence = createPersistence(lifecycle)
         val statistics = persistence.statistics
@@ -196,6 +196,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 localServerId = serverId,
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 findRecordedMatch = persistence.statistics::findMatch,
+                findMultiplayerResult = persistence.multiplayerResults::findResult,
             )
         sessions = sessionManager
         lifecycle.own(AutoCloseable { sessionManager.shutdown() })
@@ -279,6 +280,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 },
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 playerStateMode = settings.playerStateMode,
+                preferredArenaSelection = arenas::preferredSelection,
             )
         lifecycle.own(controller)
         lateinit var gui: DuelGuiService
@@ -295,6 +297,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 serverNames = serverNames,
                 groupBus = network.groups,
                 arenaDirectory = network.arenas,
+                preferredArenaSelection = arenas::preferredSelection,
                 transfer = transfer,
                 playerDataReady = playerDataSync::isReady,
                 runtimeSettings = { liveRuntime.snapshot().settings },
