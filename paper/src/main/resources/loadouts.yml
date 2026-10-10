@@ -1,6 +1,29 @@
 # ArcDuels loadouts are upgraded with arc-core's merge-forward configuration.
 # Existing operator values win; newly bundled kits and fields are added safely.
 kits:
+  magic:
+    display-name: '<italic:false><#c4a7ff>Магическая дуэль'
+    icon: BLAZE_ROD
+    magic: true
+    magic-damage-multiplier: 0.4
+    items:
+      '0':
+        staff-spell: chain
+      '1':
+        staff-spell: mark
+      '2':
+        staff-spell: frost
+      '3':
+        staff-spell: lance
+      '4':
+        staff-spell: ember
+      '5':
+        staff-spell: nova
+      '6':
+        staff-spell: icicle
+      '7':
+        staff-spell: fault
+    armor: {}
   classic:
     display-name: '<gold>Классика</gold>'
     icon: DIAMOND_SWORD

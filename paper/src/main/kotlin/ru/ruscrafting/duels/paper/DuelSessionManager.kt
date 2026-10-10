@@ -94,6 +94,7 @@ class DuelSessionManager internal constructor(
     private val kitHealthIsolation = KitHealthIsolation(NamespacedKey(plugin, "kit_health_cap"))
     private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
     private val recoveryListeners = CopyOnWriteArrayList<(Player, RecordedMatch) -> Unit>()
+    @Volatile private var magicDuelStateReset: ((Collection<UUID>) -> Unit)? = null
 
     internal val isDisposablePlayerStateMode: Boolean
         get() = playerStateMode == PlayerStateMode.DISPOSABLE
@@ -485,6 +486,21 @@ class DuelSessionManager internal constructor(
         coordinator.findByPlayer(PlayerId(player.uniqueId))
             ?: sessionByPlayer[player.uniqueId]?.let(coordinator::find)
 
+    internal fun magicDuelRound(player: Player): Int? {
+        val match = matchFor(player) ?: return null
+        if (match.state != MatchState.ACTIVE || match.rules.mode != DuelMode.KIT) return null
+        return sessions[match.id]?.roundsPrepared?.takeIf { it > 0 }
+    }
+
+    internal fun teleportMagicBlink(player: Player, destination: org.bukkit.Location): Boolean {
+        val match = matchFor(player) ?: return false
+        if (match.state != MatchState.ACTIVE || match.rules.mode != DuelMode.KIT) return false
+        if (match.rules.kitId?.let(kits::get)?.magic != true || !isInsideArena(player, destination)) return false
+        val world = destination.world ?: return false
+        if (!world.isChunkLoaded(destination.blockX shr 4, destination.blockZ shr 4)) return false
+        return teleportInternally(player, destination)
+    }
+
     fun isEngaged(player: Player): Boolean =
         isExternallyEngaged(player) ||
             coordinator.isQueuedOrMatched(PlayerId(player.uniqueId)) ||
@@ -503,6 +519,17 @@ class DuelSessionManager internal constructor(
     internal fun attachExternalEngagement(probe: (Player) -> Boolean) {
         check(externalEngagement == null) { "An external duel owner is already attached" }
         externalEngagement = probe
+    }
+
+    internal fun attachMagicDuelStateReset(reset: (Collection<UUID>) -> Unit): AutoCloseable {
+        check(magicDuelStateReset == null) { "A magic duel state reset owner is already attached" }
+        magicDuelStateReset = reset
+        return AutoCloseable { if (magicDuelStateReset === reset) magicDuelStateReset = null }
+    }
+
+    private fun resetMagicDuelPlayers(playerIds: Collection<UUID>) {
+        runCatching { magicDuelStateReset?.invoke(playerIds) }
+            .onFailure { plugin.logger.warning("Could not reset ARC StaffSpells state: ${it.message}") }
     }
 
     private fun isExternallyEngaged(player: Player): Boolean = externalEngagement?.invoke(player) == true
@@ -982,6 +1009,7 @@ class DuelSessionManager internal constructor(
         playerStates.forgetRemotePending(player.uniqueId)
         pendingStarts[player.uniqueId]?.cancel(false)
         val match = matchFor(player)
+        if (match?.rules?.kitId?.let(kits::get)?.magic == true) resetMagicDuelPlayers(listOf(player.uniqueId))
         if (match == null) {
             preparingPlayers -= player.uniqueId
             return
@@ -1124,6 +1152,9 @@ class DuelSessionManager internal constructor(
             restoreArenaBlocks(session)
             hideMatchDisplay(session)
             val match = coordinator.find(matchId)
+            if (match?.rules?.kitId?.let(kits::get)?.magic == true) {
+                resetMagicDuelPlayers(session.participantIds)
+            }
             match?.let {
                 if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
                     runCatching { coordinator.cancel(matchId, MatchEndReason.SERVER_SHUTDOWN) }
@@ -1250,6 +1281,7 @@ class DuelSessionManager internal constructor(
         val arena = arenas.get(match.arenaId)
         val first = requireOnline(match.firstPlayer)
         val second = requireOnline(match.secondPlayer)
+        if (match.rules.kitId?.let(kits::get)?.magic == true) resetMagicDuelPlayers(session.participantIds)
         DuelLog.info(
             "round-prepare",
             match.id,
@@ -1735,6 +1767,9 @@ class DuelSessionManager internal constructor(
             )
             announcePersistenceFailure(matchId, unwrap(failure))
         } else if (updated?.state == MatchState.COUNTDOWN) {
+            if (updated.rules.kitId?.let(kits::get)?.magic == true) {
+                resetMagicDuelPlayers(listOf(updated.firstPlayer.value, updated.secondPlayer.value))
+            }
             DuelLog.info(
                 "round-complete",
                 matchId,
@@ -1781,6 +1816,7 @@ class DuelSessionManager internal constructor(
             return
         }
         if (!session.finishing.compareAndSet(false, true)) return
+        if (match.rules.kitId?.let(kits::get)?.magic == true) resetMagicDuelPlayers(session.participantIds)
         DuelLog.info(
             "match-complete",
             match.id,

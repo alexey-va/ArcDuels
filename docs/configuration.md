@@ -518,3 +518,32 @@ overridden only for an active participant, inside the assigned arena, when
 consumables are enabled; this includes WorldGuard's earlier interact denial.
 Fluid propagation is bounded and every affected block is restored after the
 round. Spawn protection and unrelated combat or building remain unchanged.
+
+## Magic duels
+
+`loadouts.yml` includes the `magic` kit (eight ARC staves and no armor). It stays
+inside `KIT` selection, so both 1v1 and group duels use the normal arena and
+return lifecycle. ARC must supply `ArcStaffSpellService`; without a compatible
+provider only magical kits are omitted, with a startup warning. Ordinary kits
+remain available. ARC owns the `arc-staff-spells-api:0.1.0` runtime classes;
+ArcDuels compiles against that API without shading it.
+
+Each magic kit declares `magic: true`, `magic-damage-multiplier: 0.4` and
+`items.<slot>.staff-spell` (`chain`, `mark`, `frost`, `lance`, `ember`, `nova`,
+`icicle`, `fault`). Player damage uses the configured base spell damage and this
+multiplier, without EliteMobs progression. ARC validates the active match,
+round and opponent again at impact. Kit fingerprints include spell IDs,
+provider gameplay tuning and the PvP multiplier to reject incompatible nodes.
+
+`magic-duel.blink` controls double-Shift mobility: `distance: 7.0`,
+`recharge-seconds: 8`, and `double-shift-millis: 350`. Each round starts with two
+charges; one charge regenerates at a time. A failed or cancelled teleport costs
+nothing. The blink follows the horizontal view direction, stays inside the
+arena, checks the player's full collision box and requires safe supported
+landing in loaded chunks. It cannot pass through walls. Settings are validated
+before reload and captured for the next round. Shift + right click keeps the
+staff's secondary spell.
+
+Focused checks: `MagicDuelCombatBridgeTest`, `MagicDuelBlinkTest` and the existing
+`ArcDuelsPluginTest` / `ArcDuelsConfigReloaderTest`. Tests can use the uncommitted
+provider API through `-PstaffSpellApiJar=/absolute/path/arc-staff-spells-api-0.1.0.jar`.

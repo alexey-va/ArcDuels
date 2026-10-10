@@ -97,6 +97,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             )
         val liveRuntime = ArcDuelsRuntimeSettingsState(initialRuntime).also { runtimeSettingsState = it }
         val settings = initialRuntime.settings
+        MagicDuelBlinkSettings.parse(config)
         val serverId = ServerId(config.getString("server-id", server.name)!!)
         DuelLog.info("plugin-bootstrap", "server={} version={}", serverId.value, pluginMeta.version)
         val locales = LocaleService.load(this)
@@ -224,6 +225,27 @@ open class ArcDuelsPlugin : JavaPlugin() {
         }
         sessionManager.attachExternalEngagement(multiplayerSessions::isEngaged)
         lifecycle.own(multiplayerSessions)
+        // Provider lookup handles absent/old ARC. Once present, policy setup is required:
+        // abort startup on failure instead of advertising inert magic kits.
+        val staffSpells = try {
+            MagicDuelCombatBridge.provider(this)
+        } catch (_: LinkageError) {
+            null
+        }
+        staffSpells?.let { spells ->
+            val magic = lifecycle.own(MagicDuelCombatBridge(this, spells, sessionManager, multiplayerSessions, kits))
+            val blink = lifecycle.own(
+                MagicDuelBlink(
+                    tasks = lifecycle.tasks,
+                    locales = locales,
+                    settingsForNewRound = { MagicDuelBlinkSettings.parse(config) },
+                    activeContext = magic::activeContext,
+                    isInsideArena = magic::isInsideArena,
+                    teleportBlink = magic::teleportBlink,
+                ),
+            )
+            server.pluginManager.registerEvents(blink, this)
+        }
         val challenges =
             ChallengeRegistry(
                 Clock.systemUTC(),

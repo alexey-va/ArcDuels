@@ -219,6 +219,12 @@ objective:
     description: ['<gray>Build an unanswered hit streak.</gray>', '<gray>An opponent’s return hit resets</gray>', '<gray>your current streak.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Select objective</#e6fff3>']
 
 kit:
+  magic:
+    name: '<#c4a7ff>Magic Duel</#c4a7ff>'
+    description:
+      - '<#e6fff3>Eight staves, equal damage, and stored blinks.</#e6fff3>'
+      - '<#e6fff3>Each staff has a normal and an empowered attack.</#e6fff3>'
+      - '<#e6fff3>Double Shift — blink forward. Up to two charges.</#e6fff3>'
   classic:
     name: '<gold>Classic</gold>'
     description: ['<gray>Diamond sword, bow, armor, and apples.</gray>']
@@ -614,3 +620,9 @@ help:
     - '<green>Your inventory is protected before teleport</green>'
     - '<green>and restored before the duel is complete.</green>'
     - '<dark_gray>────────────────────────</dark_gray>'
+magic:
+  blink:
+    ready: '<#c4a7ff>Blink <charges></#c4a7ff> <#e6fff3>· Shift × 2</#e6fff3>'
+    status: '<#c4a7ff>Blink <charges></#c4a7ff> <#e6fff3>· <recharge>s · Shift × 2</#e6fff3>'
+    blocked: '<#ffb347>No safe place to blink</#ffb347>'
+    empty: '<#c4a7ff>Blink ○○</#c4a7ff> <#e6fff3>· next charge in <seconds>s</#e6fff3>'

@@ -219,6 +219,12 @@ objective:
     description: ['<gray>Собери серию ударов без ответа.</gray>', '<gray>Ответный удар соперника сбрасывает</gray>', '<gray>твою текущую серию.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Выбрать режим</#e6fff3>']
 
 kit:
+  magic:
+    name: '<#c4a7ff>Магическая дуэль</#c4a7ff>'
+    description:
+      - '<#e6fff3>Восемь посохов, равный урон и запас блинков.</#e6fff3>'
+      - '<#e6fff3>У каждого посоха есть обычная и усиленная атака.</#e6fff3>'
+      - '<#e6fff3>Двойной Shift — блинк вперёд. До двух зарядов.</#e6fff3>'
   classic:
     name: '<gold>Классика</gold>'
     description: ['<gray>Алмазный меч, лук, броня и яблоки.</gray>']
@@ -613,3 +619,9 @@ help:
     - '<green>Инвентарь защищён до телепорта</green>'
     - '<green>и восстанавливается до завершения дуэли.</green>'
     - '<dark_gray>────────────────────────</dark_gray>'
+magic:
+  blink:
+    ready: '<#c4a7ff>Блинк <charges></#c4a7ff> <#e6fff3>· Shift × 2</#e6fff3>'
+    status: '<#c4a7ff>Блинк <charges></#c4a7ff> <#e6fff3>· <recharge> с · Shift × 2</#e6fff3>'
+    blocked: '<#ffb347>Нет безопасного места для блинка</#ffb347>'
+    empty: '<#c4a7ff>Блинк ○○</#c4a7ff> <#e6fff3>· следующий заряд через <seconds> с</#e6fff3>'

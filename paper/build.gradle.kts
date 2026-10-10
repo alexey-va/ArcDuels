@@ -4,6 +4,11 @@ plugins {
     id("com.gradleup.shadow")
 }
 
+val staffSpellApiJar = providers.gradleProperty("staffSpellApiJar").orNull?.let(::file)
+if (staffSpellApiJar != null) require(staffSpellApiJar.isFile) { "Staff spell API JAR does not exist: $staffSpellApiJar" }
+val staffSpellApiDependency: Any = staffSpellApiJar?.let { files(it) }
+    ?: "ru.ruscrafting.arc:arc-staff-spells-api:0.1.0"
+
 dependencies {
     implementation(project(":domain"))
     implementation(project(":storage-mysql"))
@@ -15,11 +20,13 @@ dependencies {
     implementation("ru.ruscrafting.arc:arc-core-redis:2.7.21")
     implementation("ru.ruscrafting.arc:arc-core-menu:2.7.21")
     compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.21")
+    compileOnly(staffSpellApiDependency)
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("net.william278.husksync:husksync-bukkit:3.8.7+1.21.8")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.21")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.21")
+    testImplementation(staffSpellApiDependency)
     testImplementation("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
 }
 
@@ -38,6 +45,7 @@ tasks.shadowJar {
     mergeServiceFiles()
     exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
     exclude("ru/arc/paper/api/**")
+    exclude("ru/arc/staffspells/api/**")
 }
 
 tasks.assemble {

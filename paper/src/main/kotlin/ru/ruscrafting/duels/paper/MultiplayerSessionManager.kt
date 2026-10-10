@@ -84,6 +84,7 @@ internal class MultiplayerSessionManager(
         var objectiveTicks: Long = 0,
         val hillCapture: MultiplayerHillCaptureTracker = MultiplayerHillCaptureTracker(),
         val hitRace: HitRaceTracker = HitRaceTracker(),
+        var magicEffectsReset: Boolean = false,
     )
 
     private data class RuntimePolicy(
@@ -95,6 +96,7 @@ internal class MultiplayerSessionManager(
     private val byPlayer = ConcurrentHashMap<UUID, MatchId>()
     private val teleportsAuthorized = ScopedTeleportAuthorizer()
     private val kitHealth = KitHealthIsolation(NamespacedKey("arcduels", "multiplayer-kit-health"))
+    @Volatile private var magicDuelStateReset: ((Collection<UUID>) -> Unit)? = null
 
     internal val isDisposablePlayerStateMode: Boolean
         get() = playerStateMode == PlayerStateMode.DISPOSABLE
@@ -243,6 +245,39 @@ internal class MultiplayerSessionManager(
 
     fun matchFor(player: Player): MultiplayerMatch? = byPlayer[player.uniqueId]?.let(sessions::get)?.match
 
+    internal fun magicDuelRound(player: Player): Int? {
+        val match = matchFor(player) ?: return null
+        val id = PlayerId(player.uniqueId)
+        if (match.state != MultiplayerMatchState.ACTIVE || id !in match.activePlayers) return null
+        return 1
+    }
+
+    internal fun teleportMagicBlink(player: Player, destination: Location): Boolean {
+        val session = byPlayer[player.uniqueId]?.let(sessions::get) ?: return false
+        val match = session.match
+        val playerId = PlayerId(player.uniqueId)
+        if (match.state != MultiplayerMatchState.ACTIVE || playerId !in match.activePlayers) return false
+        if (!kits.get(match.roster.participant(playerId).kitId).magic || !isInsideArena(player, destination)) return false
+        val world = destination.world ?: return false
+        if (!world.isChunkLoaded(destination.blockX shr 4, destination.blockZ shr 4)) return false
+        return runCatching {
+            teleportsAuthorized.authorize(player.uniqueId, destination) {
+                player.teleport(destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
+            }
+        }.getOrDefault(false)
+    }
+
+    internal fun attachMagicDuelStateReset(reset: (Collection<UUID>) -> Unit): AutoCloseable {
+        check(magicDuelStateReset == null) { "A magic duel state reset owner is already attached" }
+        magicDuelStateReset = reset
+        return AutoCloseable { if (magicDuelStateReset === reset) magicDuelStateReset = null }
+    }
+
+    private fun resetMagicDuelPlayers(playerIds: Collection<UUID>) {
+        runCatching { magicDuelStateReset?.invoke(playerIds) }
+            .onFailure { Bukkit.getLogger().warning("Could not reset ARC StaffSpells state: ${it.message}") }
+    }
+
     fun isEngaged(player: Player): Boolean = byPlayer.containsKey(player.uniqueId)
 
     fun isLocked(player: Player): Boolean = isEngaged(player)
@@ -334,6 +369,9 @@ internal class MultiplayerSessionManager(
         if (session.match.state != MultiplayerMatchState.ACTIVE) return
         val playerId = PlayerId(player.uniqueId)
         if (playerId !in session.match.activePlayers) return
+        if (session.match.roster.participants.any { kits.get(it.kitId).magic }) {
+            resetMagicDuelPlayers(listOf(player.uniqueId))
+        }
         session.match = session.match.eliminate(playerId, clock.instant(), reason)
         player.gameMode = GameMode.SPECTATOR
         audience.showTitle(
@@ -379,6 +417,9 @@ internal class MultiplayerSessionManager(
         val match = matchFor(player) ?: return
         val session = byPlayer[player.uniqueId]?.let(sessions::get) ?: return
         val disposable = session.playerStateMode == PlayerStateMode.DISPOSABLE
+        if (match.roster.participants.any { kits.get(it.kitId).magic }) {
+            resetMagicDuelPlayers(listOf(player.uniqueId))
+        }
         if (disposable) restoreDeparting(player, stored = null)
         if (match.state == MultiplayerMatchState.ACTIVE) {
             if (PlayerId(player.uniqueId) in match.activePlayers) eliminate(player, MatchEndReason.DISCONNECT)
@@ -439,6 +480,9 @@ internal class MultiplayerSessionManager(
             session = created
             check(sessions.putIfAbsent(matchId, created) == null) { "Multiplayer match id collision" }
             check(roster.playerIds.none { byPlayer.putIfAbsent(it.value, matchId) != null }) { "A participant became engaged" }
+            if (roster.participants.any { kits.get(it.kitId).magic }) {
+                resetMagicDuelPlayers(roster.playerIds.map { it.value })
+            }
             onlinePlayers.forEach { (playerId, player) ->
                 prepareKit(player, kits.get(roster.participant(playerId).kitId))
             }
@@ -671,6 +715,10 @@ internal class MultiplayerSessionManager(
         }
         val players = participants(session)
         if (players.isEmpty()) return releaseSession(session)
+        if (!session.magicEffectsReset && session.match.roster.participants.any { kits.get(it.kitId).magic }) {
+            session.magicEffectsReset = true
+            resetMagicDuelPlayers(session.match.roster.playerIds.map { it.value })
+        }
         val applyFailure = players.firstNotNullOfOrNull { player ->
             runCatching { restoreOwnedState(session, player) }.exceptionOrNull()
         }
@@ -789,6 +837,10 @@ internal class MultiplayerSessionManager(
     }
 
     private fun shutdownRestore(session: Session) {
+        if (!session.magicEffectsReset && session.match.roster.participants.any { kits.get(it.kitId).magic }) {
+            session.magicEffectsReset = true
+            resetMagicDuelPlayers(session.match.roster.playerIds.map { it.value })
+        }
         participants(session).forEach { player -> restoreDeparting(player, session.snapshots[player.uniqueId]) }
         releaseSession(session)
     }
