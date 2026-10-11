@@ -1368,7 +1368,7 @@ internal class MultiplayerGuiService(
         interactive: Boolean,
     ): ItemStack =
         style(
-            ItemStack(kit.icon),
+            kit.menuIcon(),
             kit.localizedName(player, locales),
             locales.lines(
                 player,

@@ -10,6 +10,10 @@ internal fun DuelKit.localizedName(player: Player, locales: LocaleService): Comp
     return if (locales.hasKey(locales.language(player), key)) locales.component(player, key) else displayName
 }
 
+/** Uses the issued staff's appearance without letting menu styling mutate the kit template. */
+internal fun DuelKit.menuIcon(): ItemStack =
+    staffSpells.keys.minOrNull()?.let(items::get)?.clone()?.apply { amount = 1 } ?: ItemStack(icon)
+
 /** Builds the visible kit manifest from the exact runtime stacks to prevent config/lore drift. */
 internal fun DuelKit.contentLore(player: Player, locales: LocaleService): List<Component> =
     buildList {
@@ -30,7 +34,7 @@ private fun DuelKit.contents(): List<ItemStack> =
 
 private fun ItemStack.contentLine(player: Player, locales: LocaleService): Component {
     var line = Component.text("• ", NamedTextColor.DARK_GRAY)
-        .append(Component.translatable(type.translationKey()).color(NamedTextColor.GRAY))
+        .append(itemMeta.displayName() ?: Component.translatable(type.translationKey()).color(NamedTextColor.GRAY))
     if (amount > 1) line = line.append(Component.text(" ×$amount", NamedTextColor.WHITE))
     if (enchantments.isNotEmpty()) {
         line = line.append(Component.text("  ", NamedTextColor.DARK_GRAY))

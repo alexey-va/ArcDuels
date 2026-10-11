@@ -1139,7 +1139,7 @@ class DuelGuiService internal constructor(
         val key = "kit.${kit.id.value}"
         val name = kit.localizedName(player, locales)
         val lore = if (locales.hasKey(locales.language(player), "$key.description")) locales.lines(player, "$key.description") else emptyList()
-        return item(kit.icon, name, lore + kit.contentLore(player, locales) + locales.lines(player, "menu.loadouts.kit-hint"))
+        return style(kit.menuIcon(), name, lore + kit.contentLore(player, locales) + locales.lines(player, "menu.loadouts.kit-hint"))
     }
 
     private fun toggleItem(player: Player, key: String, value: Boolean, enabled: Boolean = true): ItemStack {

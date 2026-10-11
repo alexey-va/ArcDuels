@@ -5,6 +5,8 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
@@ -101,6 +103,33 @@ class KitRegistryMagicTest : StringSpec({
         shouldThrow<IllegalArgumentException> {
             KitRegistry.loadCandidate(plugin, plugin.config, invalidSpell, staffItems = null)
         }
+    }
+
+    "magic menu uses a separate issued staff icon and contents use the staff name" {
+        val staff = ItemStack(Material.DIAMOND_HOE).apply {
+            itemMeta = itemMeta.apply {
+                displayName(Component.text("Грозовая ветвь"))
+            }
+        }
+        val registry = KitRegistry.loadCandidate(
+            plugin,
+            plugin.config,
+            loadoutsWithMagicKit(plugin),
+            StaffSpellItemProvider({ staff.clone() }, "staff-provider-v1"),
+        )
+        val kit = registry.get(KitId("registry_magic_test"))
+        val icon = kit.menuIcon()
+
+        icon.type shouldBe Material.DIAMOND_HOE
+        icon.itemMeta.displayName() shouldBe Component.text("Грозовая ветвь")
+        icon.itemMeta = icon.itemMeta.apply { displayName(Component.text("Магическая дуэль")) }
+        kit.items.getValue(0).itemMeta.displayName() shouldBe Component.text("Грозовая ветвь")
+        registry.get(KitId("classic")).menuIcon().type shouldBe Material.DIAMOND_SWORD
+
+        val player = paper.server.addPlayer("StaffMenuReader")
+        val lines = kit.contentLore(player, LocaleService.load(plugin))
+            .map(PlainTextComponentSerializer.plainText()::serialize)
+        lines.any { it.contains("Грозовая ветвь") } shouldBe true
     }
 
     "bridge binds hits to the current active duel and rejects the previous round context" {
