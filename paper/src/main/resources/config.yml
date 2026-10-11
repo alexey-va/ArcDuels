@@ -226,8 +226,8 @@ arenas:
         pitch: 0.0
       radius: 3.5
       height: 3.0
-# Magical kit mobility. Each round starts with two charges; they recharge one at a time.
+# Magical kit mobility. Each round starts with three charges; they recharge one at a time.
 magic-duel:
   blink:
-    distance: 7.0
+    distance: 12.0
     recharge-seconds: 8

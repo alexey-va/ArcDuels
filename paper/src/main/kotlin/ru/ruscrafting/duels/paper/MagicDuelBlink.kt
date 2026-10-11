@@ -22,7 +22,7 @@ import kotlin.math.floor
 import kotlin.math.hypot
 
 internal data class MagicDuelBlinkSettings(
-    val distance: Double = 7.0,
+    val distance: Double = 12.0,
     val rechargeSeconds: Long = 8L,
 ) {
     init {
@@ -36,7 +36,7 @@ internal data class MagicDuelBlinkSettings(
 
     companion object {
         fun parse(configuration: Configuration): MagicDuelBlinkSettings = MagicDuelBlinkSettings(
-            distance = configuration.strictNumber("magic-duel.blink.distance", 7.0),
+            distance = configuration.strictNumber("magic-duel.blink.distance", 12.0),
             rechargeSeconds = configuration.strictLong("magic-duel.blink.recharge-seconds", 8L),
         )
     }
@@ -95,11 +95,11 @@ internal class MagicDuelBlinkRoundState(
     private val rechargeNanos: Long
         get() = settings.rechargeSeconds * NANOS_PER_SECOND
 
-    private companion object {
-        const val MAX_CHARGES = 2
-        const val STATUS_FEEDBACK_MILLIS = 2_000L
-        const val NANOS_PER_MILLI = 1_000_000L
-        const val NANOS_PER_SECOND = 1_000_000_000L
+    companion object {
+        const val MAX_CHARGES = 3
+        private const val STATUS_FEEDBACK_MILLIS = 2_000L
+        private const val NANOS_PER_MILLI = 1_000_000L
+        private const val NANOS_PER_SECOND = 1_000_000_000L
     }
 }
 
@@ -139,6 +139,7 @@ internal class MagicDuelBlink(
     private val localCollisionBoxes: (Block) -> Collection<BoundingBox> = { block ->
         block.blockData.getCollisionShape(block.location).boundingBoxes
     },
+    private val playEffects: (Location, Location) -> Unit = MagicDuelBlinkEffects::play,
 ) : Listener, AutoCloseable {
     private val states = MagicDuelBlinkStateStore()
     private val teleporting = mutableSetOf<UUID>()
@@ -186,6 +187,7 @@ internal class MagicDuelBlink(
             return
         }
 
+        val origin = player.location.clone()
         val outcome = state.attemptTeleport(now) {
             if (!teleporting.add(playerId)) {
                 false
@@ -204,7 +206,10 @@ internal class MagicDuelBlink(
             }
         }
         when (outcome) {
-            MagicDuelBlinkAttempt.TELEPORTED -> showStatus(player, state, nowNanos())
+            MagicDuelBlinkAttempt.TELEPORTED -> {
+                playEffects(origin, destination)
+                showStatus(player, state, nowNanos())
+            }
             MagicDuelBlinkAttempt.FAILED -> showBlocked(player, state, nowNanos())
             MagicDuelBlinkAttempt.EMPTY -> {
                 state.pauseStatus(nowNanos())
@@ -280,7 +285,7 @@ internal class MagicDuelBlink(
     private fun showStatus(player: Player, state: MagicDuelBlinkRoundState, now: Long) {
         if (!state.mayShowStatus(now)) return
         val charges = buildString {
-            repeat(2) { index -> append(if (index < state.charges) '●' else '○') }
+            repeat(MagicDuelBlinkRoundState.MAX_CHARGES) { index -> append(if (index < state.charges) '●' else '○') }
         }
         val recharge = state.nextRechargeSeconds(now)
         val (key, values) = if (recharge == null) {

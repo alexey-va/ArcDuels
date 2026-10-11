@@ -21,30 +21,33 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 class MagicDuelBlinkTest : StringSpec({
-    "two successful blinks consume two charges and the next attempt does not run" {
+    "three successful blinks consume all charges and the fourth attempt does not run" {
         val state = blinkState()
         var teleports = 0
 
         state.attemptTeleport(0L) { teleports++; true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
         state.attemptTeleport(1L) { teleports++; true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
-        state.attemptTeleport(2L) { teleports++; true } shouldBe MagicDuelBlinkAttempt.EMPTY
+        state.attemptTeleport(2L) { teleports++; true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
+        state.attemptTeleport(3L) { teleports++; true } shouldBe MagicDuelBlinkAttempt.EMPTY
 
         state.charges shouldBe 0
-        teleports shouldBe 2
+        teleports shouldBe 3
     }
 
     "failed teleport does not debit a charge" {
         val state = blinkState()
 
         state.attemptTeleport(0L) { false } shouldBe MagicDuelBlinkAttempt.FAILED
-        state.charges shouldBe 2
+        state.charges shouldBe 3
         state.nextRechargeSeconds(0L) shouldBe null
     }
 
-    "charges refill sequentially and delayed status refresh grants only elapsed intervals" {
+    "three charges refill sequentially and delayed refresh grants only elapsed intervals" {
         val state = blinkState()
         state.attemptTeleport(0L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
         state.attemptTeleport(1_000_000_000L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
+        state.attemptTeleport(2_000_000_000L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
+        state.charges shouldBe 0
 
         state.refreshCharges(8_000_000_000L)
 
@@ -54,15 +57,22 @@ class MagicDuelBlinkTest : StringSpec({
         state.charges shouldBe 1
         state.refreshCharges(16_000_000_000L)
         state.charges shouldBe 2
+        state.refreshCharges(24_000_000_000L)
+        state.charges shouldBe 3
+        state.nextRechargeSeconds(24_000_000_000L) shouldBe null
 
         val delayed = blinkState()
         delayed.attemptTeleport(0L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
         delayed.attemptTeleport(1_000_000_000L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
+        delayed.attemptTeleport(2_000_000_000L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
         delayed.refreshCharges(17_000_000_000L)
         delayed.charges shouldBe 2
+        delayed.nextRechargeSeconds(17_000_000_000L) shouldBe 7L
+        delayed.refreshCharges(24_000_000_000L)
+        delayed.charges shouldBe 3
     }
 
-    "a new match round starts with two fresh charges" {
+    "a new match round starts with three fresh charges" {
         val states = MagicDuelBlinkStateStore()
         val playerId = UUID(0L, 1L)
         val firstToken = MagicDuelBlinkRoundToken(UUID(0L, 2L), 1)
@@ -70,37 +80,44 @@ class MagicDuelBlinkTest : StringSpec({
         val settings = { MagicDuelBlinkSettings() }
         val first = states.stateFor(playerId, firstToken, settings)
         first.attemptTeleport(1L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
-        first.charges shouldBe 1
+        first.attemptTeleport(2L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
+        first.attemptTeleport(3L) { true } shouldBe MagicDuelBlinkAttempt.TELEPORTED
+        first.charges shouldBe 0
 
         states.stateFor(playerId, firstToken, settings) shouldBe first
         val next = states.stateFor(playerId, nextToken, settings)
 
         next.token shouldBe nextToken
         (next === first) shouldBe false
-        next.charges shouldBe 2
+        next.charges shouldBe 3
     }
 
     "settings parse defaults and reject values outside their configured bounds" {
         val config = YamlConfiguration()
-        MagicDuelBlinkSettings.parse(config) shouldBe MagicDuelBlinkSettings()
+        val defaults = MagicDuelBlinkSettings.parse(config)
+        defaults shouldBe MagicDuelBlinkSettings()
+        defaults.distance shouldBe 12.0
+        defaults.rechargeSeconds shouldBe 8L
 
         config.set("magic-duel.blink.distance", 17.0)
         shouldThrow<IllegalArgumentException> { MagicDuelBlinkSettings.parse(config) }
         config.set("magic-duel.blink.distance", Double.POSITIVE_INFINITY)
         shouldThrow<IllegalArgumentException> { MagicDuelBlinkSettings.parse(config) }
-        config.set("magic-duel.blink.distance", 7.0)
+        config.set("magic-duel.blink.distance", 12.0)
         config.set("magic-duel.blink.recharge-seconds", "8")
         shouldThrow<IllegalArgumentException> { MagicDuelBlinkSettings.parse(config) }
     }
 
-    "path stops before its first unsafe sample and rejects less than one block of movement" {
+    "path uses the 12-block default and stops before its first unsafe sample" {
         val origin = Location(null, 0.5, 64.0, 0.5, 90f, 0f)
         val direction = Vector(1.0, 0.0, 0.0)
+        val distance = MagicDuelBlinkSettings().distance
 
-        val wallStop = MagicDuelBlinkPath.resolve(origin, direction, 7.0) { it.x <= 2.5 }
+        MagicDuelBlinkPath.resolve(origin, direction, distance) { true }?.x shouldBe 12.5
+        val wallStop = MagicDuelBlinkPath.resolve(origin, direction, distance) { it.x <= 2.5 }
         wallStop?.x shouldBe 2.5
-        MagicDuelBlinkPath.resolve(origin, direction, 7.0) { it.x <= 1.25 } shouldBe null
-        MagicDuelBlinkPath.resolve(origin, direction, 7.0) { it.x <= 0.9 } shouldBe null
+        MagicDuelBlinkPath.resolve(origin, direction, distance) { it.x <= 1.25 } shouldBe null
+        MagicDuelBlinkPath.resolve(origin, direction, distance) { it.x <= 0.9 } shouldBe null
     }
 
     "local block shapes are translated before support and collision checks" {
@@ -131,7 +148,7 @@ class MagicDuelBlinkTest : StringSpec({
             val plugin = paper.loadPlugin<ArcDuelsPlugin>()
             val world = paper.server.getWorld("world") ?: paper.server.addSimpleWorld("world")
             for (x in -1..1) for (z in -1..1) world.getChunkAt(x, z).load()
-            for (x in -4..12) for (z in -4..18) world.getBlockAt(x, 69, z).type = Material.STONE
+            for (x in -4..12) for (z in -4..28) world.getBlockAt(x, 69, z).type = Material.STONE
             for (y in 70..72) for (z in -2..3) world.getBlockAt(3, y, z).type = Material.STONE
             val slab = world.getBlockAt(1, 69, 8)
             slab.type = Material.STONE_SLAB
@@ -144,21 +161,26 @@ class MagicDuelBlinkTest : StringSpec({
             val hazardPlayer = paper.server.addPlayer("BlinkHazard")
             val shiftPlayer = paper.server.addPlayer("BlinkShift")
             val inactivePlayer = paper.server.addPlayer("BlinkFree")
+            val failedPlayer = paper.server.addPlayer("BlinkFailed")
             val players = listOf(
                 wallPlayer to 0.5,
                 boundedPlayer to 4.5,
                 slabPlayer to 8.5,
                 hazardPlayer to 12.5,
                 shiftPlayer to 16.5,
+                failedPlayer to 20.5,
             )
             players.forEach { (player, z) ->
                 player.teleport(Location(world, 0.5, 70.0, z, -90f, 0f), PlayerTeleportEvent.TeleportCause.PLUGIN)
             }
+            val origins = players.associate { (player, _) -> player.uniqueId to player.location.clone() }
 
             val contexts = players.associate { (player, _) ->
                 player.uniqueId to StaffSpellDuelContext(UUID.randomUUID(), 1, 1.0)
             }
             val destinations = mutableMapOf<UUID, Location>()
+            val teleportAttempts = mutableSetOf<UUID>()
+            val effects = mutableListOf<Pair<Location, Location>>()
             val collisionQueries = mutableListOf<String>()
             val time = AtomicLong()
             val tasks = LifecycleTaskScope(TestTaskScheduler())
@@ -172,8 +194,14 @@ class MagicDuelBlinkTest : StringSpec({
                         location.x <= (if (player.uniqueId == boundedPlayer.uniqueId) 1.75 else 10.0)
                 },
                 teleportBlink = { player, destination ->
-                    destinations[player.uniqueId] = destination.clone()
-                    player.teleport(destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
+                    teleportAttempts += player.uniqueId
+                    if (player.uniqueId == failedPlayer.uniqueId) {
+                        false
+                    } else {
+                        val teleported = player.teleport(destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
+                        if (teleported) destinations[player.uniqueId] = destination.clone()
+                        teleported
+                    }
                 },
                 nowNanos = { time.getAndAdd(100_000_000L) },
                 localCollisionBoxes = { block ->
@@ -184,6 +212,7 @@ class MagicDuelBlinkTest : StringSpec({
                         else -> emptyList()
                     }
                 },
+                playEffects = { origin, destination -> effects.add(origin.clone() to destination.clone()) },
             )
             try {
                 paper.server.pluginManager.registerEvents(blink, plugin)
@@ -210,6 +239,8 @@ class MagicDuelBlinkTest : StringSpec({
                 swap(boundedPlayer).isCancelled shouldBe true
                 val boundsStop = destinations[boundedPlayer.uniqueId]
                 (boundsStop != null && boundsStop.x <= 1.75) shouldBe true
+                wallPlayer.location.distanceSquared(wallStop) shouldBe 0.0
+                boundedPlayer.location.distanceSquared(requireNotNull(boundsStop)) shouldBe 0.0
 
                 swap(slabPlayer).isCancelled shouldBe true
                 swap(hazardPlayer).isCancelled shouldBe true
@@ -222,6 +253,14 @@ class MagicDuelBlinkTest : StringSpec({
 
                 swap(inactivePlayer).isCancelled shouldBe false
                 destinations.containsKey(inactivePlayer.uniqueId) shouldBe false
+
+                swap(failedPlayer).isCancelled shouldBe true
+                teleportAttempts shouldBe setOf(wallPlayer.uniqueId, boundedPlayer.uniqueId, failedPlayer.uniqueId)
+                destinations.containsKey(failedPlayer.uniqueId) shouldBe false
+                failedPlayer.location shouldBe requireNotNull(origins[failedPlayer.uniqueId])
+                effects.map { it.first } shouldBe
+                    listOf(origins[wallPlayer.uniqueId], origins[boundedPlayer.uniqueId])
+                effects.map { it.second } shouldBe listOf(wallStop, requireNotNull(boundsStop))
             } finally {
                 blink.close()
                 tasks.close()
