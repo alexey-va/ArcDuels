@@ -56,7 +56,7 @@ class KitRegistryMagicTest : StringSpec({
         registry.defaultId() shouldBe KitId("classic")
     }
 
-    "provider materializes staff items and only changes magic fingerprints" {
+    "magic routing compares the loadout independently of the origin staff provider generation" {
         val loadouts = loadoutsWithMagicKit(plugin)
         val first = KitRegistry.loadCandidate(
             plugin,
@@ -75,7 +75,7 @@ class KitRegistryMagicTest : StringSpec({
         magic.magic shouldBe true
         magic.staffSpells shouldBe mapOf(0 to "chain")
         magic.items.getValue(0).type shouldBe Material.BLAZE_ROD
-        (first.fingerprint(KitId("registry_magic_test")) == compatibleUpdate.fingerprint(KitId("registry_magic_test"))) shouldBe false
+        first.fingerprint(KitId("registry_magic_test")) shouldBe compatibleUpdate.fingerprint(KitId("registry_magic_test"))
         first.fingerprint(KitId("classic")) shouldBe compatibleUpdate.fingerprint(KitId("classic"))
 
         val changedMultiplier = loadoutsWithMagicKit(plugin).apply { set("kits.registry_magic_test.magic-damage-multiplier", 0.5) }
@@ -87,6 +87,15 @@ class KitRegistryMagicTest : StringSpec({
         )
         (changed.fingerprint(KitId("registry_magic_test")) == first.fingerprint(KitId("registry_magic_test"))) shouldBe false
         changed.fingerprint(KitId("classic")) shouldBe first.fingerprint(KitId("classic"))
+
+        val changedSpell = loadoutsWithMagicKit(plugin).apply { set("kits.registry_magic_test.items.0.staff-spell", "frost") }
+        val otherSpell = KitRegistry.loadCandidate(
+            plugin,
+            plugin.config,
+            changedSpell,
+            StaffSpellItemProvider({ ItemStack(Material.BLAZE_ROD) }, "staff-provider-v2"),
+        )
+        (otherSpell.fingerprint(KitId("registry_magic_test")) == first.fingerprint(KitId("registry_magic_test"))) shouldBe false
     }
 
     "missing provider rejects a magic default and invalid spell ids fail validation" {

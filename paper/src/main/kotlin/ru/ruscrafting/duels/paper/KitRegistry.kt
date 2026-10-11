@@ -312,7 +312,8 @@ private fun DuelKit.loadoutFingerprint(): String {
             if (magic) {
                 append("magic=true\n")
                 append("magic-damage-multiplier=").append(magicDamageMultiplier).append('\n')
-                append("staff-provider=").append(staffProviderFingerprint ?: "missing").append('\n')
+                // Both players receive this kit and cast on the same arena host. The origin's
+                // ARC version and unrelated spell tuning do not define loadout compatibility.
                 staffSpells.toSortedMap().forEach { (slot, spell) ->
                     append("staff-spell:").append(slot).append('=').append(spell).append('\n')
                 }
