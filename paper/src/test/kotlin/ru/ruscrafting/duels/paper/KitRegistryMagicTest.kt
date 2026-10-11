@@ -56,6 +56,45 @@ class KitRegistryMagicTest : StringSpec({
         registry.defaultId() shouldBe KitId("classic")
     }
 
+    "bundled magic roster contains the seven approved spells and keeps legacy spell ids readable" {
+        val bundledLoadouts = YamlConfiguration().apply {
+            requireNotNull(plugin.getResource("loadouts.yml")).use { input ->
+                load(InputStreamReader(input, Charsets.UTF_8))
+            }
+        }
+        val registry = KitRegistry.loadCandidate(
+            plugin,
+            plugin.config,
+            bundledLoadouts,
+            StaffSpellItemProvider({ ItemStack(Material.BLAZE_ROD) }, "staff-provider-v1"),
+        )
+        val magic = registry.get(KitId("magic"))
+
+        magic.staffSpells shouldBe mapOf(
+            0 to "chain",
+            1 to "mark",
+            2 to "lance",
+            3 to "ember",
+            4 to "icicle",
+            5 to "fault",
+            6 to "necromancer",
+        )
+        magic.magicDamageMultiplier shouldBe 0.4
+
+        for (legacySpell in listOf("frost", "nova")) {
+            val legacyLoadout = YamlConfiguration().apply {
+                loadFromString(bundledLoadouts.saveToString())
+                set("kits.magic.items.0.staff-spell", legacySpell)
+            }
+            KitRegistry.loadCandidate(
+                plugin,
+                plugin.config,
+                legacyLoadout,
+                StaffSpellItemProvider({ ItemStack(Material.BLAZE_ROD) }, "staff-provider-v1"),
+            ).get(KitId("magic")).staffSpells[0] shouldBe legacySpell
+        }
+    }
+
     "magic routing compares the loadout independently of the origin staff provider generation" {
         val loadouts = loadoutsWithMagicKit(plugin)
         val first = KitRegistry.loadCandidate(

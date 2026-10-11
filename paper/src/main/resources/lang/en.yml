@@ -222,7 +222,7 @@ kit:
   magic:
     name: '<#c4a7ff>Magic Duel</#c4a7ff>'
     description:
-      - '<#e6fff3>Eight staves, equal damage, and stored blinks.</#e6fff3>'
+      - '<#e6fff3>Seven staves, equal damage, and stored blinks.</#e6fff3>'
       - '<#e6fff3>Each staff has a normal and an empowered attack.</#e6fff3>'
       - '<#e6fff3>F — blink forward. Up to three charges.</#e6fff3>'
   classic:

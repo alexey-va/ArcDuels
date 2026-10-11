@@ -292,7 +292,8 @@ class KitRegistry private constructor(
             Material.matchMaterial(name) ?: error("Unknown Bukkit material '$name'")
 
         private const val LOADOUTS_RESOURCE = "loadouts.yml"
-        private val STAFF_SPELLS = setOf("chain", "mark", "frost", "lance", "ember", "nova", "icicle", "fault")
+        private val STAFF_SPELLS =
+            setOf("chain", "mark", "frost", "lance", "ember", "nova", "icicle", "fault", "necromancer")
     }
 }
 
