@@ -625,3 +625,11 @@ magic:
     status: '<#c4a7ff>Блинк <charges></#c4a7ff> <#e6fff3>· <recharge> с · F</#e6fff3>'
     blocked: '<#ffb347>Нет безопасного места для блинка</#ffb347>'
     empty: '<#c4a7ff>Блинк ○○○</#c4a7ff> <#e6fff3>· следующий заряд через <seconds> с</#e6fff3>'
+  echo:
+    ready: '<#c4a7ff>Отзвук</#c4a7ff> <white>· Q — оставить якорь</white>'
+    active: '<#8cecff>Отзвук · <seconds> с</#8cecff> <white>· Q — вернуться</white>'
+    cooldown: '<#c4a7ff>Отзвук</#c4a7ff> <white>· готов через <seconds> с</white>'
+    unsafe: '<#ffb347>Для якоря нужна свободная площадка под ногами</#ffb347>'
+    blocked: '<#ffb347>Точка возврата занята или недоступна</#ffb347>'
+    returned: '<#8cecff>Возврат к отзвуку</#8cecff>'
+    expired: '<#c4a7ff>Отзвук угас</#c4a7ff> <white>· готов через <seconds> с</white>'

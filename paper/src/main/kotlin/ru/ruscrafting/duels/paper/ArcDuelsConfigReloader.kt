@@ -63,6 +63,7 @@ internal class ArcDuelsConfigReloader(
             afterSourceCapture()
             val configuration = loadCandidateConfiguration(sources)
             MagicDuelBlinkSettings.parse(configuration)
+            MagicDuelEchoSettings.parse(configuration)
 
             // Every potentially throwing parser runs before JavaPlugin.config or live services change.
             val restartOnlyEnvironment =

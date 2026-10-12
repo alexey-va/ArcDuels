@@ -626,3 +626,11 @@ magic:
     status: '<#c4a7ff>Blink <charges></#c4a7ff> <#e6fff3>· <recharge>s · F</#e6fff3>'
     blocked: '<#ffb347>No safe place to blink</#ffb347>'
     empty: '<#c4a7ff>Blink ○○○</#c4a7ff> <#e6fff3>· next charge in <seconds>s</#e6fff3>'
+  echo:
+    ready: '<#c4a7ff>Echo</#c4a7ff> <white>· Q — leave an anchor</white>'
+    active: '<#8cecff>Echo · <seconds>s</#8cecff> <white>· Q — return</white>'
+    cooldown: '<#c4a7ff>Echo</#c4a7ff> <white>· ready in <seconds>s</white>'
+    unsafe: '<#ffb347>The anchor needs clear, solid ground beneath you</#ffb347>'
+    blocked: '<#ffb347>The return point is occupied or unavailable</#ffb347>'
+    returned: '<#8cecff>Returned to the echo</#8cecff>'
+    expired: '<#c4a7ff>Echo faded</#c4a7ff> <white>· ready in <seconds>s</white>'

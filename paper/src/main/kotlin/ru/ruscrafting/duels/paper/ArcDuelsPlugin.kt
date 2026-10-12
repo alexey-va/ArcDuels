@@ -98,6 +98,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val liveRuntime = ArcDuelsRuntimeSettingsState(initialRuntime).also { runtimeSettingsState = it }
         val settings = initialRuntime.settings
         MagicDuelBlinkSettings.parse(config)
+        MagicDuelEchoSettings.parse(config)
         val serverId = ServerId(config.getString("server-id", server.name)!!)
         DuelLog.info("plugin-bootstrap", "server={} version={}", serverId.value, pluginMeta.version)
         val locales = LocaleService.load(this)
@@ -246,6 +247,16 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 ),
             )
             server.pluginManager.registerEvents(blink, this)
+            val echo = lifecycle.own(MagicDuelEcho(
+                tasks = lifecycle.tasks,
+                locales = locales,
+                settingsForNewRound = { MagicDuelEchoSettings.parse(config) },
+                activeContext = magic::activeContext,
+                isInsideArena = magic::isInsideArena,
+                teleport = magic::teleportBlink,
+            ))
+            lifecycle.own(magic.attachRoundReset(echo::reset))
+            server.pluginManager.registerEvents(echo, this)
         }
         val challenges =
             ChallengeRegistry(

@@ -2,7 +2,6 @@ package ru.ruscrafting.duels.paper
 
 import org.bukkit.Bukkit
 import org.bukkit.Location
-import org.bukkit.Material
 import org.bukkit.block.Block
 import org.bukkit.configuration.Configuration
 import org.bukkit.entity.Player
@@ -18,7 +17,6 @@ import ru.arc.core.ScheduledTask
 import ru.arc.staffspells.api.StaffSpellDuelContext
 import java.util.UUID
 import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.hypot
 
 internal data class MagicDuelBlinkSettings(
@@ -141,6 +139,7 @@ internal class MagicDuelBlink(
     },
     private val playEffects: (Location, Location) -> Unit = MagicDuelBlinkEffects::play,
 ) : Listener, AutoCloseable {
+    private val safety = MagicDuelTeleportSafety(isInsideArena, localCollisionBoxes)
     private val states = MagicDuelBlinkStateStore()
     private val teleporting = mutableSetOf<UUID>()
     private var closed = false
@@ -198,7 +197,7 @@ internal class MagicDuelBlink(
                     } else {
                         teleportBlink(player, destination) &&
                             activeContext(player)?.roundToken() == token &&
-                            isExactDestination(player.location, destination)
+                            safety.isExactDestination(player.location, destination)
                     }
                 } finally {
                     teleporting.remove(playerId)
@@ -260,25 +259,10 @@ internal class MagicDuelBlink(
 
     private fun safeDestination(player: Player, distance: Double): Location? {
         val origin = player.location
-        val world = origin.world ?: return null
         val direction = origin.direction.setY(0.0)
         if (direction.lengthSquared() < MIN_DIRECTION_LENGTH_SQUARED) return null
-        direction.normalize()
-        val originBox = player.boundingBox
-
         return MagicDuelBlinkPath.resolve(origin, direction, distance) { candidate ->
-            if (!isInsideArena(player, candidate)) return@resolve false
-            val candidateBox = originBox.clone().shift(
-                candidate.x - origin.x,
-                candidate.y - origin.y,
-                candidate.z - origin.z,
-            )
-            if (!chunksLoaded(world, candidateBox)) return@resolve false
-            if (!standable(world, candidate)) return@resolve false
-            if (hasHazardOrBlockCollision(world, candidateBox)) return@resolve false
-            world.getNearbyEntities(candidateBox).none { entity ->
-                entity is Player && entity.uniqueId != player.uniqueId && entity.boundingBox.overlaps(candidateBox)
-            }
+            safety.isSafe(player, candidate)
         }
     }
 
@@ -309,76 +293,8 @@ internal class MagicDuelBlink(
     private fun StaffSpellDuelContext.roundToken(): MagicDuelBlinkRoundToken =
         MagicDuelBlinkRoundToken(matchId(), round())
 
-    private fun isExactDestination(actual: Location, expected: Location): Boolean {
-        val world = actual.world ?: return false
-        val expectedWorld = expected.world ?: return false
-        return world.uid == expectedWorld.uid &&
-            kotlin.math.abs(actual.x - expected.x) <= TELEPORT_COORDINATE_TOLERANCE &&
-            kotlin.math.abs(actual.y - expected.y) <= TELEPORT_COORDINATE_TOLERANCE &&
-            kotlin.math.abs(actual.z - expected.z) <= TELEPORT_COORDINATE_TOLERANCE &&
-            kotlin.math.abs(actual.yaw - expected.yaw) <= TELEPORT_ANGLE_TOLERANCE &&
-            kotlin.math.abs(actual.pitch - expected.pitch) <= TELEPORT_ANGLE_TOLERANCE
-    }
-
-    private fun chunksLoaded(world: org.bukkit.World, box: BoundingBox): Boolean {
-        val minChunkX = floor(box.minX).toInt() shr 4
-        val maxChunkX = floor(box.maxX - BOX_EDGE_EPSILON).toInt() shr 4
-        val minChunkZ = floor(box.minZ).toInt() shr 4
-        val maxChunkZ = floor(box.maxZ - BOX_EDGE_EPSILON).toInt() shr 4
-        for (chunkX in minChunkX..maxChunkX) {
-            for (chunkZ in minChunkZ..maxChunkZ) {
-                if (!world.isChunkLoaded(chunkX, chunkZ)) return false
-            }
-        }
-        return true
-    }
-
-    private fun standable(world: org.bukkit.World, location: Location): Boolean {
-        val x = location.blockX
-        val z = location.blockZ
-        val floorBlock = world.getBlockAt(x, floor(location.y - BOX_EDGE_EPSILON).toInt(), z)
-        if (!floorBlock.type.isSolid || floorBlock.isLiquid || isHazard(floorBlock.type)) return false
-        return MagicDuelBlinkBlockShapes.supports(location, worldCollisionBoxes(floorBlock), SUPPORT_HEIGHT_EPSILON)
-    }
-
-    private fun hasHazardOrBlockCollision(world: org.bukkit.World, box: BoundingBox): Boolean {
-        val minX = floor(box.minX).toInt()
-        val maxX = floor(box.maxX - BOX_EDGE_EPSILON).toInt()
-        val minY = floor(box.minY).toInt()
-        val maxY = floor(box.maxY - BOX_EDGE_EPSILON).toInt()
-        val minZ = floor(box.minZ).toInt()
-        val maxZ = floor(box.maxZ - BOX_EDGE_EPSILON).toInt()
-        for (x in minX..maxX) for (y in minY..maxY) for (z in minZ..maxZ) {
-            val block = world.getBlockAt(x, y, z)
-            if (block.isLiquid || isHazard(block.type)) return true
-            if (MagicDuelBlinkBlockShapes.overlaps(box, worldCollisionBoxes(block))) return true
-        }
-        return false
-    }
-
-    private fun worldCollisionBoxes(block: Block): List<BoundingBox> =
-        MagicDuelBlinkBlockShapes.toWorld(block.x, block.y, block.z, localCollisionBoxes(block))
-
-    private fun isHazard(material: Material): Boolean = material in HAZARDS
-
     private companion object {
         const val MIN_DIRECTION_LENGTH_SQUARED = 1.0e-8
-        const val TELEPORT_COORDINATE_TOLERANCE = 1.0e-7
-        const val TELEPORT_ANGLE_TOLERANCE = 1.0e-4f
-        const val BOX_EDGE_EPSILON = 1.0e-7
-        const val SUPPORT_HEIGHT_EPSILON = 1.0e-4
-        val HAZARDS = setOf(
-            Material.CACTUS,
-            Material.CAMPFIRE,
-            Material.FIRE,
-            Material.MAGMA_BLOCK,
-            Material.POINTED_DRIPSTONE,
-            Material.POWDER_SNOW,
-            Material.SOUL_CAMPFIRE,
-            Material.SOUL_FIRE,
-            Material.SWEET_BERRY_BUSH,
-            Material.WITHER_ROSE,
-        )
     }
 }
 

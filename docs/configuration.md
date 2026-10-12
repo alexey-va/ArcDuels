@@ -535,15 +535,32 @@ multiplier, without EliteMobs progression. ARC validates the active match,
 round and opponent again at impact. Kit fingerprints include spell IDs,
 provider gameplay tuning and the PvP multiplier to reject incompatible nodes.
 
-`magic-duel.blink` controls double-Shift mobility: `distance: 7.0`,
-`recharge-seconds: 8`, and `double-shift-millis: 350`. Each round starts with two
-charges; one charge regenerates at a time. A failed or cancelled teleport costs
-nothing. The blink follows the horizontal view direction, stays inside the
-arena, checks the player's full collision box and requires safe supported
-landing in loaded chunks. It cannot pass through walls. Settings are validated
-before reload and captured for the next round. Shift + right click keeps the
-staff's secondary spell.
+`magic-duel.blink` controls F mobility: `distance: 12.0` and
+`recharge-seconds: 8`. Each round starts with three charges; one charge
+regenerates at a time. A failed or cancelled teleport costs nothing. The blink
+follows the horizontal view direction, stays inside the arena, checks the
+player's full collision box and requires safe supported landing in loaded
+chunks. It cannot pass through walls. Shift + F retains ARC's menu shortcut.
 
-Focused checks: `MagicDuelCombatBridgeTest`, `MagicDuelBlinkTest` and the existing
-`ArcDuelsPluginTest` / `ArcDuelsConfigReloaderTest`. Tests can use the uncommitted
+`magic-duel.echo` gives every living magic-kit participant **Echo / Отзвук**.
+With an item held, Q cancels the drop and leaves a visible particle silhouette
+and ground ring at the player's feet. Q again within `window-seconds: 4`
+returns to that location, keeping the current aim and health/status/spell
+cooldowns. Return can cross cover but always rechecks loaded chunks, arena
+bounds, floor support, block hazards and other players at the destination.
+An occupied or cancelled return preserves the anchor until its original expiry.
+`cooldown-seconds: 18` starts when the anchor is placed, including unused anchors.
+A dedicated boss bar shows the return window, cooldown and rejection feedback.
+Shift + Q cancels dropping without casting; inventory drop gestures never cast.
+Vanilla's empty-hand Q has no Bukkit drop event; hold any kit item to use Echo.
+
+Both abilities are limited to active magical 1v1/group rounds. Echo removes its
+anchor and HUD on round teardown, death, world change, quit and plugin shutdown.
+Settings validate before reload and apply to the next round; current round
+settings remain stable. Echo's source owner is `MagicDuelEcho.kt`; both abilities
+share `MagicDuelTeleportSafety.kt`, and approved teleportation stays in the
+existing session managers and their scoped teleport authorizer.
+
+Focused checks: `MagicDuelBlinkTest`, `MagicDuelEchoTest`,
+`ArcDuelsConfigDefaultsTest` and `LocaleParityTest`. Tests can use the uncommitted
 provider API through `-PstaffSpellApiJar=/absolute/path/arc-staff-spells-api-0.1.0.jar`.

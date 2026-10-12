@@ -231,3 +231,6 @@ magic-duel:
   blink:
     distance: 12.0
     recharge-seconds: 8
+  echo:
+    window-seconds: 4
+    cooldown-seconds: 18

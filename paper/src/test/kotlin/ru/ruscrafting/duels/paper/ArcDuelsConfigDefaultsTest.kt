@@ -34,6 +34,9 @@ class ArcDuelsConfigDefaultsTest : StringSpec({
         migrated.getDouble("multiplayer.spawn-placement.minimum-separation") shouldBe 2.0
         migrated.getDouble("multiplayer.spawn-placement.bounds-inset") shouldBe 1.0
 
+        migrated.getLong("magic-duel.echo.window-seconds") shouldBe 4L
+        migrated.getLong("magic-duel.echo.cooldown-seconds") shouldBe 18L
+
         val firstMigration = Files.readString(file)
         ArcDuelsConfigDefaults.mergeMissing(dataRoot) shouldBe false
         Files.readString(file) shouldBe firstMigration
