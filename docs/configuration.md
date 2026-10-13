@@ -521,7 +521,7 @@ round. Spawn protection and unrelated combat or building remain unchanged.
 
 ## Magic duels
 
-`loadouts.yml` includes the `magic` kit (eight ARC staves and no armor). It stays
+`loadouts.yml` includes the `magic` kit (seven ARC staves and no armor). It stays
 inside `KIT` selection, so both 1v1 and group duels use the normal arena and
 return lifecycle. ARC must supply `ArcStaffSpellService`; without a compatible
 provider only magical kits are omitted, with a startup warning. Ordinary kits
@@ -529,8 +529,8 @@ remain available. ARC owns the `arc-staff-spells-api:0.1.0` runtime classes;
 ArcDuels compiles against that API without shading it.
 
 Each magic kit declares `magic: true`, `magic-damage-multiplier: 0.4` and
-`items.<slot>.staff-spell` (`chain`, `mark`, `frost`, `lance`, `ember`, `nova`,
-`icicle`, `fault`). Player damage uses the configured base spell damage and this
+`items.<slot>.staff-spell` (`chain`, `mark`, `lance`, `ember`, `icicle`, `fault`,
+`necromancer`). Player damage uses the configured base spell damage and this
 multiplier, without EliteMobs progression. ARC validates the active match,
 round and opponent again at impact. Kit fingerprints include spell IDs,
 provider gameplay tuning and the PvP multiplier to reject incompatible nodes.
@@ -540,7 +540,8 @@ provider gameplay tuning and the PvP multiplier to reject incompatible nodes.
 regenerates at a time. A failed or cancelled teleport costs nothing. The blink
 follows the horizontal view direction, stays inside the arena, checks the
 player's full collision box and requires safe supported landing in loaded
-chunks. It cannot pass through walls. Shift + F retains ARC's menu shortcut.
+chunks. It passes through intervening walls and chooses the farthest safe landing.
+Shift + F retains ARC's menu shortcut.
 
 `magic-duel.echo` gives every living magic-kit participant **Echo / Отзвук**.
 With an item held, Q cancels the drop and leaves a visible particle silhouette
