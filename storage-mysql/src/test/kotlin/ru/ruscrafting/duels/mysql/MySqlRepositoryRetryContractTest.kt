@@ -4,7 +4,6 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import com.zaxxer.hikari.HikariDataSource
-import ru.arc.sql.SqlExecutor
 import ru.arc.sql.SqlRuntime
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.MatchId
@@ -19,6 +18,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -77,8 +77,15 @@ private fun failingRuntime(attempts: AtomicInteger, failure: (Int) -> SQLExcepti
     val dataSource = object : HikariDataSource() {
         override fun getConnection(): Connection = throw failure(attempts.incrementAndGet())
     }
-    val executor = SqlExecutor(dataSource, 1, "retry-contract")
-    return SqlRuntime::class.java.getDeclaredConstructor(HikariDataSource::class.java, SqlExecutor::class.java)
-        .apply { isAccessible = true }
-        .newInstance(dataSource, executor)
+    val executor = Executors.newSingleThreadExecutor()
+    return SqlRuntime.borrow(
+        dataSource = dataSource,
+        executor = executor,
+        completionExecutor = executor,
+        lease = AutoCloseable {
+            executor.shutdownNow()
+            dataSource.close()
+        },
+        evictConnection = {},
+    )
 }
