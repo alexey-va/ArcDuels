@@ -1,11 +1,11 @@
 package ru.ruscrafting.duels.paper
 
-import ru.arc.redis.RedisManager
+import ru.arc.redis.RedisOperations
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 
 internal object NetworkLifecycle {
     fun initialize(
-        manager: RedisManager,
+        manager: RedisOperations,
         bus: CrossServerDuelBus,
         onUnavailable: (Throwable) -> Unit,
     ): Boolean =
@@ -20,7 +20,7 @@ internal object NetworkLifecycle {
 
     fun close(
         bus: CrossServerDuelBus,
-        manager: RedisManager,
+        manager: RedisOperations,
     ): Result<Unit> =
         runCatching {
             var firstFailure: Throwable? = null

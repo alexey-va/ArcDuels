@@ -5,12 +5,12 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import ru.arc.redis.RedisManager
+import ru.arc.redis.RedisOperations
 import ru.ruscrafting.duels.redis.CrossServerDuelBus
 
 class NetworkLifecycleTest : StringSpec({
     "failed Redis initialization closes every resource and remains fail-soft" {
-        val manager = mockk<RedisManager>(relaxed = true)
+        val manager = mockk<RedisOperations>(relaxed = true)
         val bus = mockk<CrossServerDuelBus>(relaxed = true)
         val failure = IllegalStateException("redis unavailable")
         val observed = mutableListOf<Throwable>()
@@ -24,7 +24,7 @@ class NetworkLifecycleTest : StringSpec({
     }
 
     "cleanup attempts the manager even when bus cleanup fails" {
-        val manager = mockk<RedisManager>(relaxed = true)
+        val manager = mockk<RedisOperations>(relaxed = true)
         val bus = mockk<CrossServerDuelBus>(relaxed = true)
         every { bus.close() } throws IllegalStateException("bus close failed")
 

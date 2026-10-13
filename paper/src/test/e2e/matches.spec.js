@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import chat from 'prismarine-chat';
 import { test, expect, waitUntil } from '@drownek/plugwright';
-import { invite } from './support.js';
+import { invite, isolateCombatWorld } from './support.js';
 
 function count(player, name) {
   return player.bot.inventory.items().filter(item => item.name === name).reduce((n, item) => n + item.count, 0);
@@ -60,6 +60,7 @@ async function restored(player, before, signal, exactInventory = true) {
 }
 
 test('classic kit melee victory restores both exact inventories and releases the arena', async ({ player, createPlayer, server, signal }) => {
+  await isolateCombatWorld(player, server);
   const opponent = await createPlayer({ username: 'KitOpponent' });
   const first = await seed(player, server, 40.5, 'diamond', signal);
   const second = await seed(opponent, server, 44.5, 'emerald', signal);
@@ -100,6 +101,7 @@ test('classic kit melee victory restores both exact inventories and releases the
 });
 
 test('own-inventory forfeit preserves consumed items and returns both players safely', async ({ player, createPlayer, server, signal }) => {
+  await isolateCombatWorld(player, server);
   const opponent = await createPlayer({ username: 'OwnOpponent' });
   const first = await seed(player, server, 40.5, 'diamond', signal);
   const second = await seed(opponent, server, 44.5, 'emerald', signal);
@@ -123,6 +125,7 @@ test('own-inventory forfeit preserves consumed items and returns both players sa
 });
 
 test('disconnect during a kit fight restores the player on reconnect without keeping the kit', async ({ player, createPlayer, server, signal }) => {
+  await isolateCombatWorld(player, server);
   const opponent = await createPlayer({ username: 'QuitOpponent' });
   const first = await seed(player, server, 40.5, 'diamond', signal);
   const second = await seed(opponent, server, 44.5, 'emerald', signal);

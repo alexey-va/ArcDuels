@@ -8,24 +8,25 @@ val staffSpellApiJar = providers.gradleProperty("staffSpellApiJar").orNull?.let(
 if (staffSpellApiJar != null) require(staffSpellApiJar.isFile) { "Staff spell API JAR does not exist: $staffSpellApiJar" }
 val staffSpellApiDependency: Any = staffSpellApiJar?.let { files(it) }
     ?: "ru.ruscrafting.arc:arc-staff-spells-api:0.1.0"
+val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
 
 dependencies {
     implementation(project(":domain"))
     implementation(project(":storage-mysql"))
     implementation(project(":network-redis"))
-    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-redis:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.21")
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.21")
+    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-redis:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.22")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.22")
     compileOnly(staffSpellApiDependency)
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("net.william278.husksync:husksync-bukkit:3.8.7+1.21.8")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.21")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.21")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.22")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.22")
     testImplementation(staffSpellApiDependency)
     testImplementation("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
 }
@@ -45,6 +46,11 @@ tasks.shadowJar {
     mergeServiceFiles()
     exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
     exclude("ru/arc/paper/api/**")
+    exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
+    exclude("ru/arc/paper/sql/SharedPaperSqlService*.class")
+    exclude("ru/arc/paper/redis/PaperRedisServiceProvider*.class")
+    exclude("ru/arc/paper/redis/SharedPaperRedisService*.class")
+    exclude("ru/arc/paper/metrics/PaperArcMetricsProvider*.class")
     exclude("ru/arc/staffspells/api/**")
 }
 
@@ -60,9 +66,16 @@ plugwright {
     downloadNode.set(true)
     nodeVersion.set("22.14.0")
     acceptEula.set(true)
+    downloadPlugins {
+        url("https://github.com/retrooper/packetevents/releases/download/v2.12.1/packetevents-spigot-2.12.1.jar")
+    }
     jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
     writeFiles {
+        e2eArcJar.orNull?.let { file("plugins/ARC.jar", it) }
         file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
+        file("plugins/ARC/modules/runtime.yml", projectDir.resolve("src/test/e2e/fixtures/arc-runtime.yml"))
+        file("plugins/ARC/modules/redis.yml", projectDir.resolve("src/test/e2e/fixtures/arc-redis.yml"))
+        file("plugins/ARC/modules/ops-http.yml", projectDir.resolve("src/test/e2e/fixtures/arc-ops-http.yml"))
         file("plugins/ArcDuels/config.yml", projectDir.resolve("src/test/e2e/fixtures/config.yml"))
     }
 }

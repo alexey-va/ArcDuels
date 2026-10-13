@@ -8,8 +8,8 @@ import ru.arc.paper.network.BackendTransferResult
 import ru.arc.paper.runtime.PaperPluginRuntime
 import ru.arc.paper.chunk.PaperChunkTicketRegistry
 import ru.arc.redis.RedisConnection
-import ru.arc.redis.RedisManager
-import ru.arc.redis.ServerIdentity
+import ru.arc.paper.redis.PaperRedisClient
+import ru.arc.paper.sql.PaperSqlServices
 import ru.arc.sql.SqlConnectionConfig
 import ru.arc.sql.SqlRuntime
 import ru.arc.sql.SqlSslMode
@@ -57,6 +57,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             it.start("version" to pluginMeta.version)
         }
         runCatching {
+            lifecycle.own(PaperSqlServices.installConsumer(this))
             saveDefaultConfig()
             if (ArcDuelsConfigDefaults.mergeMissing(dataFolder.toPath())) reloadConfig()
             runCatching { DuelLog.install(this) }
@@ -524,14 +525,15 @@ open class ArcDuelsPlugin : JavaPlugin() {
         if (!config.getBoolean("redis.enabled", false)) return NetworkRuntime(NoOpDuelEventPublisher, redisReady = true)
         val redis = requireNotNull(effectiveRedis) { "Redis is enabled but its effective connection was not prepared" }
         val manager =
-            RedisManager(
+            PaperRedisClient.open(
+                this,
                 RedisConnection(
                     redis.host,
                     redis.port,
                     redis.username,
                     redis.password,
                 ),
-                ServerIdentity { serverId.value },
+                serverId.value,
             )
         val bus = CrossServerDuelBus(manager, serverId)
         val challengeBus = CrossServerChallengeBus(manager, serverId)
