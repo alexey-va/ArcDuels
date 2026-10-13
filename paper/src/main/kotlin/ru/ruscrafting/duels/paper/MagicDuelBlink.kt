@@ -17,7 +17,6 @@ import ru.arc.core.ScheduledTask
 import ru.arc.staffspells.api.StaffSpellDuelContext
 import java.util.UUID
 import kotlin.math.ceil
-import kotlin.math.hypot
 
 internal data class MagicDuelBlinkSettings(
     val distance: Double = 12.0,
@@ -325,7 +324,7 @@ internal object MagicDuelBlinkBlockShapes {
     private const val SUPPORT_EDGE_EPSILON = 1.0e-7
 }
 
-/** Samples at most 64 player positions and stops at the first unsafe point. */
+/** Samples at most 64 candidate landings, choosing the farthest safe one. */
 internal object MagicDuelBlinkPath {
     fun resolve(
         origin: Location,
@@ -338,17 +337,15 @@ internal object MagicDuelBlinkPath {
         if (direction.lengthSquared() < 1.0e-8) return null
         direction.normalize()
         val steps = ceil(distance / MAX_STEP).toInt().coerceIn(1, MAX_STEPS)
-        var lastSafe: Location? = null
-        for (step in 1..steps) {
+        for (step in steps downTo 1) {
             val traveled = distance * step / steps
+            if (traveled < MIN_USEFUL_MOVEMENT) continue
             val candidate = origin.clone().add(direction.clone().multiply(traveled)).apply {
                 y = origin.y
             }
-            if (!isSafe(candidate)) break
-            lastSafe = candidate
+            if (isSafe(candidate)) return candidate
         }
-        val result = lastSafe ?: return null
-        return result.takeIf { hypot(it.x - origin.x, it.z - origin.z) >= MIN_USEFUL_MOVEMENT }
+        return null
     }
 
     private const val MAX_STEP = 0.25

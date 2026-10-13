@@ -108,16 +108,21 @@ class MagicDuelBlinkTest : StringSpec({
         shouldThrow<IllegalArgumentException> { MagicDuelBlinkSettings.parse(config) }
     }
 
-    "path uses the 12-block default and stops before its first unsafe sample" {
+    "path selects the farthest safe landing without checking intervening obstacles" {
         val origin = Location(null, 0.5, 64.0, 0.5, 90f, 0f)
         val direction = Vector(1.0, 0.0, 0.0)
         val distance = MagicDuelBlinkSettings().distance
+        val checkedLandings = mutableListOf<Double>()
 
         MagicDuelBlinkPath.resolve(origin, direction, distance) { true }?.x shouldBe 12.5
-        val wallStop = MagicDuelBlinkPath.resolve(origin, direction, distance) { it.x <= 2.5 }
-        wallStop?.x shouldBe 2.5
-        MagicDuelBlinkPath.resolve(origin, direction, distance) { it.x <= 1.25 } shouldBe null
-        MagicDuelBlinkPath.resolve(origin, direction, distance) { it.x <= 0.9 } shouldBe null
+        val behindWall = MagicDuelBlinkPath.resolve(origin, direction, distance) {
+            checkedLandings += it.x
+            it.x !in 3.0..4.0
+        }
+        behindWall?.x shouldBe 12.5
+        checkedLandings shouldBe listOf(12.5)
+        MagicDuelBlinkPath.resolve(origin, direction, distance) { it.x <= 2.5 }?.x shouldBe 2.5
+        MagicDuelBlinkPath.resolve(origin, direction, distance) { false } shouldBe null
     }
 
     "local block shapes are translated before support and collision checks" {
@@ -154,6 +159,7 @@ class MagicDuelBlinkTest : StringSpec({
             slab.type = Material.STONE_SLAB
             (slab.blockData as Slab).apply { type = Slab.Type.BOTTOM }.also { slab.blockData = it }
             world.getBlockAt(1, 70, 12).type = Material.CACTUS
+            world.getBlockAt(10, 70, 12).type = Material.CACTUS
 
             val wallPlayer = paper.server.addPlayer("BlinkWall")
             val boundedPlayer = paper.server.addPlayer("BlinkBound")
@@ -229,23 +235,25 @@ class MagicDuelBlinkTest : StringSpec({
                 swap(wallPlayer, cancelled = true).isCancelled shouldBe true
                 destinations.containsKey(wallPlayer.uniqueId) shouldBe false
                 swap(wallPlayer).isCancelled shouldBe true
-                val wallStop = requireNotNull(destinations[wallPlayer.uniqueId]) {
-                    "Expected a wall-stop blink destination; origin=${wallPlayer.location}, " +
+                val wallLanding = requireNotNull(destinations[wallPlayer.uniqueId]) {
+                    "Expected a landing beyond the wall; origin=${wallPlayer.location}, " +
                         "direction=${wallPlayer.location.direction}, " +
                         "collisionQueries=${collisionQueries.takeLast(20)}"
                 }
-                (wallStop.x in 1.0..<3.0) shouldBe true
+                wallLanding.x shouldBe 10.0
 
                 swap(boundedPlayer).isCancelled shouldBe true
                 val boundsStop = destinations[boundedPlayer.uniqueId]
                 (boundsStop != null && boundsStop.x <= 1.75) shouldBe true
-                wallPlayer.location.distanceSquared(wallStop) shouldBe 0.0
+                wallPlayer.location.distanceSquared(wallLanding) shouldBe 0.0
                 boundedPlayer.location.distanceSquared(requireNotNull(boundsStop)) shouldBe 0.0
 
                 swap(slabPlayer).isCancelled shouldBe true
                 swap(hazardPlayer).isCancelled shouldBe true
-                destinations.containsKey(slabPlayer.uniqueId) shouldBe false
-                destinations.containsKey(hazardPlayer.uniqueId) shouldBe false
+                val slabLanding = destinations[slabPlayer.uniqueId]
+                (slabLanding != null && slabLanding.x > 3.0) shouldBe true
+                val hazardLanding = destinations[hazardPlayer.uniqueId]
+                (hazardLanding != null && hazardLanding.x in 9.0..<10.0) shouldBe true
 
                 shiftPlayer.isSneaking = true
                 swap(shiftPlayer).isCancelled shouldBe true
@@ -255,12 +263,28 @@ class MagicDuelBlinkTest : StringSpec({
                 destinations.containsKey(inactivePlayer.uniqueId) shouldBe false
 
                 swap(failedPlayer).isCancelled shouldBe true
-                teleportAttempts shouldBe setOf(wallPlayer.uniqueId, boundedPlayer.uniqueId, failedPlayer.uniqueId)
+                teleportAttempts shouldBe setOf(
+                    wallPlayer.uniqueId,
+                    boundedPlayer.uniqueId,
+                    slabPlayer.uniqueId,
+                    hazardPlayer.uniqueId,
+                    failedPlayer.uniqueId,
+                )
                 destinations.containsKey(failedPlayer.uniqueId) shouldBe false
                 failedPlayer.location shouldBe requireNotNull(origins[failedPlayer.uniqueId])
                 effects.map { it.first } shouldBe
-                    listOf(origins[wallPlayer.uniqueId], origins[boundedPlayer.uniqueId])
-                effects.map { it.second } shouldBe listOf(wallStop, requireNotNull(boundsStop))
+                    listOf(
+                        origins[wallPlayer.uniqueId],
+                        origins[boundedPlayer.uniqueId],
+                        origins[slabPlayer.uniqueId],
+                        origins[hazardPlayer.uniqueId],
+                    )
+                effects.map { it.second } shouldBe listOf(
+                    wallLanding,
+                    requireNotNull(boundsStop),
+                    requireNotNull(slabLanding),
+                    requireNotNull(hazardLanding),
+                )
             } finally {
                 blink.close()
                 tasks.close()
