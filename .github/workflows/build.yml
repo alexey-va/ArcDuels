@@ -76,7 +76,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: alexey-va/ARC
-          ref: dd15c0e8af4274bd1d626cf96f83880a4af61fc9
+          ref: 2e76378c7b329fc654cba108bb02cd5bafdb2f22
           path: e2e-arc
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
