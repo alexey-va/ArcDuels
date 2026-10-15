@@ -7,7 +7,7 @@ plugins {
 val staffSpellApiJar = providers.gradleProperty("staffSpellApiJar").orNull?.let(::file)
 if (staffSpellApiJar != null) require(staffSpellApiJar.isFile) { "Staff spell API JAR does not exist: $staffSpellApiJar" }
 val staffSpellApiDependency: Any = staffSpellApiJar?.let { files(it) }
-    ?: "ru.ruscrafting.arc:arc-staff-spells-api:0.1.0"
+    ?: "ru.ruscrafting.arc:arc-staff-spells-api:0.1.1"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
 
 dependencies {

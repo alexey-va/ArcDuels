@@ -7,6 +7,7 @@ import io.mockk.every
 import io.mockk.mockk
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
@@ -21,6 +22,13 @@ import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.MatchScore
 import ru.ruscrafting.duels.domain.MatchState
+import ru.ruscrafting.duels.domain.MultiplayerMatch
+import ru.ruscrafting.duels.domain.MultiplayerMatchState
+import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
+import ru.ruscrafting.duels.domain.MultiplayerLayout
+import ru.ruscrafting.duels.domain.MultiplayerParticipant
+import ru.ruscrafting.duels.domain.MultiplayerRoster
+import ru.ruscrafting.duels.domain.MultiplayerRules
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -180,7 +188,7 @@ class KitRegistryMagicTest : StringSpec({
         lines.any { it.contains("Грозовая ветвь") } shouldBe true
     }
 
-    "bridge binds hits to the current active duel and rejects the previous round context" {
+    "bridge gates shared staff input and mobility by the current active duel round" {
         val caster = paper.server.addPlayer("MagicCaster")
         val target = paper.server.addPlayer("MagicTarget")
         val outsider = paper.server.addPlayer("MagicOutsider")
@@ -219,9 +227,50 @@ class KitRegistryMagicTest : StringSpec({
         val firstRound = StaffSpellDuelContext(match.id.value, 2, 0.4)
 
         bridge.activeContext(caster) shouldBe firstRound
+        bridge.permitsInput(caster) shouldBe true
         bridge.canHit(caster, target, firstRound) shouldBe true
         bridge.canHit(caster, outsider, firstRound) shouldBe false
 
+        val destination = caster.location.clone().add(0.0, 0.0, 2.0)
+        destination.world.loadChunk(destination.blockX shr 4, destination.blockZ shr 4)
+        every { duelSessions.isInsideArena(caster, any<Location>()) } returns true
+        every { duelSessions.teleportMagicBlink(caster, any<Location>()) } returns true
+        bridge.permitsMobility(caster, destination) shouldBe true
+        bridge.teleportMobility(caster, destination) shouldBe true
+
+        var invalidateRoundDuringTeleport = false
+        every { duelSessions.teleportMagicBlink(caster, any<Location>()) } answers {
+            if (invalidateRoundDuringTeleport) currentRound++
+            true
+        }
+        invalidateRoundDuringTeleport = true
+        bridge.teleportMobility(caster, destination) shouldBe false
+        invalidateRoundDuringTeleport = false
+        currentRound = 2
+
+        every { duelSessions.matchFor(outsider) } returns null
+        every { duelSessions.isEngaged(outsider) } returns false
+        every { duelSessions.isPreparing(outsider) } returns false
+        every { multiplayerSessions.matchFor(outsider) } returns null
+        every { multiplayerSessions.isLocked(outsider) } returns false
+        bridge.permitsInput(outsider) shouldBe true
+
+        every { duelSessions.matchFor(caster) } returns match.copy(state = MatchState.COUNTDOWN)
+        every { duelSessions.isEngaged(caster) } returns true
+        bridge.activeContext(caster) shouldBe null
+        bridge.permitsInput(caster) shouldBe false
+
+        every { duelSessions.matchFor(caster) } returns null
+        every { duelSessions.isEngaged(caster) } returns false
+        every { duelSessions.isPreparing(caster) } returns false
+        val multiplayerCountdown = mockk<MultiplayerMatch>()
+        every { multiplayerCountdown.state } returns MultiplayerMatchState.COUNTDOWN
+        every { multiplayerSessions.matchFor(caster) } returns multiplayerCountdown
+        every { multiplayerSessions.isLocked(caster) } returns true
+        bridge.permitsInput(caster) shouldBe false
+
+        every { duelSessions.matchFor(caster) } returns match
+        every { multiplayerSessions.matchFor(caster) } returns null
         currentRound = 3
         val nextRound = bridge.activeContext(caster)
         nextRound shouldBe StaffSpellDuelContext(match.id.value, 3, 0.4)
@@ -235,6 +284,69 @@ class KitRegistryMagicTest : StringSpec({
         every { service.isAvailable() } returns false
 
         MagicDuelCombatBridge.availableProvider(service) shouldBe null
+    }
+
+    "multiplayer magic participants use the shared staff route while the active round owns input" {
+        val caster = paper.server.addPlayer("GroupStaffCaster")
+        val opponents = listOf(
+            paper.server.addPlayer("GroupStaffOpponentA"),
+            paper.server.addPlayer("GroupStaffOpponentB"),
+        )
+        val kitId = KitId("registry_magic_test")
+        val participants = (listOf(caster) + opponents).map { player ->
+            MultiplayerParticipant(PlayerId(player.uniqueId), kitId = kitId)
+        }
+        val roster = MultiplayerRoster(
+            rules = MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, kitId),
+            participants = participants,
+        )
+        val match = MultiplayerMatch(
+            id = MatchId(UUID.randomUUID()),
+            arenaId = ArenaId("magic_test"),
+            serverId = ServerId("duels-1"),
+            roster = roster,
+            state = MultiplayerMatchState.ACTIVE,
+            activePlayers = roster.playerIds,
+            eliminationOrder = emptyList(),
+            createdAt = Instant.now(),
+        )
+        val duelSessions = mockk<DuelSessionManager>()
+        val multiplayerSessions = mockk<MultiplayerSessionManager>()
+        val spellService = mockk<ArcStaffSpellService>()
+        every { duelSessions.attachMagicDuelStateReset(any()) } returns AutoCloseable { }
+        every { multiplayerSessions.attachMagicDuelStateReset(any()) } returns AutoCloseable { }
+        every { duelSessions.matchFor(any<Player>()) } returns null
+        every { duelSessions.isEngaged(caster) } returns false
+        every { duelSessions.isPreparing(caster) } returns false
+        every { multiplayerSessions.matchFor(caster) } returns match
+        every { multiplayerSessions.magicDuelRound(caster) } returns 1
+        every { multiplayerSessions.isLocked(caster) } returns true
+        every { multiplayerSessions.isInsideArena(caster, any<Location>()) } returns true
+        every { multiplayerSessions.teleportMagicBlink(caster, any<Location>()) } returns true
+        every { spellService.isAvailable() } returns true
+        every { spellService.registerDuelPolicy(plugin, any()) } returns AutoCloseable { }
+
+        val kits = KitRegistry.loadCandidate(
+            plugin,
+            plugin.config,
+            loadoutsWithMagicKit(plugin),
+            StaffSpellItemProvider({ ItemStack(Material.BLAZE_ROD) }, "staff-provider-v1"),
+        )
+        val bridge = MagicDuelCombatBridge(plugin, spellService, duelSessions, multiplayerSessions, kits)
+        try {
+            bridge.permitsInput(caster) shouldBe true
+            bridge.activeContext(caster) shouldBe StaffSpellDuelContext(match.id.value, 1, 0.4)
+            val destination = caster.location.clone().add(0.0, 0.0, 2.0)
+            destination.world.loadChunk(destination.blockX shr 4, destination.blockZ shr 4)
+            bridge.permitsMobility(caster, destination) shouldBe true
+            bridge.teleportMobility(caster, destination) shouldBe true
+
+            every { multiplayerSessions.matchFor(caster) } returns match.copy(state = MultiplayerMatchState.COUNTDOWN)
+            bridge.activeContext(caster) shouldBe null
+            bridge.permitsInput(caster) shouldBe false
+        } finally {
+            bridge.close()
+        }
     }
 })
 

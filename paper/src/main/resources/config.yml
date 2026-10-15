@@ -226,7 +226,8 @@ arenas:
         pitch: 0.0
       radius: 3.5
       height: 3.0
-# Magical kit mobility. Each round starts with three charges; they recharge one at a time.
+# Deprecated compatibility settings. ARC StaffSpells now owns Q/F staff abilities in and out of arenas.
+# These values are retained when merging existing configs but are no longer read by ArcDuels.
 magic-duel:
   blink:
     distance: 12.0

@@ -222,9 +222,9 @@ kit:
   magic:
     name: '<#c4a7ff>Magic Duel</#c4a7ff>'
     description:
-      - '<#e6fff3>Seven staves, equal damage, and stored blinks.</#e6fff3>'
+      - '<#e6fff3>Seven staves, equal damage, and distinct Q/F abilities.</#e6fff3>'
       - '<#e6fff3>Each staff has a normal and an empowered attack.</#e6fff3>'
-      - '<#e6fff3>F — blink forward. Up to three charges.</#e6fff3>'
+      - '<#e6fff3>Shift + F keeps ARC menu access.</#e6fff3>'
   classic:
     name: '<gold>Classic</gold>'
     description: ['<gray>Diamond sword, bow, armor, and apples.</gray>']
@@ -620,17 +620,3 @@ help:
     - '<green>Your inventory is protected before teleport</green>'
     - '<green>and restored before the duel is complete.</green>'
     - '<dark_gray>────────────────────────</dark_gray>'
-magic:
-  blink:
-    ready: '<#c4a7ff>Blink <charges></#c4a7ff> <#e6fff3>· F</#e6fff3>'
-    status: '<#c4a7ff>Blink <charges></#c4a7ff> <#e6fff3>· <recharge>s · F</#e6fff3>'
-    blocked: '<#ffb347>No safe place to blink</#ffb347>'
-    empty: '<#c4a7ff>Blink ○○○</#c4a7ff> <#e6fff3>· next charge in <seconds>s</#e6fff3>'
-  echo:
-    ready: '<#c4a7ff>Echo</#c4a7ff> <white>· Q — leave an anchor</white>'
-    active: '<#8cecff>Echo · <seconds>s</#8cecff> <white>· Q — return</white>'
-    cooldown: '<#c4a7ff>Echo</#c4a7ff> <white>· ready in <seconds>s</white>'
-    unsafe: '<#ffb347>The anchor needs clear, solid ground beneath you</#ffb347>'
-    blocked: '<#ffb347>The return point is occupied or unavailable</#ffb347>'
-    returned: '<#8cecff>Returned to the echo</#8cecff>'
-    expired: '<#c4a7ff>Echo faded</#c4a7ff> <white>· ready in <seconds>s</white>'

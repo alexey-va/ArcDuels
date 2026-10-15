@@ -29,7 +29,6 @@ internal class MagicDuelCombatBridge(
         multiplayerResetRegistration.close()
         throw failure
     }
-    private val roundResets = mutableListOf<(Collection<UUID>) -> Unit>()
     private var closed = false
 
     /** Returns a context only for a living participant using a magic kit in an active round. */
@@ -54,6 +53,22 @@ internal class MagicDuelCombatBridge(
     }
 
     override fun context(caster: Player): StaffSpellDuelContext? = activeContext(caster)
+
+    /**
+     * Outside managed sessions staff inputs remain available. A player owned by either match manager
+     * must have a living, active magic round; a missing spell context alone never means "outside duel".
+     */
+    override fun permitsInput(player: Player): Boolean {
+        if (closed || !serviceAvailable() || !player.isOnline || player.isDead || player.health <= 0.0) return false
+        if (activeContext(player) != null) return true
+        return !duels.isEngaged(player) && !duels.isPreparing(player) && !multiplayer.isLocked(player)
+    }
+
+    override fun permitsMobility(player: Player, destination: Location): Boolean =
+        !closed && isInsideArena(player, destination)
+
+    override fun teleportMobility(player: Player, destination: Location): Boolean =
+        !closed && teleportBlink(player, destination)
 
     override fun canHit(
         caster: Player,
@@ -109,17 +124,7 @@ internal class MagicDuelCombatBridge(
         return teleported && activeContext(player) == context
     }
 
-    /** Mobility joins the existing round teardown before snapshots or new kit state are applied. */
-    fun attachRoundReset(reset: (Collection<UUID>) -> Unit): AutoCloseable {
-        roundResets += reset
-        return AutoCloseable { roundResets -= reset }
-    }
-
     private fun resetPlayers(playerIds: Collection<UUID>) {
-        roundResets.toList().forEach { reset ->
-            runCatching { reset(playerIds) }
-                .onFailure { plugin.logger.warning("Could not reset magic duel mobility: ${it.message}") }
-        }
         playerIds.forEach { playerId ->
             runCatching { spells.resetPlayer(playerId) }
                 .onFailure { plugin.logger.warning("Could not reset ARC StaffSpells state for $playerId: ${it.message}") }
@@ -140,7 +145,6 @@ internal class MagicDuelCombatBridge(
             .onFailure { plugin.logger.warning("Could not unregister ARC StaffSpells duel policy: ${it.message}") }
         duelResetRegistration.close()
         multiplayerResetRegistration.close()
-        roundResets.clear()
     }
 
     companion object {

@@ -34,6 +34,8 @@ class ArcDuelsConfigDefaultsTest : StringSpec({
         migrated.getDouble("multiplayer.spawn-placement.minimum-separation") shouldBe 2.0
         migrated.getDouble("multiplayer.spawn-placement.bounds-inset") shouldBe 1.0
 
+        migrated.getDouble("magic-duel.blink.distance") shouldBe 12.0
+        migrated.getLong("magic-duel.blink.recharge-seconds") shouldBe 8L
         migrated.getLong("magic-duel.echo.window-seconds") shouldBe 4L
         migrated.getLong("magic-duel.echo.cooldown-seconds") shouldBe 18L
 
