@@ -4,7 +4,7 @@ plugins {
 
 dependencies {
     implementation(project(":domain"))
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.26")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.28")
 }
 
 val integrationTest by sourceSets.creating {
@@ -16,7 +16,7 @@ configurations[integrationTest.implementationConfigurationName].extendsFrom(conf
 configurations[integrationTest.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
 
 dependencies {
-    add(integrationTest.implementationConfigurationName, "ru.ruscrafting.arc:arc-core-integration-testing:2.7.26")
+    add(integrationTest.implementationConfigurationName, "ru.ruscrafting.arc:arc-core-integration-testing:2.7.28")
 }
 
 tasks.register<Test>("integrationTest") {
