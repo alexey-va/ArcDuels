@@ -94,14 +94,22 @@ class DuelCommand internal constructor(
         alias: String,
         args: Array<out String>,
     ): List<String> {
-        if (args.firstOrNull()?.equals("admin", ignoreCase = true) == true) {
+        if (!sender.hasPermission("arcduels.use")) return emptyList()
+        if (args.size > 1 && args[0].equals("admin", ignoreCase = true)) {
             return admin.complete(sender, args.drop(1))
+        }
+        if (args.size == 2 && sender is Player && args[0].lowercase() in setOf("stats", "статы")) {
+            return (targets?.players()?.map(DuelTarget::name) ?: sender.server.onlinePlayers.map(Player::getName))
+                .filter { it.startsWith(args[1], ignoreCase = true) }.sorted()
         }
         if (args.size != 1) return emptyList()
         val prefix = args[0].lowercase()
-        val commands = mutableListOf("accept", "deny", "cancel", "leave", "return", "stats", "top", "history", "rematch")
+        val commands = if (sender is Player) mutableListOf("accept", "deny", "cancel", "leave", "return", "stats", "top", "history", "rematch") else mutableListOf()
         if (sender.hasPermission("arcduels.admin")) commands += "admin"
-        val playerNames = targets?.players()?.map(DuelTarget::name) ?: sender.server.onlinePlayers.map(Player::getName)
+        val playerNames = if (sender is Player) {
+            (targets?.players()?.filterNot { it.uniqueId == sender.uniqueId }?.map(DuelTarget::name)
+                ?: sender.server.onlinePlayers.filterNot { it.uniqueId == sender.uniqueId }.map(Player::getName))
+        } else emptyList()
         return (commands + playerNames)
             .distinctBy { it.lowercase() }
             .filter { it.lowercase().startsWith(prefix) }

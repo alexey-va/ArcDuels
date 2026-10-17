@@ -81,7 +81,7 @@ internal class DuelAdminCommand(
         if (!args[0].equals("arena", true)) return emptyList()
         if (args.size == 2) return filter(listOf("create", "setspawn", "setlobby", "setcorner", "sethill", "setloadouts", "setobjectives", "enable", "disable", "list", "info", "reload"), args[1])
         val operation = args[1].lowercase()
-        if (args.size == 3 && operation != "create" && operation !in setOf("list", "reload")) {
+        if (args.size == 3 && operation in setOf("setspawn", "setlobby", "setcorner", "sethill", "setloadouts", "setobjectives", "enable", "disable", "info")) {
             return filter(arenaIds(), args[2])
         }
         if (args.size == 4 && operation in setOf("setspawn", "setcorner")) return filter(listOf("1", "2"), args[3])
