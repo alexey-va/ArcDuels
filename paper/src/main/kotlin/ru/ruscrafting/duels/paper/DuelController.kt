@@ -1,5 +1,7 @@
 package ru.ruscrafting.duels.paper
 
+import java.util.concurrent.CompletableFuture
+
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.event.HoverEvent
@@ -64,6 +66,7 @@ class DuelController(
     private val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
     private val preferredArenaSelection: () -> ArenaSelection? = { null },
 ) : AutoCloseable {
+    @Volatile private var closed = false
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
     private val acceptedMatches = ConcurrentHashMap<ChallengeId, AcceptedMatch>()
     private val acceptedTasks = ConcurrentHashMap<ChallengeId, BukkitTask>()
@@ -513,6 +516,7 @@ class DuelController(
         )
 
     override fun close() {
+        closed = true
         networkSubscription?.close()
         completionSubscription.close()
         recoverySubscription.close()
@@ -1109,10 +1113,12 @@ class DuelController(
         listOf(match.firstPlayer, match.secondPlayer).forEach { playerId ->
             val player = plugin.server.getPlayer(playerId.value) ?: return@forEach
             val opponentId = match.opponentOf(playerId)
-            val opponentName = resolveName(opponentId)
-            playerComponents.load(player, opponentId.value, opponentName).whenComplete { opponent, _ ->
+            resolveNameAsync(opponentId).thenCompose { opponentName ->
+                playerComponents.load(player, opponentId.value, opponentName)
+            }.whenComplete { opponent, _ ->
                 runSync {
                     if (!player.isOnline) return@runSync
+                    val opponentComponent = opponent ?: playerComponents.component(player, opponentId.value, resolveName(opponentId))
                     val action =
                         locales.component(player, "controller.rematch-action")
                             .clickEvent(ClickEvent.runCommand("/duel rematch ${match.id}"))
@@ -1147,7 +1153,7 @@ class DuelController(
                                 locales.component(
                                     player,
                                     if (playerId == match.winner) "controller.result-win" else "controller.result-loss",
-                                    LocaleService.component("player", requireNotNull(opponent)),
+                                    LocaleService.component("player", opponentComponent),
                                     LocaleService.component("mode", duelModeComponent(locales, player, match.rules)),
                                     LocaleService.component("reason", resultReason(locales, player, playerId, requireNotNull(match.winner), requireNotNull(match.endReason))),
                                 ),
@@ -1166,10 +1172,12 @@ class DuelController(
         if (!player.isOnline || sessions.matchFor(player) != null || sessions.isPreparing(player)) return
         val playerId = PlayerId(player.uniqueId)
         val opponentId = recorded.opponentOf(playerId)
-        val opponentName = resolveName(opponentId)
-        playerComponents.load(player, opponentId.value, opponentName).whenComplete { opponent, _ ->
+        resolveNameAsync(opponentId).thenCompose { opponentName ->
+            playerComponents.load(player, opponentId.value, opponentName)
+        }.whenComplete { opponent, _ ->
             runSync {
                 if (!player.isOnline || sessions.matchFor(player) != null || sessions.isPreparing(player)) return@runSync
+                val opponentComponent = opponent ?: playerComponents.component(player, opponentId.value, resolveName(opponentId))
                 val effectiveRematchWindow = runtimeSettings()?.rematchWindow ?: rematchWindow
                 val action =
                     locales.component(player, "controller.rematch-action")
@@ -1193,7 +1201,7 @@ class DuelController(
                             locales.component(
                                 player,
                                 if (recorded.wonBy(playerId)) "controller.result-win" else "controller.result-loss",
-                                LocaleService.component("player", requireNotNull(opponent)),
+                                LocaleService.component("player", opponentComponent),
                                 LocaleService.component("mode", duelModeComponent(locales, player, rules)),
                                 LocaleService.component("reason", resultReason(locales, player, playerId, recorded.outcome.winner, recorded.outcome.endReason)),
                             ),
@@ -1378,8 +1386,9 @@ class DuelController(
                 challenge.target -> challenge.challenger
                 else -> return
             }
-        val name = resolveName(opponent)
-        sendPlayerNotice(player, opponent.value, name, "controller.expired")
+        resolveNameAsync(opponent).whenComplete { name, _ -> runSync {
+            sendPlayerNotice(player, opponent.value, name ?: resolveName(opponent), "controller.expired")
+        } }
     }
 
     private fun notifyChallenge(recipient: Player, challengerName: String, challenge: DuelChallenge) {
@@ -1519,7 +1528,14 @@ class DuelController(
     }
 
     private fun resolveName(playerId: PlayerId): String =
-        targets.find(playerId.value)?.name ?: plugin.server.getOfflinePlayer(playerId.value).name ?: playerId.toString().take(8)
+        cachedName(playerId) ?: playerId.toString().take(8)
+
+    private fun cachedName(playerId: PlayerId): String? =
+        targets.find(playerId.value)?.name ?: plugin.server.getOfflinePlayer(playerId.value).playerProfile.name
+
+    private fun resolveNameAsync(playerId: PlayerId): CompletableFuture<String> =
+        cachedName(playerId)?.let { CompletableFuture.completedFuture(it) }
+            ?: targets.names(listOf(playerId.value)).thenApply { it[playerId.value] ?: playerId.toString().take(8) }
 
     private fun sendPlayerNotice(
         viewer: Player,
@@ -1557,8 +1573,10 @@ class DuelController(
         listOfNotNull(plugin.server.getPlayer(challenge.challenger.value), plugin.server.getPlayer(challenge.target.value))
 
     private fun runSync(block: () -> Unit) {
-        if (!plugin.isEnabled) return
-        if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable(block))
+        if (closed || !plugin.isEnabled) return
+        if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable {
+            if (!closed && plugin.isEnabled) block()
+        })
     }
 
     private fun unwrap(failure: Throwable): Throwable =

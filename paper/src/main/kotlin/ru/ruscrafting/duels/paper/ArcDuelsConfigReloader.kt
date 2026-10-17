@@ -7,6 +7,11 @@ import ru.ruscrafting.duels.domain.ChallengeRegistry
 import java.io.File
 import java.io.InputStreamReader
 import java.security.MessageDigest
+import ru.arc.core.BoundedAsyncExecutor
+import ru.arc.core.BudgetedTaskQueue
+import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.whenCompleteSync
+import java.util.concurrent.CompletableFuture
 
 internal data class ArcDuelsReloadActivity(
     val reservedArenas: Int,
@@ -50,6 +55,7 @@ internal class ArcDuelsConfigReloader(
     private val beforeCommit: () -> Unit = {},
     private val afterCatalogReplacement: () -> Unit = {},
     private val commitMenus: (PaperMenuConfiguration) -> Unit = {},
+    private val publishConfiguration: (YamlConfiguration) -> Unit = { publishValidatedConfiguration(plugin.config, it) },
     private val activity: () -> ArcDuelsReloadActivity,
 ) {
     private var deferredCatalogs: PreparedCatalogs? = null
@@ -108,19 +114,110 @@ internal class ArcDuelsConfigReloader(
             // Prove the exact candidate can be copied into Bukkit's live configuration type
             // before the runtime generation is advanced.
             publishValidatedConfiguration(YamlConfiguration(), configuration)
-            val catalogsInitiallyDeferred = activity().blocksCatalogReplacement
 
             beforeCommit()
             require(readSourceRevision() == prepared.sourceRevision) {
                 "Configuration sources changed while the candidate was being validated; retry the reload"
             }
-            val committed = runtime.commit(expected.generation, prepared.settings)
+            commit(expected.generation, configuration, prepared)
+
+        }.onFailure { failure ->
+            DuelLog.warn(
+                "config-reload-failed",
+                "version={} error_type={} error={}",
+                runtime.snapshot().generation,
+                failure.javaClass.simpleName,
+                configReloadFailureSummary(failure),
+            )
+        }
+
+    private var preparing = false
+
+    /** Production reload: bounded worker IO/pure parsing, native catalogs through the shared queue. */
+    fun reloadAsync(worker: BoundedAsyncExecutor, queue: BudgetedTaskQueue, tasks: LifecycleTaskScope): CompletableFuture<ArcDuelsReloadReport> {
+        check(plugin.server.isPrimaryThread)
+        if (preparing) return CompletableFuture.failedFuture(IllegalStateException("Configuration is already preparing"))
+        preparing = true
+        val generation = runtime.snapshot().generation
+        val result = worker.submit {
+            val sources = captureSources()
+            afterSourceCapture()
+            val configuration = loadCandidateConfiguration(sources)
+            val bundledLoadouts = requireNotNull(plugin.getResource("loadouts.yml")).use {
+                YamlConfiguration.loadConfiguration(InputStreamReader(it, Charsets.UTF_8))
+            }
+            PureReload(sources, configuration,
+                sources.requiredYaml(loadoutsFile(), "ArcDuels loadouts.yml"), bundledLoadouts,
+                LocaleService.loadCandidate(plugin, configuration, localeFiles().mapValues { (language, file) ->
+                    sources.requiredYaml(file, "ArcDuels locale $language")
+                }), ArcDuelsMenuLayouts.inspect(plugin.dataFolder.toPath()).current(),
+                ServerDisplayNames.load(configuration, plugin.logger::warning), GuiItemCatalog.load(configuration),
+                sources.firstOptionalYaml(arcRedisSourceFiles(), "ARC Redis configuration"))
+        }.thenCompose { pure -> tasks.callSync {
+            val environment = ArcDuelsRestartOnlySettingsValidator.validateReloadEnvironment(plugin, pure.configuration) {
+                pure.arcRedis
+            }
+            pure to environment
+        } }.thenCompose { (pure, environment) -> worker.submit {
+            val settings = ArcDuelsRuntimeSettingsParser.parse(pure.configuration, environment.effectiveRedis, environment.playerDataProvider)
+            publishValidatedConfiguration(YamlConfiguration(), pure.configuration)
+            pure to settings
+        } }.thenCompose { (pure, settings) -> tasks.callSync {
+            val arenas = PaperArenaCatalog.loadAsync(plugin, pure.configuration, settings.settings.preferredArenaSelection, queue, worker)
+            val kits = KitRegistry.loadCandidateAsync(plugin, pure.configuration, pure.loadouts, pure.bundledLoadouts, queue, worker)
+            arenas.thenCombine(kits) { arenas, kits -> pure to PreparedReload(settings, arenas, kits, pure.locales,
+                pure.serverNames, pure.guiItems, pure.menus, pure.sources.revision) }
+        }.thenCompose { it } }.thenCompose { (pure, prepared) -> tasks.callSync {
+            beforeCommit()
+            Unit
+        }.thenCompose { worker.submit {
+            require(readSourceRevision() == prepared.sourceRevision) { "Configuration sources changed while the candidate was being validated; retry the reload" }
+        } }.thenCompose { tasks.callSync { commit(generation, pure.configuration, prepared) } } }
+        // The caller may immediately request another reload after acknowledgement.
+        // Include reopening admission in that acknowledgement, not a detached callback.
+        return result.handle { report, failure -> report to failure }.thenCompose { (report, failure) ->
+            tasks.callSync {
+                preparing = false
+                if (failure != null) {
+                    DuelLog.warn("config-reload-failed", "version={} error_type={} error={}",
+                        runtime.snapshot().generation, failure.javaClass.simpleName, configReloadFailureSummary(failure))
+                    throw failure
+                }
+                requireNotNull(report)
+            }
+        }
+    }
+
+    /** Idle polling reads source revisions on the worker and rechecks generation/admission on Paper. */
+    fun applyDeferredIfIdleAsync(worker: BoundedAsyncExecutor, queue: BudgetedTaskQueue, tasks: LifecycleTaskScope) {
+        val prepared = deferredCatalogs ?: return
+        if (preparing || activity().blocksCatalogReplacement) return
+        preparing = true
+        worker.submit { readSourceRevision() }.whenCompleteSync(tasks) { revision, failure ->
+            preparing = false
+            if (failure != null || deferredCatalogs !== prepared || activity().blocksCatalogReplacement) return@whenCompleteSync
+            if (revision != prepared.sourceRevision) { reloadAsync(worker, queue, tasks); return@whenCompleteSync }
+            if (arenas.tryReplaceWith(prepared.arenas) == null) return@whenCompleteSync
+            kits.replaceWith(prepared.kits)
+            deferredCatalogs = null
+            notifyCatalogReplacement()
+        }
+    }
+
+    private data class PureReload(val sources: CapturedSources, val configuration: YamlConfiguration,
+        val loadouts: YamlConfiguration, val bundledLoadouts: YamlConfiguration, val locales: LocaleService,
+        val menus: PaperMenuConfiguration, val serverNames: ServerDisplayNames, val guiItems: GuiItemCatalog, val arcRedis: YamlConfiguration?)
+
+    private fun commit(generation: Long, configuration: YamlConfiguration, prepared: PreparedReload): ArcDuelsReloadReport {
+        check(plugin.server.isPrimaryThread)
+        val catalogsInitiallyDeferred = activity().blocksCatalogReplacement
+            val committed = runtime.commit(generation, prepared.settings)
             check(committed is ArcDuelsRuntimeSettingsCommitResult.Applied) {
                 "Configuration changed concurrently; retry the reload"
             }
             // Publish the exact parsed tree. JavaPlugin.reloadConfig() would reread mutable disk
             // state and could pair candidate A services with candidate B plugin.config.
-            publishValidatedConfiguration(plugin.config, configuration)
+            publishConfiguration(configuration)
 
             // These stable service objects are retained by every listener/GUI. Replacing their
             // immutable backing state makes the next render observe the new generation.
@@ -162,16 +259,8 @@ internal class ArcDuelsConfigReloader(
                 if (catalogsDeferred) "deferred" else "applied",
                 report.restartRequired.joinToString(",") { it.reportKey }.ifEmpty { "none" },
             )
-            report
-        }.onFailure { failure ->
-            DuelLog.warn(
-                "config-reload-failed",
-                "version={} error_type={} error={}",
-                runtime.snapshot().generation,
-                failure.javaClass.simpleName,
-                configReloadFailureSummary(failure),
-            )
-        }
+            return report
+    }
 
     /** Applies the latest validated arena/loadout candidate once no flow can retain old ids. */
     @Synchronized

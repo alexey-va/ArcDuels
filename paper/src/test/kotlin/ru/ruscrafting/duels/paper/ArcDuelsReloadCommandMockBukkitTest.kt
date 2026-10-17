@@ -9,26 +9,27 @@ import org.bukkit.configuration.file.YamlConfiguration
 import org.mockbukkit.mockbukkit.entity.PlayerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
-import ru.arc.paper.testing.loadPlugin
 import java.io.File
 
 @Suppress("DEPRECATION")
 class ArcDuelsReloadCommandMockBukkitTest : StringSpec({
     "top-level command and legacy arena alias execute the same live reloader" {
         withReloadCommandPlugin { paper, plugin ->
-            val admin = paper.server.addPlayer("ReloadAdmin")
+            val admin = paper.addReadyDuelsPlayer(plugin, "ReloadAdmin")
             admin.isOp = true
             admin.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
 
             admin.performCommand("duel admin reload") shouldBe true
+            paper.awaitDuelsAdminIdle(plugin)
             plugin.currentConfigGeneration() shouldBe 2L
             admin.drainPlainMessages().single().contains("Конфигурация v2 применена") shouldBe true
 
             admin.performCommand("duel admin arena reload") shouldBe true
+            paper.awaitDuelsAdminIdle(plugin)
             plugin.currentConfigGeneration() shouldBe 3L
             admin.drainPlainMessages().single().contains("Конфигурация v3 применена") shouldBe true
 
-            val player = paper.server.addPlayer("NoReloadPerm")
+            val player = paper.addReadyDuelsPlayer(plugin, "NoReloadPerm")
             player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
             val beforeDenied = plugin.currentConfigGeneration()
             player.performCommand("duel admin reload") shouldBe true
@@ -39,12 +40,13 @@ class ArcDuelsReloadCommandMockBukkitTest : StringSpec({
 
     "rejected command reload sends one last-good error and a revoked GUI permission sends one denial" {
         withReloadCommandPlugin { paper, plugin ->
-            val admin = paper.server.addPlayer("ReloadRaceAdmin")
+            val admin = paper.addReadyDuelsPlayer(plugin, "ReloadRaceAdmin")
             admin.isOp = true
             admin.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
             editCommandConfig(plugin) { set("countdown-seconds", 99) }
 
             admin.performCommand("duel admin reload") shouldBe true
+            paper.awaitDuelsAdminIdle(plugin)
             plugin.currentConfigGeneration() shouldBe 1L
             val rejected = admin.drainPlainMessages()
             rejected.size shouldBe 1
@@ -67,7 +69,7 @@ class ArcDuelsReloadCommandMockBukkitTest : StringSpec({
 
     "restart-only server id never leaks into active admin status debug or GUI" {
         withReloadCommandPlugin { paper, plugin ->
-            val admin = paper.server.addPlayer("StartupIdAdmin")
+            val admin = paper.addReadyDuelsPlayer(plugin, "StartupIdAdmin")
             admin.isOp = true
             admin.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
             editCommandConfig(plugin) {
@@ -104,7 +106,7 @@ class ArcDuelsReloadCommandMockBukkitTest : StringSpec({
 
     "malformed YAML feedback never echoes a nearby secret to chat or diagnostics" {
         withReloadCommandPlugin { paper, plugin ->
-            val admin = paper.server.addPlayer("SecretReloadAdm")
+            val admin = paper.addReadyDuelsPlayer(plugin, "SecretReloadAdm")
             admin.isOp = true
             admin.setLocale(java.util.Locale.ENGLISH)
             val secret = "super-secret-never-echo"
@@ -113,6 +115,7 @@ class ArcDuelsReloadCommandMockBukkitTest : StringSpec({
             )
 
             admin.performCommand("duel admin reload") shouldBe true
+            paper.awaitDuelsAdminIdle(plugin)
 
             val feedback = admin.drainPlainMessages().single()
             feedback.contains("invalid YAML configuration") shouldBe true
@@ -127,7 +130,7 @@ class ArcDuelsReloadCommandMockBukkitTest : StringSpec({
 private fun withReloadCommandPlugin(block: (MockBukkitTestRuntime, ArcDuelsPlugin) -> Unit) {
     MockBukkitTestRuntime.open().use { paper ->
         failOnUnsupportedMockBukkitOperation {
-            block(paper, paper.loadPlugin<ArcDuelsPlugin>())
+            block(paper, paper.loadReadyDuelsPlugin())
         }
     }
 }

@@ -4,6 +4,7 @@ import org.bukkit.plugin.java.JavaPlugin
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.redis.NetworkPlayerDirectory
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 data class DuelTarget(
     val uniqueId: UUID,
@@ -16,7 +17,12 @@ class DuelTargetDirectory(
     private val plugin: JavaPlugin,
     private val localServer: ServerId,
     private val network: NetworkPlayerDirectory?,
+    private val nameLookup: ((Collection<UUID>) -> CompletableFuture<Map<UUID, String>>)? = null,
 ) {
+    /** The production lookup captures native cached profiles on Paper and reads missing names on its worker. */
+    fun names(ids: Collection<UUID>): CompletableFuture<Map<UUID, String>> =
+        nameLookup?.invoke(ids) ?: CompletableFuture.completedFuture(ids.associateWith { it.toString().take(8) })
+
     fun players(): List<DuelTarget> {
         val result = LinkedHashMap<UUID, DuelTarget>()
         network?.players()?.forEach { player ->

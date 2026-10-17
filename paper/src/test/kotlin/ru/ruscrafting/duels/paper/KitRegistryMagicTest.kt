@@ -32,7 +32,6 @@ import ru.ruscrafting.duels.domain.MultiplayerRules
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import ru.arc.paper.testing.MockBukkitTestRuntime
-import ru.arc.paper.testing.loadPlugin
 import java.io.InputStreamReader
 import java.time.Instant
 import java.util.UUID
@@ -43,7 +42,7 @@ class KitRegistryMagicTest : StringSpec({
 
     beforeSpec {
         paper = MockBukkitTestRuntime.open()
-        plugin = paper.loadPlugin()
+        plugin = paper.loadReadyDuelsPlugin()
     }
 
     afterSpec {

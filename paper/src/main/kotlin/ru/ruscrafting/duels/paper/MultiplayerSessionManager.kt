@@ -12,6 +12,7 @@ import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.util.Vector
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.BudgetedTaskQueue
 import ru.arc.core.ScheduledTask
 import ru.arc.core.whenCompleteSync
 import ru.arc.paper.audience.NativePaperAudienceEffects
@@ -64,6 +65,8 @@ internal class MultiplayerSessionManager(
     private val countdownSeconds: Int = 3,
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
+    private val nativeWork: BudgetedTaskQueue? = null,
+    private val recoveryAvailable: () -> Boolean = { true },
 ) : AutoCloseable {
     private data class Session(
         var match: MultiplayerMatch,
@@ -85,6 +88,7 @@ internal class MultiplayerSessionManager(
         val hillCapture: MultiplayerHillCaptureTracker = MultiplayerHillCaptureTracker(),
         val hitRace: HitRaceTracker = HitRaceTracker(),
         var magicEffectsReset: Boolean = false,
+        val nativeRestored: MutableSet<UUID> = mutableSetOf(),
     )
 
     private data class RuntimePolicy(
@@ -94,6 +98,8 @@ internal class MultiplayerSessionManager(
 
     private val sessions = ConcurrentHashMap<MatchId, Session>()
     private val byPlayer = ConcurrentHashMap<UUID, MatchId>()
+    private val preparing = ConcurrentHashMap.newKeySet<UUID>()
+    private var closed = false
     private val teleportsAuthorized = ScopedTeleportAuthorizer()
     private val kitHealth = KitHealthIsolation(NamespacedKey("arcduels", "multiplayer-kit-health"))
     @Volatile private var magicDuelStateReset: ((Collection<UUID>) -> Unit)? = null
@@ -109,6 +115,7 @@ internal class MultiplayerSessionManager(
         check(Bukkit.isPrimaryThread()) {
             "Multiplayer matches must start on the Paper primary thread"
         }
+        check(!closed && recoveryAvailable()) { "Multiplayer recovery is unavailable" }
         require(onlinePlayers.keys == roster.playerIds) { "Every roster participant must be online on this Paper node" }
         require(onlinePlayers.values.all(Player::isOnline)) { "Every multiplayer participant must remain online" }
         require(onlinePlayers.values.none {
@@ -119,10 +126,12 @@ internal class MultiplayerSessionManager(
         val policy = captureRuntimePolicy()
         val matchId = MatchId.random()
         val completion = CompletableFuture<MatchId>()
-        arenas.reserveMultiplayer(roster).whenCompleteSync(tasks) { reservation, reservationFailure ->
+        preparing += onlinePlayers.keys.map(PlayerId::value)
+        completion.whenCompleteSync(tasks) { _, _ -> preparing -= onlinePlayers.keys.map(PlayerId::value).toSet() }
+        arenas.reserveMultiplayer(roster).whenCompleteSync(tasks) reserved@ { reservation, reservationFailure ->
             if (reservationFailure != null || reservation == null) {
                 completion.completeExceptionally(reservationFailure ?: IllegalStateException("Multiplayer arena reservation failed"))
-                return@whenCompleteSync
+                return@reserved
             }
             val snapshots =
                 if (playerStateMode == PlayerStateMode.DISPOSABLE) {
@@ -131,11 +140,11 @@ internal class MultiplayerSessionManager(
                     playerStates.storeAll(matchId, onlinePlayers.values, inventoryReplaced = true)
                 }
             snapshots
-                .whenCompleteSync(tasks) { snapshots, escrowFailure ->
+                .whenCompleteSync(tasks) escrow@ { snapshots, escrowFailure ->
                     if (escrowFailure != null || snapshots == null) {
                         reservation.close()
                         completion.completeExceptionally(escrowFailure ?: IllegalStateException("Multiplayer escrow failed"))
-                        return@whenCompleteSync
+                        return@escrow
                     }
                     val returnLocations =
                         if (playerStateMode == PlayerStateMode.DISPOSABLE) {
@@ -171,12 +180,15 @@ internal class MultiplayerSessionManager(
         mayStart: () -> Boolean = { true },
     ): CompletableFuture<MatchId> {
         check(Bukkit.isPrimaryThread()) { "Network multiplayer matches must start on the Paper primary thread" }
+        check(!closed && recoveryAvailable()) { "Multiplayer recovery is unavailable" }
         require(onlinePlayers.keys == roster.playerIds) { "Every roster participant must be online on this Paper node" }
         require(origins.keys == roster.playerIds) { "Every roster participant must have an origin route" }
         require(onlinePlayers.values.all(Player::isOnline)) { "Every multiplayer participant must remain online" }
         require(onlinePlayers.values.none { isEngaged(it) }) { "A multiplayer participant is already engaged" }
         val policy = captureRuntimePolicy()
         val completion = CompletableFuture<MatchId>()
+        preparing += onlinePlayers.keys.map(PlayerId::value)
+        completion.whenCompleteSync(tasks) { _, _ -> preparing -= onlinePlayers.keys.map(PlayerId::value).toSet() }
         val snapshotOrigins =
             if (playerStateMode == PlayerStateMode.DISPOSABLE) origins.filterValues { it != serverId } else origins
         val snapshots =
@@ -186,52 +198,41 @@ internal class MultiplayerSessionManager(
                 playerStates.findMatchSnapshots(matchId, snapshotOrigins)
             }
         val reservation = arenas.reserveMultiplayer(roster)
-        reservation.thenCombine(snapshots, ::Pair).whenCompleteSync(tasks) { prepared, failure ->
+        reservation.thenCombine(snapshots, ::Pair).whenCompleteSync(tasks) prepared@ { prepared, failure ->
             if (failure != null || prepared == null) {
                 reservation.whenCompleteSync(tasks) { reserved, _ -> reserved?.close() }
                 completion.completeExceptionally(failure ?: IllegalStateException("Network multiplayer preparation failed"))
-                return@whenCompleteSync
+                return@prepared
             }
             val (reserved, escrows) = prepared
-            runCatching {
-                check(mayStart()) { "Network group preparation was cancelled" }
-                val stored = escrows.map { (playerId, escrow) ->
-                    val player = requireNotNull(onlinePlayers[playerId])
-                    playerId.value to playerStates.decodeForArena(escrow, player)
-                }.toMap()
-                val baselines =
-                    if (playerStateMode == PlayerStateMode.PRESERVE) {
-                        onlinePlayers.mapValues { (_, player) -> PlayerSnapshot.capture(player) }.mapKeys { it.key.value }
-                    } else {
-                        emptyMap()
-                    }
-                val returnLocations =
-                    if (playerStateMode == PlayerStateMode.DISPOSABLE) {
-                        origins.filterValues { it == serverId }.keys.associate { playerId ->
-                            val player = requireNotNull(onlinePlayers[playerId])
-                            playerId.value to player.location.clone()
-                        }
-                    } else {
-                        emptyMap()
-                    }
-                createSession(
-                    matchId,
-                    roster,
-                    onlinePlayers,
-                    reserved,
-                    stored,
-                    origins = origins,
-                    policy = policy,
-                    arenaBaselines = baselines,
-                    returnLocations = returnLocations,
-                )
-            }.onSuccess {
-                completion.complete(matchId)
-            }.onFailure { startFailure ->
-                reserved.close()
-                completion.completeExceptionally(startFailure)
+            val stored = ConcurrentHashMap<UUID, StoredPlayerSnapshot>()
+            val baselines = ConcurrentHashMap<UUID, PlayerSnapshot>()
+            val returnLocations = ConcurrentHashMap<UUID, Location>()
+            val captures = onlinePlayers.map { (playerId, player) ->
+                val decoded = escrows[playerId]?.let { playerStates.decodeAsync(it, player, forArena = true) }
+                    ?: CompletableFuture.completedFuture(null)
+                decoded.thenCompose { snapshot -> native({ !closed && mayStart() && player.isOnline }) {
+                    if (snapshot != null) stored[playerId.value] = snapshot
+                    if (playerStateMode == PlayerStateMode.PRESERVE) baselines[playerId.value] = PlayerSnapshot.capture(player)
+                    else if (origins[playerId] == serverId) returnLocations[playerId.value] = player.location.clone()
+                    Unit
+                } }
+            }
+            CompletableFuture.allOf(*captures.toTypedArray()).whenCompleteSync(tasks) { _, nativeFailure ->
+                if (nativeFailure != null) {
+                    reserved.close()
+                    completion.completeExceptionally(nativeFailure)
+                } else runCatching {
+                    check(!closed && mayStart()) { "Network group preparation was cancelled" }
+                    createSession(matchId, roster, onlinePlayers, reserved, stored, origins = origins,
+                        policy = policy, arenaBaselines = baselines, returnLocations = returnLocations)
+                }.onSuccess { completion.complete(matchId) }.onFailure { startFailure ->
+                    reserved.close()
+                    completion.completeExceptionally(startFailure)
+                }
             }
         }
+
         return completion
     }
 
@@ -278,7 +279,7 @@ internal class MultiplayerSessionManager(
             .onFailure { Bukkit.getLogger().warning("Could not reset ARC StaffSpells state: ${it.message}") }
     }
 
-    fun isEngaged(player: Player): Boolean = byPlayer.containsKey(player.uniqueId)
+    fun isEngaged(player: Player): Boolean = byPlayer.containsKey(player.uniqueId) || player.uniqueId in preparing
 
     fun isLocked(player: Player): Boolean = isEngaged(player)
 
@@ -443,11 +444,28 @@ internal class MultiplayerSessionManager(
     fun activeCount(): Int = sessions.size
 
     override fun close() {
+        closed = true
+        preparing.clear()
+        var remainingNativePlayers = 2
         sessions.values.toList().forEach { session ->
+            session.objectiveTask?.cancel()
             session.match = runCatching { session.match.cancel(clock.instant(), MatchEndReason.SERVER_SHUTDOWN) }.getOrDefault(session.match)
-            shutdownRestore(session)
+            participants(session).forEach { player ->
+                if (remainingNativePlayers > 0) {
+                    remainingNativePlayers--
+                    restoreDeparting(player, session.snapshots[player.uniqueId])
+                }
+            }
+            // The origin or local pending snapshot retains recovery ownership for every unfinished player.
+            releaseSession(session)
         }
     }
+
+    private fun <T> native(isCurrent: () -> Boolean, operation: () -> T): CompletableFuture<T> =
+        nativeWork?.call(isCurrent, operation) ?: runCatching {
+            check(isCurrent()) { "Multiplayer native stage is stale" }
+            CompletableFuture.completedFuture(operation())
+        }.getOrElse { CompletableFuture.failedFuture(it) }
 
     private fun createSession(
         matchId: MatchId,
@@ -486,14 +504,17 @@ internal class MultiplayerSessionManager(
             if (roster.participants.any { kits.get(it.kitId).magic }) {
                 resetMagicDuelPlayers(roster.playerIds.map { it.value })
             }
-            onlinePlayers.forEach { (playerId, player) ->
-                prepareKit(player, kits.get(roster.participant(playerId).kitId))
-            }
             val arrivals = onlinePlayers.map { (playerId, player) ->
                 val destination = requireNotNull(reservation.spawns[playerId])
-                teleportsAuthorized.authorize(player.uniqueId, destination) {
-                    teleports.teleportAsync(player, destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
-                }.thenApply { arrived -> check(arrived) { "Could not teleport ${player.name} to the multiplayer arena" } }
+                native({ !closed && sessions[matchId] === created && player.isOnline }) {
+                    check(arenas.get(reservation.arenaId).multiplayerNavigation.isSafe(destination)) {
+                        "Multiplayer spawn is no longer loaded and safe"
+                    }
+                    prepareKit(player, kits.get(roster.participant(playerId).kitId))
+                    teleportsAuthorized.authorize(player.uniqueId, destination) {
+                        teleports.teleportAsync(player, destination, PlayerTeleportEvent.TeleportCause.PLUGIN)
+                    }
+                }.thenCompose { it }.thenApply { arrived -> check(arrived) { "Could not teleport ${player.uniqueId} to the multiplayer arena" } }
             }
             val activeSession = requireNotNull(session)
             val arrivalBarrier = CompletableFuture.allOf(*arrivals.toTypedArray())
@@ -711,24 +732,16 @@ internal class MultiplayerSessionManager(
             session.magicEffectsReset = true
             resetMagicDuelPlayers(session.match.roster.playerIds.map { it.value })
         }
-        val applyFailure = players.firstNotNullOfOrNull { player ->
-            runCatching { restoreOwnedState(session, player) }.exceptionOrNull()
-        }
-        if (applyFailure != null) {
-            DuelLog.warn(
-                "multiplayer-restore-failed",
-                session.match.id,
-                "error_type={} error={}",
-                applyFailure.javaClass.simpleName,
-                applyFailure.message,
-            )
-            tasks.runLater(RESTORE_RETRY_TICKS) { finishRestore(session) }
-            return
-        }
         session.restoreInFlight = true
-        val retentions = players.filter { ownsEscrow(session, it.uniqueId) }
-            .map { player -> playerStates.retain(requireNotNull(session.snapshots[player.uniqueId])) }
-        CompletableFuture.allOf(*retentions.toTypedArray()).whenCompleteSync(tasks) { _, failure ->
+        val applied = players.filter { it.uniqueId !in session.nativeRestored }.map { player -> native({ !closed && sessions[session.match.id] === session }) {
+            restoreOwnedState(session, player)
+            session.nativeRestored += player.uniqueId
+        } }
+        val restored = CompletableFuture.allOf(*applied.toTypedArray())
+        restored.thenCompose { tasks.callSync {
+            players.filter { ownsEscrow(session, it.uniqueId) }
+                .map { player -> playerStates.retain(requireNotNull(session.snapshots[player.uniqueId])) }
+        } }.thenCompose { retentions -> CompletableFuture.allOf(*retentions.toTypedArray()) }.whenCompleteSync(tasks) { _, failure ->
             if (sessions[session.match.id] !== session) return@whenCompleteSync
             if (failure == null) {
                 releaseSession(session)
@@ -844,7 +857,7 @@ internal class MultiplayerSessionManager(
         session.match.roster.playerIds.forEach { byPlayer.remove(it.value, session.match.id) }
         session.leases.forEach { runCatching { it.close() } }
         runCatching { session.reservation.close() }
-        session.origins?.forEach { (playerId, destination) ->
+        if (!closed) session.origins?.forEach { (playerId, destination) ->
             if (destination != serverId) {
                 Bukkit.getPlayer(playerId.value)?.takeIf(Player::isOnline)?.let { player ->
                     runCatching { networkReturn(player, destination) }

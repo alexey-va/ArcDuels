@@ -6,7 +6,6 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.World
 import ru.arc.paper.testing.MockBukkitTestRuntime
-import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
@@ -19,7 +18,7 @@ import java.util.UUID
 class MultiplayerSpawnNavigationMockBukkitTest : StringSpec({
     "sumo platform automatically fits every supported free for all group size" {
         MockBukkitTestRuntime.open().use { paper ->
-            val plugin = paper.loadPlugin<ArcDuelsPlugin>()
+            val plugin = paper.loadReadyDuelsPlugin()
             val world = paper.server.addSimpleWorld("sumo-platform")
             // Surface of the deployed octagonal platform, world-content/duels/sumo-platform.atelier.json.
             listOf(intArrayOf(6, 14, 0, 20), intArrayOf(4, 16, 1, 19),
@@ -38,7 +37,7 @@ class MultiplayerSpawnNavigationMockBukkitTest : StringSpec({
             plugin.config.set("$path.bounds.min.z", -4.0)
             plugin.config.set("$path.bounds.max.x", 25.0)
             plugin.config.set("$path.bounds.max.z", 25.0)
-            val catalog = PaperArenaCatalog.load(plugin)
+            val catalog = paper.loadReadyArenaCatalog(plugin)
             for (size in 3..12) {
                 val roster = MultiplayerRoster(
                     MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED,
@@ -55,11 +54,11 @@ class MultiplayerSpawnNavigationMockBukkitTest : StringSpec({
 
     "procedural placement keeps every player in the duel spawn walkable component" {
         MockBukkitTestRuntime.open().use { paper ->
-            val plugin = paper.loadPlugin<ArcDuelsPlugin>()
+            val plugin = paper.loadReadyDuelsPlugin()
             val world = paper.server.addSimpleWorld("barrier-arena")
             prepareArena(world)
             configureArena(plugin, world.name)
-            val catalog = PaperArenaCatalog.load(plugin)
+            val catalog = paper.loadReadyArenaCatalog(plugin)
             val roster =
                 MultiplayerRoster(
                     MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("classic")),

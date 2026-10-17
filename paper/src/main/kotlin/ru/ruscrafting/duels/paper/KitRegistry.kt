@@ -12,6 +12,9 @@ import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.config.Config
+import ru.arc.core.BoundedAsyncExecutor
+import ru.arc.core.BudgetedTaskQueue
+import java.util.concurrent.CompletableFuture
 import ru.ruscrafting.duels.domain.KitId
 import java.io.File
 import java.io.InputStreamReader
@@ -42,9 +45,10 @@ internal data class StaffSpellItemProvider(
 class KitRegistry private constructor(
     kits: Map<KitId, DuelKit>,
     defaultKit: KitId,
+    fingerprints: Map<KitId, String>? = null,
 ) {
     @Volatile
-    private var state = State.of(kits, defaultKit)
+    private var state = State.of(kits, defaultKit, fingerprints)
 
     fun get(id: KitId): DuelKit = state.kits[id] ?: error("Unknown duel kit $id")
 
@@ -70,10 +74,10 @@ class KitRegistry private constructor(
         val defaultKit: KitId,
     ) {
         companion object {
-            fun of(kits: Map<KitId, DuelKit>, defaultKit: KitId): State =
+            fun of(kits: Map<KitId, DuelKit>, defaultKit: KitId, fingerprints: Map<KitId, String>? = null): State =
                 State(
                     kits = kits.toMap(),
-                    fingerprints = kits.mapValues { (_, kit) -> kit.loadoutFingerprint() },
+                    fingerprints = fingerprints ?: kits.mapValues { (_, kit) -> kit.loadoutFingerprint() },
                     defaultKit = defaultKit,
                 )
         }
@@ -94,12 +98,14 @@ class KitRegistry private constructor(
             configuration: Configuration,
             capturedLoadouts: YamlConfiguration? = null,
             staffItems: StaffSpellItemProvider? = loadProviderItems(plugin),
+            bundledLoadouts: YamlConfiguration? = null,
         ): KitRegistry = load(
             plugin,
             configuration,
             prepareFiles = false,
             capturedLoadouts = capturedLoadouts,
             staffItems = staffItems,
+            bundledLoadouts = bundledLoadouts,
         )
 
         private fun load(
@@ -108,6 +114,7 @@ class KitRegistry private constructor(
             prepareFiles: Boolean,
             capturedLoadouts: YamlConfiguration? = null,
             staffItems: StaffSpellItemProvider? = null,
+            bundledLoadouts: YamlConfiguration? = null,
         ): KitRegistry {
             val loadoutsFile = File(plugin.dataFolder, LOADOUTS_RESOURCE)
             if (capturedLoadouts == null && !loadoutsFile.isFile) {
@@ -119,28 +126,10 @@ class KitRegistry private constructor(
             // preparation is read-only and merges bundled values only in memory.
             if (prepareFiles) Config(plugin.dataFolder.toPath(), LOADOUTS_RESOURCE).mergeMissingFromBundled(LOADOUTS_RESOURCE)
             val loadouts = capturedLoadouts ?: YamlConfiguration().apply { load(loadoutsFile) }
-            val bundled =
-                requireNotNull(plugin.getResource(LOADOUTS_RESOURCE)) { "Missing bundled ArcDuels loadouts.yml" }
+            val bundled = bundledLoadouts ?: requireNotNull(plugin.getResource(LOADOUTS_RESOURCE)) { "Missing bundled ArcDuels loadouts.yml" }
                     .use { input -> YamlConfiguration().apply { load(InputStreamReader(input, Charsets.UTF_8)) } }
             loadouts.setDefaults(bundled)
-            val sections = linkedMapOf<String, ConfigurationSection>()
-            loadouts.strictConfigurationSection("kits")?.let { root ->
-                require(root.getKeys(false).map(String::lowercase).distinct().size == root.getKeys(false).size) {
-                    "Kit ids in loadouts.yml must be unique after lowercase normalization"
-                }
-                root.getKeys(false).forEach { rawId ->
-                    sections[rawId.lowercase()] = root.getConfigurationSection(rawId) ?: error("Invalid kit section $rawId")
-                }
-            }
-            // Existing operator-owned kit values remain authoritative during the split from config.yml.
-            configuration.strictConfigurationSection("kits")?.let { legacy ->
-                require(legacy.getKeys(false).map(String::lowercase).distinct().size == legacy.getKeys(false).size) {
-                    "Kit ids in config.yml must be unique after lowercase normalization"
-                }
-                legacy.getKeys(false).forEach { rawId ->
-                    sections[rawId.lowercase()] = legacy.getConfigurationSection(rawId) ?: error("Invalid kit section $rawId")
-                }
-            }
+            val sections = sections(configuration, loadouts)
             val skippedMagicKits = mutableListOf<String>()
             val parsed = sections.mapNotNull { (rawId, section) ->
                 val kit = section.readKit(KitId(rawId), staffItems)
@@ -170,6 +159,60 @@ class KitRegistry private constructor(
                 }
             }
             return KitRegistry(parsed, defaultKit)
+        }
+
+        /** IO/default merging is already prepared; one fixed-inventory kit is bound per native step. */
+        internal fun loadCandidateAsync(plugin: JavaPlugin, configuration: Configuration,
+            loadouts: YamlConfiguration, bundled: YamlConfiguration, queue: BudgetedTaskQueue,
+            worker: BoundedAsyncExecutor): CompletableFuture<KitRegistry> {
+            val provider = loadProviderItems(plugin) // Provider acquisition/native factory is main-owned.
+            return worker.submit {
+                loadouts.setDefaults(bundled)
+                val prepared = sections(configuration, loadouts)
+                val default = KitId(configuration.strictString("multiplayer.defaults.kit", "classic").trim().lowercase(Locale.ROOT))
+                prepared.entries.toList() to default
+            }.thenCompose { (entries, default) ->
+                val iterator = entries.iterator()
+                val parsed = linkedMapOf<KitId, DuelKit>()
+                val canonical = linkedMapOf<KitId, String>()
+                queue.submit({ plugin.isEnabled }) {
+                    if (iterator.hasNext()) {
+                        val (rawId, section) = iterator.next()
+                        val id = KitId(rawId)
+                        val kit = section.readKit(id, provider)
+                        if (kit != null) {
+                            parsed[id] = kit
+                            canonical[id] = kit.loadoutCanonical()
+                        } else plugin.logger.warning("Skipped magic duel kit $rawId because ARC StaffSpells API is unavailable")
+                    }
+                    !iterator.hasNext()
+                }.thenCompose { worker.submit {
+                    require(default in parsed) { "multiplayer.defaults.kit references unavailable kit '${default.value}'" }
+                    KitRegistry(parsed, default, canonical.mapValues { (_, value) -> value.loadoutDigest() })
+                } }
+            }
+        }
+
+        private fun sections(configuration: Configuration, loadouts: YamlConfiguration): LinkedHashMap<String, ConfigurationSection> {
+            val sections = linkedMapOf<String, ConfigurationSection>()
+            loadouts.strictConfigurationSection("kits")?.let { root ->
+                require(root.getKeys(false).map(String::lowercase).distinct().size == root.getKeys(false).size) {
+                    "Kit ids in loadouts.yml must be unique after lowercase normalization"
+                }
+                root.getKeys(false).forEach { rawId ->
+                    sections[rawId.lowercase()] = root.getConfigurationSection(rawId) ?: error("Invalid kit section $rawId")
+                }
+            }
+            // Existing operator-owned kit values remain authoritative during the split from config.yml.
+            configuration.strictConfigurationSection("kits")?.let { legacy ->
+                require(legacy.getKeys(false).map(String::lowercase).distinct().size == legacy.getKeys(false).size) {
+                    "Kit ids in config.yml must be unique after lowercase normalization"
+                }
+                legacy.getKeys(false).forEach { rawId ->
+                    sections[rawId.lowercase()] = legacy.getConfigurationSection(rawId) ?: error("Invalid kit section $rawId")
+                }
+            }
+            return sections
         }
 
         private fun ConfigurationSection.readKit(id: KitId, staffItems: StaffSpellItemProvider?): DuelKit? {
@@ -297,8 +340,9 @@ class KitRegistry private constructor(
     }
 }
 
-private fun DuelKit.loadoutFingerprint(): String {
-    val canonical =
+private fun DuelKit.loadoutFingerprint(): String = loadoutCanonical().loadoutDigest()
+
+private fun DuelKit.loadoutCanonical(): String =
         buildString {
             append("arcduels-kit-v1\n")
             items.toSortedMap().forEach { (slot, item) ->
@@ -320,10 +364,10 @@ private fun DuelKit.loadoutFingerprint(): String {
                 }
             }
         }
-    return MessageDigest.getInstance("SHA-256")
-        .digest(canonical.toByteArray(Charsets.UTF_8))
-        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-}
+
+private fun String.loadoutDigest(): String = MessageDigest.getInstance("SHA-256")
+    .digest(toByteArray(Charsets.UTF_8))
+    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
 private fun StringBuilder.appendCanonical(item: ItemStack?): StringBuilder {
     if (item == null) return append("-\n")

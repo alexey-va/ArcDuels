@@ -460,7 +460,16 @@ class MySqlStatisticsRepository(
             }
         }
 
-    override fun close() = runtime.close()
+    /** Terminal-worker only: retain the pool/lease until accepted JDBC cleanup actually completes. */
+    override fun close() {
+        var failure: Throwable? = null
+        try { runtime.executor.closeAsync().join() } catch (error: Throwable) { failure = error }
+        try { runtime.close() } catch (error: Throwable) {
+            val previous = failure
+            if (previous == null) failure = error else previous.addSuppressed(error)
+        }
+        failure?.let { throw it }
+    }
 
     private fun saveAllTransaction(
         connection: Connection,

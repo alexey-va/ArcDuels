@@ -14,7 +14,6 @@ import org.mockbukkit.mockbukkit.entity.PlayerMock
 import org.mockbukkit.mockbukkit.simulate.entity.PlayerSimulation
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
-import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.ChallengeRegistry
 import java.io.File
 import java.io.InputStreamReader
@@ -90,7 +89,7 @@ class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
             plugin.currentRuntimeSettings().multiplayerFinishDelayTicks shouldBe 5L
             HandlerList.getRegisteredListeners(plugin).size shouldBe listenerCount
 
-            val player = paper.server.addPlayer("ReloadViewer")
+            val player = paper.addReadyDuelsPlayer(plugin, "ReloadViewer")
             player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
             player.performCommand("duel") shouldBe true
             player.openInventory.topInventory.getItem(0)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
@@ -119,7 +118,7 @@ class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
             plugin.currentRuntimeSettings().countdownSeconds shouldBe 1
             plugin.config.getInt("countdown-seconds") shouldBe 1
 
-            val player = paper.server.addPlayer("LastGoodViewer")
+            val player = paper.addReadyDuelsPlayer(plugin, "LastGoodViewer")
             player.performCommand("duel") shouldBe true
             player.openInventory.topInventory.getItem(0)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
         }
@@ -321,9 +320,9 @@ class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
 
     "only a visibly open multiplayer draft blocks kit publication and it auto applies after close" {
         withReloadPlugin { paper, plugin ->
-            val host = paper.server.addPlayer("DraftReloadHost")
-            paper.server.addPlayer("DraftReloadAlpha")
-            paper.server.addPlayer("DraftReloadBravo")
+            val host = paper.addReadyDuelsPlayer(plugin, "DraftReloadHost")
+            paper.addReadyDuelsPlayer(plugin, "DraftReloadAlpha")
+            paper.addReadyDuelsPlayer(plugin, "DraftReloadBravo")
             host.performCommand("duel") shouldBe true
             host.clickReload(15)
             editYaml(File(plugin.dataFolder, "loadouts.yml")) {
@@ -335,7 +334,7 @@ class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
             report.catalogsDeferred shouldBe true
             plugin.hasDeferredConfigurationCatalogs() shouldBe true
             host.closeInventory()
-            paper.performTicks(20)
+            paper.awaitDuelsCatalogPublication(plugin)
             plugin.hasDeferredConfigurationCatalogs() shouldBe false
             host.performCommand("duel") shouldBe true
             host.clickReload(15)
@@ -354,7 +353,7 @@ class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
             }
             editConfig(plugin) { set("multiplayer.defaults.kit", "aaa_custom") }
             plugin.reloadConfiguration().getOrThrow().catalogsDeferred shouldBe false
-            val host = paper.server.addPlayer("ClosedDraftHost")
+            val host = paper.addReadyDuelsPlayer(plugin, "ClosedDraftHost")
             host.performCommand("duel") shouldBe true
             host.clickReload(15)
             host.openInventory.topInventory.getItem(32)?.type shouldBe Material.BLAZE_ROD
@@ -379,8 +378,8 @@ class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
                 set("kits.aaa_custom.items.0", "STONE_SWORD")
             }
             plugin.reloadConfiguration().getOrThrow()
-            val player = paper.server.addPlayer("RulesCatalogHost")
-            paper.server.addPlayer("RulesTarget")
+            val player = paper.addReadyDuelsPlayer(plugin, "RulesCatalogHost")
+            paper.addReadyDuelsPlayer(plugin, "RulesTarget")
             player.performCommand("duel") shouldBe true
             player.clickReload(11)
             player.clickReload(10)
@@ -394,7 +393,7 @@ class ArcDuelsConfigReloadMockBukkitTest : StringSpec({
             plugin.hasDeferredConfigurationCatalogs() shouldBe true
 
             player.closeInventory()
-            paper.performTicks(20)
+            paper.awaitDuelsCatalogPublication(plugin)
             plugin.hasDeferredConfigurationCatalogs() shouldBe false
             player.performCommand("duel RulesTarget") shouldBe true
             player.clickReload(11)
@@ -690,7 +689,7 @@ private fun idleReloadActivity(): ArcDuelsReloadActivity =
 private fun withReloadPlugin(block: (MockBukkitTestRuntime, ArcDuelsPlugin) -> Unit) {
     MockBukkitTestRuntime.open().use { paper ->
         failOnUnsupportedMockBukkitOperation {
-            block(paper, paper.loadPlugin<ArcDuelsPlugin>())
+            block(paper, paper.loadReadyDuelsPlugin())
         }
     }
 }

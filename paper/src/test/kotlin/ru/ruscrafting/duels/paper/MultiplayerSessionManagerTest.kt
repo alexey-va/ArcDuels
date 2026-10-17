@@ -4,6 +4,9 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import org.bukkit.Material
+import ru.arc.core.BudgetedTaskQueue
+import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.TestTaskScheduler
 import ru.arc.paper.chunk.PaperChunkKey
 import ru.arc.paper.chunk.PaperChunkTicketAddResult
 import ru.arc.paper.chunk.PaperChunkTicketBackend
@@ -18,6 +21,54 @@ import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 
 class MultiplayerSessionManagerTest : StringSpec({
+    "shared native budget slices group admission and keeps the arena until every player save barrier" {
+        withManagerScenario { paper ->
+            val scheduler = TestTaskScheduler()
+            val scope = LifecycleTaskScope(scheduler)
+            val queue = BudgetedTaskQueue(scope, maximumSteps = 1, nanoTime = { 0 })
+            var saves = 0
+            try {
+                multiplayerHarness(paper, nativeWork = queue, playerData = PaperPlayerDataPersistence { saves++ }).use { harness ->
+                    val roster = ffaRoster(harness.players)
+                    val starting = harness.manager.start(roster, harness.players.associateBy { PlayerId(it.uniqueId) })
+                    starting.isDone shouldBe false
+                    harness.players.all(harness.manager::isLocked) shouldBe true
+                    var ticks = 0
+                    while (harness.teleports.pendingCount < harness.players.size && ticks++ < 64) {
+                        val before = harness.teleports.pendingCount
+                        scheduler.tick()
+                        paper.performTicks(1)
+                        (harness.teleports.pendingCount - before in 0..1) shouldBe true
+                    }
+                    harness.teleports.pendingCount shouldBe harness.players.size
+                    harness.arenas.reservedCount() shouldBe 1
+                    harness.teleports.completeAll()
+                    paper.performTicks(4)
+                    harness.players.dropLast(1).forEach(harness.manager::eliminate)
+                    harness.results.completion.complete(true)
+                    paper.performTicks(64)
+                    saves shouldBe 0
+                    var restoreTicks = 0
+                    while (saves < harness.players.size && restoreTicks++ < 64) {
+                        val before = saves
+                        scheduler.tick()
+                        paper.performTicks(1)
+                        (saves - before in 0..1) shouldBe true
+                        // Native apply/save and durable archival are separate barriers.
+                        if (saves < harness.players.size) {
+                        harness.arenas.reservedCount() shouldBe 1
+                        harness.manager.activeCount() shouldBe 1
+                        }
+                    }
+                    paper.performTicks(4)
+                    saves shouldBe harness.players.size
+                    harness.manager.activeCount() shouldBe 0
+                    harness.arenas.reservedCount() shouldBe 0
+                }
+            } finally { queue.close(); scope.close() }
+        }
+    }
+
     "completed groups remain locked through durable retention and ignore duplicate elimination" {
         withManagerScenario { paper ->
             val harness = multiplayerHarness(paper)
@@ -156,9 +207,12 @@ class MultiplayerSessionManagerTest : StringSpec({
         }
     }
 
-    "shutdown restores every active participant and releases the session immediately" {
+    "shutdown bounds native restores and leaves every unfinished escrow recoverable" {
         withManagerScenario { paper ->
-            multiplayerHarness(paper).use { harness ->
+            val repository = InMemoryEscrowRepository()
+            var nativeWrites = 0
+            multiplayerHarness(paper, escrowRepository = repository,
+                playerData = PaperPlayerDataPersistence { nativeWrites++ }).use { harness ->
                 val roster = ffaRoster(harness.players)
                 harness.manager.start(roster, harness.players.associateBy { PlayerId(it.uniqueId) })
                 paper.performTicks(4)
@@ -169,10 +223,17 @@ class MultiplayerSessionManagerTest : StringSpec({
                 paper.performTicks(4)
 
                 harness.manager.activeCount() shouldBe 0
+                nativeWrites shouldBe 2
+                repository.retainedCount() shouldBe 2
+                repository.pendingCount() shouldBe harness.players.size - 2
                 harness.players.forEachIndexed { index, player ->
                     harness.manager.isEngaged(player) shouldBe false
-                    player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
-                    player.world.name shouldBe "world"
+                    if (index < 2) {
+                        player.inventory.getItem(index)?.type shouldBe Material.GOLDEN_APPLE
+                        player.world.name shouldBe "world"
+                    } else {
+                        repository.findPending(PlayerId(player.uniqueId)).get()?.playerId shouldBe PlayerId(player.uniqueId)
+                    }
                 }
             }
         }

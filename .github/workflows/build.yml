@@ -76,13 +76,18 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: alexey-va/ARC
-          ref: 2e76378c7b329fc654cba108bb02cd5bafdb2f22
+          ref: 560ccd424d82c0c5e3c70daeb1ddc8c47837c90a
           path: e2e-arc
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - name: Download immutable ArcCore provider
+        run: |
+          mkdir -p paper/build/e2e-runtime
+          curl --fail --location --retry 3 --output paper/build/e2e-runtime/ArcCore-0.1.12.jar https://repo.rus-crafting.ru/grocermc/ru/ruscrafting/ArcCore/0.1.12/ArcCore-0.1.12.jar
+          echo '93158072f30ad3d7d5201acdf9036324841c4455844b4f1b650cfea0d8540502  paper/build/e2e-runtime/ArcCore-0.1.12.jar' | sha256sum --check --strict
       - name: Build ARC runtime
         working-directory: e2e-arc
         run: ./gradlew --no-daemon shadowJar
@@ -93,7 +98,7 @@ jobs:
           mkdir -p paper/build
           mapfile -t arc_jars < <(find "$GITHUB_WORKSPACE/e2e-arc/build/libs" -maxdepth 1 -type f -name 'ARC-*.jar' ! -name '*-plain.jar' -print | sort)
           test "${#arc_jars[@]}" -eq 1
-          ./gradlew --no-daemon :paper:plugwrightTest "-Pe2eArcJar=${arc_jars[0]}" 2>&1 | tee paper/build/plugwright-e2e.log
+          ./gradlew --no-daemon :paper:plugwrightTest "-Pe2eArcJar=${arc_jars[0]}" -Pe2eArcCoreJar=build/e2e-runtime/ArcCore-0.1.12.jar 2>&1 | tee paper/build/plugwright-e2e.log
           git diff --exit-code -- paper/src/test/e2e/package-lock.json
       - name: Verify durable match history and archived inventories
         env:

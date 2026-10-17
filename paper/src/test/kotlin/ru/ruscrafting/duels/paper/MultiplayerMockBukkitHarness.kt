@@ -16,6 +16,7 @@ import org.bukkit.inventory.ItemStack
 import org.mockbukkit.mockbukkit.entity.PlayerMock
 import org.mockbukkit.mockbukkit.simulate.entity.PlayerSimulation
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.BudgetedTaskQueue
 import ru.arc.paper.chunk.PaperChunkKey
 import ru.arc.paper.chunk.PaperChunkTicketAddResult
 import ru.arc.paper.chunk.PaperChunkTicketBackend
@@ -24,7 +25,6 @@ import ru.arc.paper.playerstate.PaperPlayerDataPersistence
 import ru.arc.paper.teleport.PaperTeleportExecutor
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.RecordingPaperAudienceEffects
-import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MultiplayerKitPolicy
 import ru.ruscrafting.duels.domain.MultiplayerLayout
@@ -78,9 +78,10 @@ internal fun multiplayerHarness(
     enableArena: Boolean = true,
     runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
+    nativeWork: BudgetedTaskQueue? = null,
     configureArena: (ArcDuelsPlugin) -> Unit = {},
 ): MultiplayerHarness {
-    val plugin = paper.loadPlugin<ArcDuelsPlugin>()
+    val plugin = paper.loadReadyDuelsPlugin()
     HandlerList.unregisterAll(plugin)
     // This reusable GUI fixture exercises both locale catalogs explicitly.
     plugin.config.set("locale.use-client-locale", true)
@@ -103,8 +104,8 @@ internal fun multiplayerHarness(
     val audience = RecordingPaperAudienceEffects()
     val kits = KitRegistry.load(plugin)
     val locales = LocaleService.load(plugin)
-    val playerStates = DurablePlayerStateService(plugin, ServerId("group-test"), escrowRepository)
-    val arenas = PaperArenaCatalog.load(plugin)
+    val playerStates = DurablePlayerStateService(plugin, ServerId("group-test"), escrowRepository, nativeWork = nativeWork)
+    val arenas = paper.loadReadyArenaCatalog(plugin)
     val manager = MultiplayerSessionManager(
         serverId = ServerId("group-test"),
         arenas = arenas,
@@ -121,6 +122,7 @@ internal fun multiplayerHarness(
         countdownSeconds = countdownSeconds,
         runtimeSettings = runtimeSettings,
         playerStateMode = playerStateMode,
+        nativeWork = nativeWork,
     )
     return MultiplayerHarness(
         paper,

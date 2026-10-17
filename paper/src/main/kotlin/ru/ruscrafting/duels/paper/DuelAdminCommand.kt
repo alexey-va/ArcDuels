@@ -12,6 +12,7 @@ import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import java.util.Locale
+import java.util.concurrent.CompletableFuture
 
 internal class DuelAdminCommand(
     private val plugin: JavaPlugin,
@@ -25,8 +26,11 @@ internal class DuelAdminCommand(
     private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
     private val configurationBusy: () -> Boolean = { false },
     private val multiplayerSessions: MultiplayerSessionManager? = null,
+    private val reloadAsync: (() -> CompletableFuture<ArcDuelsReloadReport>)? = null,
+    private val saveAsync: (() -> CompletableFuture<Unit>)? = null,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
+    private var saving = false
 
     fun execute(
         sender: CommandSender,
@@ -36,6 +40,7 @@ internal class DuelAdminCommand(
             sender.sendMessage(message(sender, "admin.no-permission", LocaleService.text("permission", ADMIN_PERMISSION)))
             return
         }
+        if (saving) { sender.sendMessage(message(sender, "admin.busy")); return }
         when (args.firstOrNull()?.lowercase()) {
             null, "help" -> help(sender)
             "status" ->
@@ -114,9 +119,10 @@ internal class DuelAdminCommand(
                 plugin.config.set("$path.bounds.max.x", player.location.x + DEFAULT_ARENA_HALF_SIZE)
                 plugin.config.set("$path.bounds.max.y", player.world.maxHeight.toDouble())
                 plugin.config.set("$path.bounds.max.z", player.location.z + DEFAULT_ARENA_HALF_SIZE)
-                plugin.saveConfig()
-                sender.sendMessage(message(sender, "admin.arena-created", LocaleService.text("arena", id.value)))
-                player.sendActionBar(message(player, "admin.arena-editing", LocaleService.text("arena", id.value)))
+                saveConfiguration(sender) {
+                    sender.sendMessage(message(sender, "admin.arena-created", LocaleService.text("arena", id.value)))
+                    player.sendActionBar(message(player, "admin.arena-editing", LocaleService.text("arena", id.value)))
+                }
             }
             "setspawn" -> {
                 val player = requirePlayer(sender) ?: return
@@ -125,8 +131,9 @@ internal class DuelAdminCommand(
                 val point = parsePoint(sender, args.getOrNull(2)) ?: return
                 val path = "arenas.${id.value}"
                 writeLocation("$path.${if (point == 1) "first-spawn" else "second-spawn"}", player.location)
-                disableWhileEditing(path, id)
-                sender.sendMessage(message(sender, "admin.spawn-saved", LocaleService.text("point", point), LocaleService.text("arena", id.value)))
+                disableWhileEditing(path, id, sender) {
+                    sender.sendMessage(message(sender, "admin.spawn-saved", LocaleService.text("point", point), LocaleService.text("arena", id.value)))
+                }
             }
             "setlobby" -> {
                 val player = requirePlayer(sender) ?: return
@@ -134,8 +141,9 @@ internal class DuelAdminCommand(
                 val id = existingId(sender, args.getOrNull(1)) ?: return
                 val path = "arenas.${id.value}"
                 writeLocation("$path.lobby", player.location)
-                disableWhileEditing(path, id)
-                sender.sendMessage(message(sender, "admin.lobby-saved", LocaleService.text("arena", id.value)))
+                disableWhileEditing(path, id, sender) {
+                    sender.sendMessage(message(sender, "admin.lobby-saved", LocaleService.text("arena", id.value)))
+                }
             }
             "setcorner" -> {
                 val player = requirePlayer(sender) ?: return
@@ -152,8 +160,9 @@ internal class DuelAdminCommand(
                 plugin.config.set("$path.bounds.$corner.x", player.location.x)
                 plugin.config.set("$path.bounds.$corner.y", player.location.y)
                 plugin.config.set("$path.bounds.$corner.z", player.location.z)
-                disableWhileEditing(path, id)
-                sender.sendMessage(message(sender, "admin.corner-saved", LocaleService.text("point", point), LocaleService.text("arena", id.value)))
+                disableWhileEditing(path, id, sender) {
+                    sender.sendMessage(message(sender, "admin.corner-saved", LocaleService.text("point", point), LocaleService.text("arena", id.value)))
+                }
             }
             "sethill" -> {
                 val player = requirePlayer(sender) ?: return
@@ -169,8 +178,9 @@ internal class DuelAdminCommand(
                 writeLocation("$path.hill.center", player.location)
                 plugin.config.set("$path.hill.radius", radius)
                 plugin.config.set("$path.hill.height", height)
-                disableWhileEditing(path, id)
-                sender.sendMessage(message(sender, "admin.hill-saved", LocaleService.text("arena", id.value), LocaleService.text("radius", radius), LocaleService.text("height", height)))
+                disableWhileEditing(path, id, sender) {
+                    sender.sendMessage(message(sender, "admin.hill-saved", LocaleService.text("arena", id.value), LocaleService.text("radius", radius), LocaleService.text("height", height)))
+                }
             }
             "setloadouts" -> setLoadouts(sender, args.getOrNull(1), args.getOrNull(2))
             "setobjectives" -> setObjectives(sender, args.getOrNull(1), args.drop(2))
@@ -197,8 +207,7 @@ internal class DuelAdminCommand(
         }
         val path = "arenas.${id.value}"
         plugin.config.set("$path.$ARENA_LOADOUTS_PATH", selection.modes.map { it.name })
-        plugin.saveConfig()
-        if (plugin.config.getBoolean("$path.enabled")) arenas.reload(plugin)
+        saveConfiguration(sender) { refreshCatalog(sender, plugin.config.getBoolean("$path.enabled")) {
         sender.sendMessage(
             message(
                 sender,
@@ -207,6 +216,7 @@ internal class DuelAdminCommand(
                 LocaleService.component("loadout", message(sender, "admin.loadouts-${selection.name.lowercase()}")),
             ),
         )
+        } }
     }
 
     private fun setObjectives(
@@ -229,9 +239,9 @@ internal class DuelAdminCommand(
         }
         val path = "arenas.${id.value}"
         plugin.config.set("$path.$ARENA_OBJECTIVES_PATH", objectives.map { it.name })
-        plugin.saveConfig()
-        if (plugin.config.getBoolean("$path.enabled")) arenas.reload(plugin)
-        sender.sendMessage(message(sender, "admin.objectives-saved", LocaleService.text("arena", id.value)))
+        saveConfiguration(sender) { refreshCatalog(sender, plugin.config.getBoolean("$path.enabled")) {
+            sender.sendMessage(message(sender, "admin.objectives-saved", LocaleService.text("arena", id.value)))
+        } }
     }
 
     private fun setEnabled(
@@ -244,26 +254,37 @@ internal class DuelAdminCommand(
         val path = "arenas.${id.value}"
         if (!enabled) {
             plugin.config.set("$path.enabled", false)
-            plugin.saveConfig()
             val count = arenas.disable(id)
-            sender.sendMessage(message(sender, "admin.arena-disabled", LocaleService.text("arena", id.value), LocaleService.text("count", count)))
+            saveConfiguration(sender) {
+                sender.sendMessage(message(sender, "admin.arena-disabled", LocaleService.text("arena", id.value), LocaleService.text("count", count)))
+            }
             return
         }
         normalizeBounds(path)
         plugin.config.set("$path.enabled", true)
-        plugin.saveConfig()
-        val loaded = runCatching { arenas.reload(plugin) }
-        if (loaded.isFailure) {
-            plugin.config.set("$path.enabled", false)
-            plugin.saveConfig()
-            arenas.disable(id)
-            sender.sendMessage(message(sender, "admin.arena-invalid", LocaleService.text("reason", loaded.exceptionOrNull()?.message ?: "unknown")))
-            return
+        saveConfiguration(sender) {
+            refreshCatalog(sender, true, onFailure = { failure ->
+                plugin.config.set("$path.enabled", false)
+                arenas.disable(id)
+                saveConfiguration(sender) {
+                    sender.sendMessage(message(sender, "admin.arena-invalid", LocaleService.text("reason", configReloadFailureSummary(failure))))
+                }
+            }) { count ->
+                sender.sendMessage(message(sender, "admin.arena-enabled", LocaleService.text("arena", id.value), LocaleService.text("count", count)))
+            }
         }
-        sender.sendMessage(message(sender, "admin.arena-enabled", LocaleService.text("arena", id.value), LocaleService.text("count", loaded.getOrThrow())))
     }
 
     private fun reload(sender: CommandSender) {
+        val asynchronous = reloadAsync
+        if (asynchronous != null) {
+            saving = true
+            asynchronous().whenComplete { report, failure -> runSync {
+                saving = false
+                if (failure != null) reportFailure(sender, failure) else reportReload(sender, requireNotNull(report))
+            } }
+            return
+        }
         val action = reloadAction
         if (action == null) {
             if (!requireIdle(sender)) return
@@ -289,7 +310,10 @@ internal class DuelAdminCommand(
             }
             return
         }
-        action().onSuccess { report ->
+        action().onSuccess { reportReload(sender, it) }.onFailure { reportFailure(sender, it) }
+    }
+
+    private fun reportReload(sender: CommandSender, report: ArcDuelsReloadReport) {
             sender.sendMessage(
                 message(
                     sender,
@@ -308,16 +332,33 @@ internal class DuelAdminCommand(
                     ),
                 )
             }
-        }.onFailure { failure ->
-            sender.sendMessage(
-                message(
-                    sender,
-                    "admin.reload-failed",
-                    LocaleService.text("version", configGeneration()),
-                    LocaleService.text("reason", configReloadFailureSummary(failure)),
-                ),
-            )
-        }
+    }
+
+    private fun reportFailure(sender: CommandSender, failure: Throwable) {
+        sender.sendMessage(message(sender, "admin.reload-failed", LocaleService.text("version", configGeneration()),
+            LocaleService.text("reason", configReloadFailureSummary(failure))))
+    }
+
+    private fun saveConfiguration(sender: CommandSender, done: () -> Unit) {
+        saving = true
+        val saved = runCatching { saveAsync?.invoke() ?: run { plugin.saveConfig(); CompletableFuture.completedFuture(Unit) } }
+            .getOrElse { CompletableFuture.failedFuture(it) }
+        saved.whenComplete { _, failure -> runSync {
+            saving = false
+            if (failure != null) reportFailure(sender, failure) else done()
+        } }
+    }
+
+    private fun refreshCatalog(sender: CommandSender, enabled: Boolean,
+        onFailure: (Throwable) -> Unit = { reportFailure(sender, it) }, done: (Int) -> Unit) {
+        if (!enabled) { done(arenas.size()); return }
+        saving = true
+        val refreshed = runCatching { reloadAsync?.invoke()?.thenApply { it.arenaCount }
+            ?: CompletableFuture.completedFuture(arenas.reload(plugin)) }.getOrElse { CompletableFuture.failedFuture(it) }
+        refreshed.whenComplete { count, failure -> runSync {
+            saving = false
+            if (failure != null) onFailure(failure) else done(requireNotNull(count))
+        } }
     }
 
     private fun list(sender: CommandSender) {
@@ -560,14 +601,16 @@ internal class DuelAdminCommand(
     private fun disableWhileEditing(
         path: String,
         id: ArenaId,
+        sender: CommandSender,
+        done: () -> Unit,
     ) {
         plugin.config.set("$path.enabled", false)
-        plugin.saveConfig()
         arenas.disable(id)
+        saveConfiguration(sender, done)
     }
 
     private fun requireIdle(sender: CommandSender): Boolean {
-        if (sessions.activeArenaCount() == 0 && sessions.queueSize() == 0 && !configurationBusy()) return true
+        if (!saving && sessions.activeArenaCount() == 0 && sessions.queueSize() == 0 && !configurationBusy()) return true
         sender.sendMessage(message(sender, "admin.busy"))
         return false
     }

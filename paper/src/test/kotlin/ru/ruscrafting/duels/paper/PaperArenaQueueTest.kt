@@ -6,7 +6,6 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
-import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.ArenaSelection
 import ru.ruscrafting.duels.domain.ServerId
@@ -32,7 +31,7 @@ class PaperArenaQueueTest : StringSpec({
     beforeSpec {
         paper = MockBukkitTestRuntime.open()
         server = paper.server
-        plugin = paper.loadPlugin<ArcDuelsPlugin>()
+        plugin = paper.loadReadyDuelsPlugin()
         val world = server.addSimpleWorld("queue-world")
         for (x in -10..10) {
             for (z in -10..10) world.getBlockAt(x, 69, z).type = org.bukkit.Material.STONE
@@ -41,7 +40,7 @@ class PaperArenaQueueTest : StringSpec({
     }
 
     "capacity reports only arenas compatible with the selected objective" {
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
 
         catalog.capacity(DuelMode.OWN_INVENTORY, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
         catalog.capacity(DuelMode.KIT, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
@@ -51,7 +50,7 @@ class PaperArenaQueueTest : StringSpec({
     afterSpec { paper.close() }
 
     "arena waiters are FIFO cancelled entries are skipped and reservation stays exclusive" {
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
         val rules = DuelRules(DuelMode.OWN_INVENTORY)
 
         val active = catalog.reserve(rules)
@@ -76,7 +75,7 @@ class PaperArenaQueueTest : StringSpec({
     }
 
     "explicit arena reservations never fall back and remain queued for the selected arena" {
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
         val rules = DuelRules(DuelMode.OWN_INVENTORY)
         val active = catalog.reserve(rules, ArenaId("queue")).get()
         val pinned = catalog.reserve(rules, ArenaId("queue"))
@@ -107,7 +106,7 @@ class PaperArenaQueueTest : StringSpec({
             plugin.config.set("arenas.queue-alt.allowed-objectives", listOf("ELIMINATION", "BOXING"))
 
             val preference = ArenaSelection(ServerId("parkour"), ArenaId("duel_ruins"))
-            val catalog = PaperArenaCatalog.load(plugin, preference)
+            val catalog = paper.loadReadyArenaCatalog(plugin, preference)
             val elimination = DuelRules(DuelMode.KIT, KitId("classic"))
             val activeDefault = catalog.reserve(elimination).get()
             val fallbackWhileDefaultBusy = catalog.reserve(elimination).get()
@@ -154,7 +153,7 @@ class PaperArenaQueueTest : StringSpec({
             groupFallback.close()
 
             val updatedCatalog =
-                PaperArenaCatalog.load(
+                paper.loadReadyArenaCatalog(
                     plugin,
                     ArenaSelection(ServerId("parkour"), ArenaId("queue-alt")),
                 )
@@ -172,7 +171,7 @@ class PaperArenaQueueTest : StringSpec({
     }
 
     "arena catalog cannot hot reload while a match owns an arena or a pair is queued" {
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
         val active = catalog.reserve(DuelRules(DuelMode.OWN_INVENTORY)).get()
         val queued = catalog.reserve(DuelRules(DuelMode.OWN_INVENTORY))
 
@@ -188,7 +187,7 @@ class PaperArenaQueueTest : StringSpec({
     }
 
     "king of the hill fails fast without a hill and reserves a compatible arena when configured" {
-        val eliminationOnly = PaperArenaCatalog.load(plugin)
+        val eliminationOnly = paper.loadReadyArenaCatalog(plugin)
         val kothRules = DuelRules(DuelMode.OWN_INVENTORY, objective = DuelObjectiveType.KING_OF_THE_HILL)
         shouldThrow<java.util.concurrent.ExecutionException> { eliminationOnly.reserve(kothRules).get() }
 
@@ -199,18 +198,18 @@ class PaperArenaQueueTest : StringSpec({
         plugin.config.set("$path.center.z", 0.0)
         plugin.config.set("$path.radius", 3.5)
         plugin.config.set("$path.height", 3.0)
-        val compatible = PaperArenaCatalog.load(plugin)
+        val compatible = paper.loadReadyArenaCatalog(plugin)
 
         compatible.reserve(kothRules).get().arenaId shouldBe ArenaId("queue")
 
         plugin.config.set("$path.radius", 20.0)
-        shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        shouldThrow<IllegalArgumentException> { paper.loadReadyArenaCatalog(plugin) }
         plugin.config.set("$path.radius", 3.5)
     }
 
     "arena loadout allowlist is enforced for reservation and capacity" {
         plugin.config.set("arenas.queue.allowed-loadouts", listOf("OWN_INVENTORY"))
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
 
         catalog.capacity(DuelMode.OWN_INVENTORY, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(1, 1)
         catalog.capacity(DuelMode.KIT, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(0, 0)
@@ -220,13 +219,13 @@ class PaperArenaQueueTest : StringSpec({
         catalog.reserve(DuelRules(DuelMode.OWN_INVENTORY)).get().close()
 
         plugin.config.set("arenas.queue.allowed-loadouts", emptyList<String>())
-        shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        shouldThrow<IllegalArgumentException> { paper.loadReadyArenaCatalog(plugin) }
         plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
     }
 
     "arena objective allowlist is enforced for reservation and capacity" {
         plugin.config.set("arenas.queue.allowed-objectives", listOf("BOXING"))
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
 
         catalog.capacity(DuelMode.KIT, DuelObjectiveType.BOXING) shouldBe ArenaCapacity(1, 1)
         catalog.capacity(DuelMode.KIT, DuelObjectiveType.ELIMINATION) shouldBe ArenaCapacity(0, 0)
@@ -243,7 +242,7 @@ class PaperArenaQueueTest : StringSpec({
         ).get().close()
 
         plugin.config.set("arenas.queue.allowed-objectives", emptyList<String>())
-        shouldThrow<IllegalArgumentException> { PaperArenaCatalog.load(plugin) }
+        shouldThrow<IllegalArgumentException> { paper.loadReadyArenaCatalog(plugin) }
         plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
     }
 
@@ -251,7 +250,7 @@ class PaperArenaQueueTest : StringSpec({
         plugin.config.set("arenas.queue.hill.radius", 3.5)
         configureArena(plugin, "overlap", "queue-world")
 
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
 
         catalog.size() shouldBe 2
     }
@@ -259,7 +258,7 @@ class PaperArenaQueueTest : StringSpec({
     "multiplayer reservations assign every configured team and remain exclusive with pair matches" {
         plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
         plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
         val roster = MultiplayerRoster(
             MultiplayerRules(MultiplayerLayout.THREE_TEAMS, MultiplayerKitPolicy.SHARED, KitId("classic")),
             (0 until 6).map { index ->
@@ -282,7 +281,7 @@ class PaperArenaQueueTest : StringSpec({
         plugin.config.set("arenas.overlap.enabled", false)
         plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
         plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
         val roster =
             MultiplayerRoster(
                 MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("classic")),
@@ -301,7 +300,7 @@ class PaperArenaQueueTest : StringSpec({
     "procedural multiplayer placement supports every size and layout from three through twelve players" {
         plugin.config.set("arenas.queue.allowed-loadouts", listOf("KIT"))
         plugin.config.set("arenas.queue.allowed-objectives", listOf("ELIMINATION"))
-        val catalog = PaperArenaCatalog.load(plugin)
+        val catalog = paper.loadReadyArenaCatalog(plugin)
 
         (3..12).forEach { size ->
             listOf(

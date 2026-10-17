@@ -66,6 +66,7 @@ class DuelGuiService internal constructor(
     private val clock: Clock = Clock.systemUTC(),
     private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
 ) : Listener, AutoCloseable {
+    @Volatile private var closed = false
     private val pendingArenaNames = ConcurrentHashMap<UUID, PendingArenaName>()
     private val asyncMenuRequests = LatestRequestTracker()
     private val menuRuntimeDelegate = lazy { PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuLayouts.current()) }
@@ -309,19 +310,22 @@ class DuelGuiService internal constructor(
         val request = asyncMenuRequests.begin(player.uniqueId)
         player.sendActionBar(locales.component(player, "menu.leaderboard.loading"))
         val limit = runtimeSettings()?.guiLeaderboardLimit ?: MAX_LEADERBOARD_ENTRIES
-        statistics.leaderboard(limit).whenComplete { entries, failure ->
+        statistics.leaderboard(limit).thenCompose { entries ->
+            targets.names(entries.filter { it.playerName == null }.map { it.playerId.value }).thenApply { entries to it }
+        }.whenComplete { prepared, failure ->
             runSync {
                 if (!player.isOnline || !asyncMenuRequests.isCurrent(player.uniqueId, request)) return@runSync
                 if (failure != null) {
                     player.sendMessage(locales.notice(player, "error.leaderboard"))
                     return@runSync
                 }
+                val (entries, names) = requireNotNull(prepared)
                 val page = pageWindow(entries, requestedPage, CONTENT_SLOTS.size)
                 val holder = LeaderboardMenuHolder(page.index, page.hasPrevious, page.hasNext)
                 val inventory = create(holder, locales.component(player, "menu.leaderboard.title", LocaleService.text("page", page.index + 1), LocaleService.text("pages", page.totalPages)))
                 page.items.forEachIndexed { index, entry ->
                     val slot = CONTENT_SLOTS[index]
-                    val name = entry.playerName ?: Bukkit.getOfflinePlayer(entry.playerId.value).name ?: entry.playerId.toString().take(8)
+                    val name = entry.playerName ?: names[entry.playerId.value] ?: entry.playerId.toString().take(8)
                     inventory.setItem(
                         slot,
                         playerHead(
@@ -1194,6 +1198,7 @@ class DuelGuiService internal constructor(
     }
 
     override fun close() {
+        closed = true
         frameHolders.clear()
         activeFrames.clear()
         activeContents.clear()
@@ -1271,8 +1276,10 @@ class DuelGuiService internal constructor(
     private fun nonItalic(component: Component): Component = component.decoration(TextDecoration.ITALIC, false)
 
     private fun runSync(block: () -> Unit) {
-        if (!plugin.isEnabled) return
-        if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable(block))
+        if (closed || !plugin.isEnabled) return
+        if (plugin.server.isPrimaryThread) block() else plugin.server.scheduler.runTask(plugin, Runnable {
+            if (!closed && plugin.isEnabled) block()
+        })
     }
 
     private abstract class MenuHolder(val screen: ArcDuelsMenuScreen)

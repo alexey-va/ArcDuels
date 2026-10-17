@@ -9,7 +9,7 @@ plugins {
 
 allprojects {
     group = "ru.ruscrafting.duels"
-    version = "0.11.16"
+    version = "0.11.17"
 }
 
 subprojects {
@@ -40,8 +40,9 @@ subprojects {
         // separate macOS attach helper, which can block indefinitely on JDK 25.
         jvmArgs("-Djdk.attach.allowAttachSelf=true", "-XX:+EnableDynamicAgentLoading")
         // MockBukkit and Paper retain enough static state between specs to exhaust the
-        // worker heap in the full suite. Periodic isolation keeps CI deterministic.
-        if (project.name == "paper") forkEvery = 10
+        // worker heap across specs. Navigation fixtures now prepare real arena indexes;
+        // isolate each spec while keeping the ordinary worker heap and production bounds.
+        if (project.name == "paper") forkEvery = 1
     }
 }
 

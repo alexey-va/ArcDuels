@@ -55,7 +55,7 @@ class DurablePlayerStateServiceTest : StringSpec({
     beforeSpec {
         paper = MockBukkitTestRuntime.open()
         server = paper.server
-        plugin = paper.loadPlugin(ArcDuelsPlugin::class.java)
+        plugin = paper.loadReadyDuelsPlugin()
         server.addSimpleWorld("world")
     }
 
@@ -72,8 +72,8 @@ class DurablePlayerStateServiceTest : StringSpec({
                 clock = Clock.fixed(restoredAt, ZoneOffset.UTC),
                 retention = Duration.ofDays(7),
             )
-        val first = server.addPlayer()
-        val second = server.addPlayer()
+        val first = paper.addReadyDuelsPlayer(plugin)
+        val second = paper.addReadyDuelsPlayer(plugin)
         first.inventory.setItem(0, ItemStack(Material.NETHERITE_SWORD))
         second.inventory.setItem(4, ItemStack(Material.TOTEM_OF_UNDYING))
 
@@ -104,7 +104,7 @@ class DurablePlayerStateServiceTest : StringSpec({
     "multiplayer escrow publishes no participant before one atomic group commit" {
         val repository = GatedEscrowRepository()
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val players = List(6) { server.addPlayer() }
+        val players = List(6) { paper.addReadyDuelsPlayer(plugin) }
         players.forEachIndexed { index, player -> player.inventory.setItem(index, ItemStack(Material.GOLDEN_APPLE, index + 1)) }
 
         val storedFuture = service.storeAll(MatchId.random(), players, inventoryReplaced = true)
@@ -123,7 +123,7 @@ class DurablePlayerStateServiceTest : StringSpec({
 
     "removed format-one escrow fails closed" {
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), GatedEscrowRepository())
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val payload = byteArrayOf(1, 2, 3)
         val escrow =
             PlayerStateEscrow(
@@ -143,7 +143,7 @@ class DurablePlayerStateServiceTest : StringSpec({
     "one origin snapshot is captured before transfer and becomes visible only after commit" {
         val repository = GatedEscrowRepository()
         val service = DurablePlayerStateService(plugin, ServerId("origin"), repository)
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         player.inventory.setItem(0, ItemStack(Material.DIAMOND_SWORD))
         val matchId = MatchId.random()
 
@@ -164,8 +164,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val archival = CompletableFuture<Boolean>()
         repository.archival = archival
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val first = server.addPlayer()
-        val second = server.addPlayer()
+        val first = paper.addReadyDuelsPlayer(plugin)
+        val second = paper.addReadyDuelsPlayer(plugin)
         val storedFuture = service.storePair(MatchId.random(), first, second, inventoryReplaced = true)
         repository.commit.complete(Unit)
         val stored = storedFuture.get().getValue(first.uniqueId)
@@ -188,7 +188,7 @@ class DurablePlayerStateServiceTest : StringSpec({
         val archival = CompletableFuture<Boolean>()
         repository.archival = archival
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val stored = service.store(MatchId.random(), player, inventoryReplaced = true).get()
         val retention = service.retain(stored)
 
@@ -205,8 +205,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val first = server.addPlayer()
-        val second = server.addPlayer()
+        val first = paper.addReadyDuelsPlayer(plugin)
+        val second = paper.addReadyDuelsPlayer(plugin)
 
         val stored = service.storePair(MatchId.random(), first, second, inventoryReplaced = false).get()
 
@@ -220,8 +220,8 @@ class DurablePlayerStateServiceTest : StringSpec({
             archival = CompletableFuture()
         }
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val winner = server.addPlayer()
-        val loser = server.addPlayer()
+        val winner = paper.addReadyDuelsPlayer(plugin)
+        val loser = paper.addReadyDuelsPlayer(plugin)
         val origin = winner.location.clone().apply { x = 18.5; y = 72.0; z = -3.5 }
         winner.teleport(origin)
         val matchId = MatchId.random()
@@ -301,8 +301,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         }
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), escrowRepository)
         val matchRepository = InMemoryStatisticsRepository()
-        val winner = server.addPlayer("MultiplayerRecoveredWinner")
-        val loser = server.addPlayer("MultiplayerRecoveredLoser")
+        val winner = paper.addReadyDuelsPlayer(plugin, "MultiplayerRecoveredWinner")
+        val loser = paper.addReadyDuelsPlayer(plugin, "MultiplayerRecoveredLoser")
         val matchId = MatchId.random()
         val winnerId = PlayerId(winner.uniqueId)
         val loserId = PlayerId(loser.uniqueId)
@@ -361,8 +361,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository().apply { commit.complete(Unit) }
         val origin = DurablePlayerStateService(plugin, ServerId("survival"), repository)
         val host = DurablePlayerStateService(plugin, ServerId("spawn"), repository)
-        val first = server.addPlayer()
-        val second = server.addPlayer()
+        val first = paper.addReadyDuelsPlayer(plugin)
+        val second = paper.addReadyDuelsPlayer(plugin)
         val priorMatch = MatchId.random()
         origin.storePair(priorMatch, first, second, inventoryReplaced = false).get()
         val origins = listOf(first, second).associate { PlayerId(it.uniqueId) to ServerId("survival") }
@@ -407,8 +407,8 @@ class DurablePlayerStateServiceTest : StringSpec({
     "origin inventory freezes before its asynchronous MySQL commit completes" {
         val repository = GatedEscrowRepository()
         val service = DurablePlayerStateService(plugin, ServerId("origin"), repository)
-        val player = server.addPlayer()
-        val peer = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
+        val peer = paper.addReadyDuelsPlayer(plugin)
         val sessions =
             DuelSessionManager(
                 plugin,
@@ -447,8 +447,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
         val service = DurablePlayerStateService(plugin, ServerId("group-node"), repository)
-        val player = server.addPlayer()
-        val peer = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
+        val peer = paper.addReadyDuelsPlayer(plugin)
         service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
         val coordinator = mockk<MatchCoordinator>(relaxed = true)
         every { coordinator.findByPlayer(any()) } returns null
@@ -483,8 +483,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val player = server.addPlayer()
-        val peer = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
+        val peer = paper.addReadyDuelsPlayer(plugin)
         player.inventory.setItem(0, ItemStack(Material.DIAMOND_SWORD))
         service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
         player.inventory.setItem(0, ItemStack(Material.STONE))
@@ -522,15 +522,15 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
         val writer = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val player = server.addPlayer()
-        val peer = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
+        val peer = paper.addReadyDuelsPlayer(plugin)
         player.inventory.setItem(0, ItemStack(Material.NETHERITE_SWORD))
         peer.inventory.setItem(4, ItemStack(Material.TOTEM_OF_UNDYING))
         writer.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
         player.inventory.setItem(0, ItemStack(Material.WOODEN_SWORD))
 
         val afterCrash = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        afterCrash.loadPending(1_000L) shouldBe 2
+        afterCrash.loadPending(1_000L).join() shouldBe 2
         val sessions =
             DuelSessionManager(
                 plugin,
@@ -551,7 +551,7 @@ class DurablePlayerStateServiceTest : StringSpec({
         player.inventory.getItem(0)?.type shouldBe Material.NETHERITE_SWORD
         afterCrash.isPending(player.uniqueId) shouldBe false
         val afterAcknowledgementCrash = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        afterAcknowledgementCrash.loadPending(1_000L) shouldBe 1
+        afterAcknowledgementCrash.loadPending(1_000L).join() shouldBe 1
         afterAcknowledgementCrash.isPending(peer.uniqueId) shouldBe true
         sessions.shutdown()
     }
@@ -560,8 +560,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val player = server.addPlayer()
-        val peer = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
+        val peer = paper.addReadyDuelsPlayer(plugin)
         player.inventory.setItem(0, ItemStack(Material.EMERALD))
         service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
         var saveCalls = 0
@@ -592,8 +592,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val player = server.addPlayer()
-        val peer = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
+        val peer = paper.addReadyDuelsPlayer(plugin)
         val origin = player.location.clone()
         service.storePair(MatchId.random(), player, peer, inventoryReplaced = true).get()
         player.teleport(origin.clone().add(12.0, 0.0, 0.0))
@@ -627,8 +627,8 @@ class DurablePlayerStateServiceTest : StringSpec({
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
         val service = DurablePlayerStateService(plugin, ServerId("test-node"), repository)
-        val player = server.addPlayer()
-        val peer = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
+        val peer = paper.addReadyDuelsPlayer(plugin)
         player.inventory.setItem(0, ItemStack(Material.EMERALD))
         player.gameMode = org.bukkit.GameMode.ADVENTURE
         player.foodLevel = 13
@@ -668,7 +668,7 @@ class DurablePlayerStateServiceTest : StringSpec({
     "remote recovery retries a failed backend switch until the player leaves" {
         val repository = GatedEscrowRepository()
         repository.commit.complete(Unit)
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val originService = DurablePlayerStateService(plugin, ServerId("spawn"), repository)
         originService.store(MatchId.random(), player, inventoryReplaced = false).get()
         val remoteService = DurablePlayerStateService(plugin, ServerId("survival"), repository)
@@ -705,7 +705,7 @@ class DurablePlayerStateServiceTest : StringSpec({
     }
 
     "non-inventory restoration runs after teleport listeners normalize player state" {
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         player.inventory.setItem(0, ItemStack(Material.EMERALD))
         player.foodLevel = 13
         player.noDamageTicks = 7
@@ -732,7 +732,7 @@ class DurablePlayerStateServiceTest : StringSpec({
     }
 
     "health verification tolerates attribute float normalization" {
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         player.health = 18.0
         val snapshot = PlayerSnapshot.capture(player)
 
@@ -744,8 +744,8 @@ class DurablePlayerStateServiceTest : StringSpec({
     "an actual arena departure forfeits the match even without a movement listener" {
         val repository = GatedEscrowRepository().apply { commit.complete(Unit) }
         val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
-        val first = server.addPlayer("AbsentFirst")
-        val second = server.addPlayer("PresentSecond")
+        val first = paper.addReadyDuelsPlayer(plugin, "AbsentFirst")
+        val second = paper.addReadyDuelsPlayer(plugin, "PresentSecond")
         plugin.config.set("arenas.example.enabled", true)
         val arenas = PaperArenaCatalog.load(plugin)
         val manager = DuelSessionManager(
@@ -786,8 +786,8 @@ class DurablePlayerStateServiceTest : StringSpec({
             archival = CompletableFuture()
         }
         val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
-        val first = server.addPlayer("DelayedWinner")
-        val second = server.addPlayer("DelayedLoser")
+        val first = paper.addReadyDuelsPlayer(plugin, "DelayedWinner")
+        val second = paper.addReadyDuelsPlayer(plugin, "DelayedLoser")
         plugin.config.set("arenas.example.enabled", true)
         val arenas = PaperArenaCatalog.load(plugin)
         val fireworks = mutableListOf<UUID>()
@@ -828,8 +828,8 @@ class DurablePlayerStateServiceTest : StringSpec({
     "a 1v1 start pins its runtime policy before the durable snapshot commit finishes" {
         val repository = GatedEscrowRepository()
         val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
-        val first = server.addPlayer("PinnedFirst")
-        val second = server.addPlayer("PinnedSecond")
+        val first = paper.addReadyDuelsPlayer(plugin, "PinnedFirst")
+        val second = paper.addReadyDuelsPlayer(plugin, "PinnedSecond")
         plugin.config.set("arenas.example.enabled", true)
         val arenas = PaperArenaCatalog.load(plugin)
         var settings =
@@ -877,8 +877,8 @@ class DurablePlayerStateServiceTest : StringSpec({
     "a best of series keeps the intermission captured before durable preparation" {
         val repository = GatedEscrowRepository()
         val service = DurablePlayerStateService(plugin, ServerId("duels-1"), repository)
-        val first = server.addPlayer("SeriesFirst")
-        val second = server.addPlayer("SeriesSecond")
+        val first = paper.addReadyDuelsPlayer(plugin, "SeriesFirst")
+        val second = paper.addReadyDuelsPlayer(plugin, "SeriesSecond")
         plugin.config.set("arenas.example.enabled", true)
         val arenas = PaperArenaCatalog.load(plugin)
         var settings =
@@ -954,8 +954,8 @@ class DurablePlayerStateServiceTest : StringSpec({
                 repository,
                 reconciliationDelay = Duration.ZERO,
             )
-        val first = server.addPlayer()
-        val second = server.addPlayer()
+        val first = paper.addReadyDuelsPlayer(plugin)
+        val second = paper.addReadyDuelsPlayer(plugin)
         val future = service.storePair(MatchId.random(), first, second, inventoryReplaced = true)
 
         repository.commit.completeExceptionally(IllegalStateException("lost commit response"))
@@ -975,7 +975,7 @@ class DurablePlayerStateServiceTest : StringSpec({
                 repository,
                 reconciliationDelay = Duration.ZERO,
             )
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val future = service.store(MatchId.random(), player, inventoryReplaced = true)
 
         repository.commit.completeExceptionally(IllegalStateException("lost commit response"))
@@ -995,8 +995,8 @@ class DurablePlayerStateServiceTest : StringSpec({
                 repository,
                 reconciliationDelay = Duration.ZERO,
             )
-        val first = server.addPlayer()
-        val second = server.addPlayer()
+        val first = paper.addReadyDuelsPlayer(plugin)
+        val second = paper.addReadyDuelsPlayer(plugin)
         val future = service.storePair(MatchId.random(), first, second, inventoryReplaced = true)
 
         repository.commit.completeExceptionally(IllegalStateException("lost commit response"))

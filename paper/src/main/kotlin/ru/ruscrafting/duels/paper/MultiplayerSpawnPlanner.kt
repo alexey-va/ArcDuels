@@ -1,11 +1,15 @@
 package ru.ruscrafting.duels.paper
 
+import ru.arc.core.BudgetedTaskQueue
+import java.util.concurrent.CompletableFuture
 import org.bukkit.Location
 import org.bukkit.World
 import org.bukkit.configuration.ConfigurationSection
 import ru.ruscrafting.duels.domain.MultiplayerLayout
 import ru.ruscrafting.duels.domain.MultiplayerRoster
 import ru.ruscrafting.duels.domain.PlayerId
+import ru.ruscrafting.duels.domain.MIN_MULTIPLAYER_PARTICIPANTS
+import ru.ruscrafting.duels.domain.MAX_MULTIPLAYER_PARTICIPANTS
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -55,55 +59,112 @@ data class MultiplayerSpawnPlacementSettings(
 internal object MultiplayerSpawnPlanner {
     private val radiusAttempts = listOf(1.0, 0.9, 0.8, 0.7, 0.6, 0.5)
 
-    fun plan(
-        arena: PaperArena,
-        roster: MultiplayerRoster,
-    ): Map<PlayerId, Location>? {
-        val first = arena.firstSpawn
-        val second = arena.secondSpawn
-        val world = first.world ?: return null
-        if (second.world?.uid != world.uid) return null
-        val centerX = (first.x + second.x) / 2.0
-        val centerY = (first.y + second.y) / 2.0
-        val centerZ = (first.z + second.z) / 2.0
-        val halfY = (first.y - second.y) / 2.0
-        val firstDx = first.x - centerX
-        val firstDz = first.z - centerZ
-        val configuredRadius = hypot(firstDx, firstDz) * arena.multiplayerPlacement.radiusScale
-        if (configuredRadius < arena.multiplayerPlacement.minimumSeparation) return null
-        val baseAngle = atan2(firstDz, firstDx)
-        val groups = groups(roster)
+    fun shape(roster: MultiplayerRoster): List<Int> = groups(roster).map(List<PlayerId>::size)
 
-        radiusAttempts.forEach { attempt ->
-            val radius = configuredRadius * attempt
-            val planned = linkedMapOf<PlayerId, Location>()
-            groups.forEachIndexed { groupIndex, participants ->
-                val angle = baseAngle + FULL_CIRCLE * groupIndex / groups.size
-                val rows = formationRows(participants.size)
-                var participantIndex = 0
-                rows.forEachIndexed { rowIndex, rowSize ->
-                    repeat(rowSize) { columnIndex ->
-                        val tangentOffset =
-                            (columnIndex - (rowSize - 1) / 2.0) * arena.multiplayerPlacement.teammateSpacing
-                        val radialOffset =
-                            (rowIndex - (rows.size - 1) / 2.0) * arena.multiplayerPlacement.teammateSpacing
-                        val effectiveRadius = radius - radialOffset
-                        val x = centerX + cos(angle) * effectiveRadius - sin(angle) * tangentOffset
-                        val z = centerZ + sin(angle) * effectiveRadius + cos(angle) * tangentOffset
-                        val y = centerY + cos(angle - baseAngle) * halfY
-                        val yaw = Math.toDegrees(atan2(-(centerX - x), centerZ - z)).toFloat()
-                        planned[participants[participantIndex++]] = Location(world, x, y, z, yaw, 0.0f)
+    /** All legal team-size permutations are finite under the existing 3..12-player contract. */
+    fun prepare(arena: PaperArena, queue: BudgetedTaskQueue): CompletableFuture<Map<List<Int>, List<Location>>> {
+        val shapes = buildSet {
+            for (size in MIN_MULTIPLAYER_PARTICIPANTS..MAX_MULTIPLAYER_PARTICIPANTS) {
+                add(List(size) { 1 })
+                for (teams in 2..3) for (mask in 0 until (1 shl teams)) {
+                    if (Integer.bitCount(mask) == size % teams) {
+                        add(List(teams) { team -> size / teams + if (mask and (1 shl team) == 0) 0 else 1 })
                     }
                 }
             }
-            val navigable = linkedMapOf<PlayerId, Location>()
-            for ((playerId, candidate) in planned) {
-                val spawn = arena.multiplayerNavigation.snap(candidate) ?: break
-                navigable[playerId] = spawn
+        }.iterator()
+        val prepared = linkedMapOf<List<Int>, List<Location>>()
+        var current: List<Int>? = null
+        var search: Search? = null
+        return queue.submit({ true }) {
+            if (search == null && shapes.hasNext()) {
+                current = shapes.next()
+                search = Search(arena, requireNotNull(current))
             }
-            if (navigable.size == planned.size && isValid(arena, navigable.values.toList())) return navigable
+            val active = search
+            if (active != null && active.step()) {
+                active.result?.let { prepared[requireNotNull(current)] = it }
+                search = null
+            }
+            search == null && !shapes.hasNext()
+        }.thenApply { prepared.toMap() }
+    }
+
+    fun bind(roster: MultiplayerRoster, locations: List<Location>): Map<PlayerId, Location> =
+        groups(roster).flatten().zip(locations.map(Location::clone)).toMap()
+
+    /** Synchronous compatibility for offline catalog fixtures; runtime uses prepare before publication. */
+    fun plan(
+        arena: PaperArena,
+        roster: MultiplayerRoster,
+    ): Map<PlayerId, Location>? = Search(arena, shape(roster)).let { search ->
+        while (!search.step()) { /* Offline fixture only. */ }
+        search.result?.let { bind(roster, it) }
+    }
+
+    /** One candidate snap (405 cached cells and three native block checks) per shared queue step. */
+    private class Search(private val arena: PaperArena, private val sizes: List<Int>) {
+        private var attempt = 0
+        private var planned: List<Location> = emptyList()
+        private val navigable = mutableListOf<Location>()
+        var result: List<Location>? = null
+            private set
+
+        fun step(): Boolean {
+            if (attempt >= radiusAttempts.size) return true
+            if (planned.isEmpty()) {
+                planned = candidates(radiusAttempts[attempt]) ?: return true
+            }
+            val spawn = arena.multiplayerNavigation.snap(planned[navigable.size])
+            if (spawn != null) navigable += spawn
+            if (spawn == null || navigable.size == planned.size) {
+                if (spawn != null && isValid(arena, navigable)) {
+                    result = navigable.toList()
+                    return true
+                }
+                attempt++
+                planned = emptyList()
+                navigable.clear()
+            }
+            return attempt >= radiusAttempts.size
         }
-        return null
+
+        private fun candidates(attempt: Double): List<Location>? {
+            val first = arena.firstSpawn
+            val second = arena.secondSpawn
+            val world = first.world ?: return null
+            if (second.world?.uid != world.uid) return null
+            val centerX = (first.x + second.x) / 2.0
+            val centerY = (first.y + second.y) / 2.0
+            val centerZ = (first.z + second.z) / 2.0
+            val halfY = (first.y - second.y) / 2.0
+            val firstDx = first.x - centerX
+            val firstDz = first.z - centerZ
+            val configuredRadius = hypot(firstDx, firstDz) * arena.multiplayerPlacement.radiusScale
+            if (configuredRadius < arena.multiplayerPlacement.minimumSeparation) return null
+            val baseAngle = atan2(firstDz, firstDx)
+            val radius = configuredRadius * attempt
+            return buildList {
+                sizes.forEachIndexed { groupIndex, size ->
+                    val angle = baseAngle + FULL_CIRCLE * groupIndex / sizes.size
+                    val rows = formationRows(size)
+                    rows.forEachIndexed { rowIndex, rowSize ->
+                        repeat(rowSize) { columnIndex ->
+                            val tangentOffset =
+                                (columnIndex - (rowSize - 1) / 2.0) * arena.multiplayerPlacement.teammateSpacing
+                            val radialOffset =
+                                (rowIndex - (rows.size - 1) / 2.0) * arena.multiplayerPlacement.teammateSpacing
+                            val effectiveRadius = radius - radialOffset
+                            val x = centerX + cos(angle) * effectiveRadius - sin(angle) * tangentOffset
+                            val z = centerZ + sin(angle) * effectiveRadius + cos(angle) * tangentOffset
+                            val y = centerY + cos(angle - baseAngle) * halfY
+                            val yaw = Math.toDegrees(atan2(-(centerX - x), centerZ - z)).toFloat()
+                            add(Location(world, x, y, z, yaw, 0.0f))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun groups(roster: MultiplayerRoster): List<List<PlayerId>> =
@@ -156,6 +217,8 @@ internal object MultiplayerSpawnPlanner {
 
 internal fun interface MultiplayerSpawnNavigation {
     fun snap(candidate: Location): Location?
+    fun prepare(queue: BudgetedTaskQueue): CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
+    fun isSafe(location: Location): Boolean = true
 
     companion object {
         val UNCHECKED = MultiplayerSpawnNavigation(Location::clone)
@@ -184,49 +247,87 @@ private class BukkitMultiplayerSpawnNavigation(
 ) : MultiplayerSpawnNavigation {
     private val world = requireNotNull(firstSpawn.world)
     private val limits = NavigationLimits.create(firstSpawn, secondSpawn, bounds, settings)
-    private val reachable by lazy(LazyThreadSafetyMode.NONE, ::discoverReachable)
+    private var reachable: Set<Cell> = emptySet()
+    private var preparation: CompletableFuture<Unit>? = null
+
+    override fun prepare(queue: BudgetedTaskQueue): CompletableFuture<Unit> {
+        preparation?.let { return it }
+        val search = Search()
+        return queue.submit({ true }, search::step).also { future ->
+            preparation = future
+            future.whenComplete { _, failure -> if (failure == null) reachable = search.visited }
+        }
+    }
 
     override fun snap(candidate: Location): Location? {
         if (candidate.world?.uid != world.uid) return null
         val target = Cell(candidate.blockX, candidate.blockY, candidate.blockZ)
-        val cell =
-            reachable.asSequence()
-                .filter { cell ->
-                    abs(cell.x - target.x) <= MAX_HORIZONTAL_SNAP &&
-                        abs(cell.z - target.z) <= MAX_HORIZONTAL_SNAP &&
-                        abs(cell.y - target.y) <= MAX_VERTICAL_SNAP
-                }
-                .minWithOrNull(
-                    compareBy<Cell> { cell ->
-                        val dx = candidate.x - (cell.x + 0.5)
-                        val dy = candidate.y - cell.y
-                        val dz = candidate.z - (cell.z + 0.5)
-                        dx * dx + dy * dy + dz * dz
-                    }.thenBy { it.y }.thenBy { it.x }.thenBy { it.z },
-                ) ?: return null
-        if (cell == target && isStandable(cell)) return candidate.clone()
+        val candidates = sequence {
+            for (x in target.x - MAX_HORIZONTAL_SNAP..target.x + MAX_HORIZONTAL_SNAP)
+                for (z in target.z - MAX_HORIZONTAL_SNAP..target.z + MAX_HORIZONTAL_SNAP)
+                    for (y in target.y - MAX_VERTICAL_SNAP..target.y + MAX_VERTICAL_SNAP) {
+                        val cell = Cell(x, y, z)
+                        if (cell in reachable) yield(cell)
+                    }
+        }
+        val cell = candidates.minWithOrNull(compareBy<Cell> { cell ->
+            val dx = candidate.x - (cell.x + 0.5)
+            val dy = candidate.y - cell.y
+            val dz = candidate.z - (cell.z + 0.5)
+            dx * dx + dy * dy + dz * dz
+        }.thenBy { it.y }.thenBy { it.x }.thenBy { it.z }) ?: return null
+        if (!isStandable(cell)) return null
+        if (cell == target) return candidate.clone()
         return Location(world, cell.x + 0.5, cell.y.toDouble(), cell.z + 0.5, candidate.yaw, candidate.pitch)
     }
 
-    private fun discoverReachable(): Set<Cell> {
-        val origin = nearestStandable(firstSpawn) ?: return emptySet()
-        val queue = ArrayDeque<Cell>()
+    override fun isSafe(location: Location): Boolean =
+        location.world?.uid == world.uid && isStandable(Cell(location.blockX, location.blockY, location.blockZ))
+
+    /** One fixed node expansion per shared budget step; cold chunks are acquired asynchronously. */
+    private inner class Search {
         val visited = linkedSetOf<Cell>()
-        queue += origin
-        while (queue.isNotEmpty() && visited.size < MAX_REACHABLE_CELLS) {
-            val current = queue.removeFirst()
-            if (!visited.add(current)) continue
+        private val pending = ArrayDeque<Cell>()
+        private val enqueued = HashSet<Cell>()
+        private var started = false
+        private var loading: CompletableFuture<*>? = null
+
+        fun step(): Boolean {
+            loading?.let { load ->
+                if (!load.isDone) return false
+                if (load.isCompletedExceptionally) load.join() // Already complete: propagate, never wait.
+                loading = null
+            }
+            val current = pending.firstOrNull() ?: Cell(firstSpawn.blockX, firstSpawn.blockY, firstSpawn.blockZ)
+            for (x in (current.x - 1 shr 4)..(current.x + 1 shr 4)) {
+                for (z in (current.z - 1 shr 4)..(current.z + 1 shr 4)) {
+                    if (!world.isChunkLoaded(x, z)) {
+                        loading = world.getChunkAtAsync(x, z)
+                        return false
+                    }
+                }
+            }
+            if (!started) {
+                started = true
+                val origin = nearestStandable(firstSpawn) ?: return true
+                pending.add(origin)
+                enqueued.add(origin)
+            }
+            if (pending.isEmpty() || visited.size >= MAX_REACHABLE_CELLS) return true
+            val node = pending.removeFirst()
+            visited.add(node)
             for ((dx, dz) in CARDINAL_DIRECTIONS) {
                 for (dy in STEP_HEIGHTS) {
-                    val next = Cell(current.x + dx, current.y + dy, current.z + dz)
-                    if (next !in visited && limits.contains(next) && isStandable(next)) {
-                        queue += next
+                    val next = Cell(node.x + dx, node.y + dy, node.z + dz)
+                    if (next !in enqueued && limits.contains(next) && isStandable(next)) {
+                        pending.addLast(next)
+                        enqueued.add(next)
                         break
                     }
                 }
             }
+            return pending.isEmpty() || visited.size >= MAX_REACHABLE_CELLS
         }
-        return visited
     }
 
     private fun nearestStandable(location: Location): Cell? {
@@ -247,6 +348,7 @@ private class BukkitMultiplayerSpawnNavigation(
     }
 
     private fun isStandable(cell: Cell): Boolean {
+        if (!world.isChunkLoaded(cell.x shr 4, cell.z shr 4)) return false
         val feet = world.getBlockAt(cell.x, cell.y, cell.z)
         val head = world.getBlockAt(cell.x, cell.y + 1, cell.z)
         val floor = world.getBlockAt(cell.x, cell.y - 1, cell.z)

@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("io.github.drownek.plugwright") version "2.0.4"
     kotlin("jvm")
@@ -8,26 +10,50 @@ val staffSpellApiJar = providers.gradleProperty("staffSpellApiJar").orNull?.let(
 if (staffSpellApiJar != null) require(staffSpellApiJar.isFile) { "Staff spell API JAR does not exist: $staffSpellApiJar" }
 val staffSpellApiDependency: Any = staffSpellApiJar?.let { files(it) }
     ?: "ru.ruscrafting.arc:arc-staff-spells-api:0.1.1"
+val dungeonsApiJar = providers.gradleProperty("dungeonsApiJar").orNull?.let(::file)
+if (dungeonsApiJar != null) require(dungeonsApiJar.isFile) { "Dungeons API JAR does not exist: $dungeonsApiJar" }
+val dungeonsApiDependency: Any = dungeonsApiJar?.let { files(it) }
+    ?: "ru.ruscrafting.arc:arc-dungeons-api:0.1.1"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
+val e2eArcCoreJar = providers.gradleProperty("e2eArcCoreJar").map { project.file(it) }
+val verifyE2eProvider = tasks.register("verifyE2eProvider") {
+    description = "Verifies the standalone provider used by the isolated Paper fixture."
+    inputs.file(e2eArcCoreJar).optional()
+    doLast {
+        val provider = requireNotNull(e2eArcCoreJar.orNull) {
+            "Supply -Pe2eArcCoreJar=/absolute/path/ArcCore-0.1.12.jar for the real Paper fixture"
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(provider.readBytes()).joinToString("") { "%02x".format(it) }
+        require(digest == "93158072f30ad3d7d5201acdf9036324841c4455844b4f1b650cfea0d8540502") {
+            "ArcCore 0.1.12 fixture checksum mismatch: $digest"
+        }
+    }
+}
+tasks.withType<me.drownek.plugwright.AbstractPlugwrightTask>().configureEach {
+    dependsOn(verifyE2eProvider)
+}
 
 dependencies {
     implementation(project(":domain"))
     implementation(project(":storage-mysql"))
     implementation(project(":network-redis"))
-    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.33")
-    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.33")
-    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.33")
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.33")
-    implementation("ru.ruscrafting.arc:arc-core-redis:2.7.33")
-    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.33")
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.33")
+    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.38")
+    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.38")
+    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.38")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.38")
+    implementation("ru.ruscrafting.arc:arc-core-redis:2.7.38")
+    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.38")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.38")
     compileOnly(staffSpellApiDependency)
+    compileOnly(dungeonsApiDependency)
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("net.william278.husksync:husksync-bukkit:3.8.7+1.21.8")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.33")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.33")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.38")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.38")
     testImplementation(staffSpellApiDependency)
+    testImplementation(dungeonsApiDependency)
     testImplementation("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
 }
 
@@ -45,6 +71,7 @@ tasks.shadowJar {
     archiveClassifier.set("")
     mergeServiceFiles()
     exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
+    exclude("ru/arc/paper/runtime/PaperNativeCleanupServiceProvider*.class")
     exclude("ru/arc/paper/api/**")
     exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
     exclude("ru/arc/paper/sql/SharedPaperSqlService*.class")
@@ -72,6 +99,7 @@ plugwright {
     jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
     writeFiles {
         e2eArcJar.orNull?.let { file("plugins/ARC.jar", it) }
+        e2eArcCoreJar.orNull?.let { file("plugins/ArcCore.jar", it) }
         file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
         file("plugins/ARC/modules/runtime.yml", projectDir.resolve("src/test/e2e/fixtures/arc-runtime.yml"))
         file("plugins/ARC/modules/redis.yml", projectDir.resolve("src/test/e2e/fixtures/arc-redis.yml"))

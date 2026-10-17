@@ -1,5 +1,7 @@
 package ru.ruscrafting.duels.paper
 
+import ru.arc.core.BudgetedTaskQueue
+import java.util.concurrent.Executor
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.paper.playerstate.PaperPlayerStateCodec
@@ -47,6 +49,8 @@ internal class DurablePlayerStateService(
     private val clock: Clock = Clock.systemUTC(),
     private val retention: Duration = Duration.ofDays(7),
     private val reconciliationDelay: Duration = Duration.ofSeconds(5),
+    private val nativeWork: BudgetedTaskQueue? = null,
+    private val worker: Executor = Executor { it.run() },
 ) {
     private val coreCodec = PaperPlayerStateCodec(maxPayloadBytes = MAX_ESCROW_PAYLOAD_BYTES)
     private val pending = ConcurrentHashMap<UUID, PlayerStateEscrow>()
@@ -63,15 +67,18 @@ internal class DurablePlayerStateService(
         require(!reconciliationDelay.isNegative) { "MySQL reconciliation delay cannot be negative" }
     }
 
-    fun loadPending(timeoutMillis: Long): Int {
-        val loaded = repository.pending(serverId).get(timeoutMillis, TimeUnit.MILLISECONDS)
-        loaded.forEach { escrow ->
-            verifyChecksum(escrow)
-            check(pending.putIfAbsent(escrow.playerId.value, escrow) == null) {
-                "Duplicate pending player escrow for ${escrow.playerId}"
+    /** Worker validation completes before the runtime admits any recovery/start request. */
+    fun loadPending(timeoutMillis: Long): CompletableFuture<Int> {
+        require(timeoutMillis > 0L)
+        return repository.pending(serverId).thenApplyAsync({ loaded ->
+            loaded.forEach { escrow ->
+                verifyChecksum(escrow)
+                check(pending.putIfAbsent(escrow.playerId.value, escrow) == null) {
+                    "Duplicate pending player escrow for ${escrow.playerId}"
+                }
             }
-        }
-        return loaded.size
+            loaded.size
+        }, worker)
     }
 
     fun storePair(
@@ -92,36 +99,29 @@ internal class DurablePlayerStateService(
             "Atomic match escrow requires 2..$MAX_MULTIPLAYER_PARTICIPANTS player states"
         }
         require(players.map(Player::getUniqueId).distinct().size == players.size) { "Match escrow players must be distinct" }
-        val stored = players.map { capture(matchId, it, inventoryReplaced) }
-        val escrows = stored.map(StoredPlayerSnapshot::escrow)
-        return repository.saveAll(escrows)
-            .handle { _, failure ->
-                if (failure == null) {
-                    CompletableFuture.completedFuture(Unit)
-                } else {
-                    reconcileUnknownSave(escrows, failure.unwrapCompletion())
-                }
-            }.thenCompose { it }
-            .thenApply {
-                stored.associateBy { snapshot ->
-                    snapshot.escrow.playerId.value.also { playerId -> pending[playerId] = snapshot.escrow }
-                }
+        val captures = players.map { captureAsync(matchId, it, inventoryReplaced) }
+        return CompletableFuture.allOf(*captures.toTypedArray()).thenApplyAsync({
+            captures.map { it.join() }
+        }, worker).thenCompose { stored ->
+            val escrows = stored.map(StoredPlayerSnapshot::escrow)
+            repository.saveAll(escrows).handle { _, failure ->
+                if (failure == null) CompletableFuture.completedFuture(Unit)
+                else reconcileUnknownSave(escrows, failure.unwrapCompletion())
+            }.thenCompose { it }.thenApply {
+                stored.associateBy { snapshot -> snapshot.escrow.playerId.value.also { pending[it] = snapshot.escrow } }
             }
+        }
     }
 
-    fun store(
-        matchId: MatchId,
-        player: Player,
-        inventoryReplaced: Boolean,
-    ): CompletableFuture<StoredPlayerSnapshot> {
+    fun store(matchId: MatchId, player: Player, inventoryReplaced: Boolean): CompletableFuture<StoredPlayerSnapshot> {
         check(plugin.server.isPrimaryThread) { "Player state must be captured on the Paper primary thread" }
-        val stored = capture(matchId, player, inventoryReplaced)
-        return recoveryWorkflow.commitThenMutate(stored.escrow) { committed ->
-            CompletableFuture.completedFuture(
-                stored.copy(escrow = committed).also { pending[player.uniqueId] = committed },
-            )
-        }.thenApply { it.mutation }
+        return captureAsync(matchId, player, inventoryReplaced).thenCompose { stored ->
+            recoveryWorkflow.commitThenMutate(stored.escrow) { committed ->
+                CompletableFuture.completedFuture(stored.copy(escrow = committed).also { pending[committed.playerId.value] = committed })
+            }.thenApply { it.mutation }
+        }
     }
+
 
     private fun commitExact(expected: PlayerStateEscrow): CompletableFuture<PlayerStateEscrow> =
         repository.save(expected)
@@ -154,7 +154,7 @@ internal class DurablePlayerStateService(
         }
         val lookups = origins.keys.associateWith(repository::findPending)
         return CompletableFuture.allOf(*lookups.values.toTypedArray())
-            .thenApply {
+            .thenApplyAsync({
                 val snapshots = lookups.values.mapNotNull(CompletableFuture<PlayerStateEscrow?>::join)
                     .associateBy(PlayerStateEscrow::playerId)
                 check(snapshots.size == origins.size) { "Every origin inventory snapshot must exist before arena transfer" }
@@ -166,7 +166,7 @@ internal class DurablePlayerStateService(
                 }
                 snapshots.forEach { (playerId, escrow) -> pending[playerId.value] = escrow }
                 snapshots
-            }
+            }, worker)
     }
 
     fun pending(playerId: UUID): PlayerStateEscrow? = pending[playerId]
@@ -183,8 +183,8 @@ internal class DurablePlayerStateService(
 
     fun discover(playerId: UUID): CompletableFuture<PlayerStateEscrow?> {
         val cached = pending[playerId]
-        return repository.findPending(PlayerId(playerId)).handle { escrow, failure ->
-            if (failure != null) return@handle cached ?: throw failure
+        return repository.findPending(PlayerId(playerId)).handleAsync({ escrow, failure ->
+            if (failure != null) return@handleAsync cached ?: throw failure
             if (escrow != null) {
                 verifyChecksum(escrow)
                 pending[playerId] = escrow
@@ -192,16 +192,34 @@ internal class DurablePlayerStateService(
                 pending.remove(playerId)
             }
             escrow
-        }
+        }, worker)
     }
 
     fun isLocal(escrow: PlayerStateEscrow): Boolean = escrow.serverId == serverId
 
     fun latestRetained(playerId: UUID): CompletableFuture<PlayerStateEscrow?> =
-        repository.findLatestRetained(PlayerId(playerId)).thenApply { escrow ->
+        repository.findLatestRetained(PlayerId(playerId)).thenApplyAsync({ escrow ->
             escrow?.also(::verifyChecksum)
-        }
+        }, worker)
 
+    /** Worker prepares authenticated opaque blobs; the shared queue binds one native inventory. */
+    fun decodeAsync(escrow: PlayerStateEscrow, player: Player, forArena: Boolean = false): CompletableFuture<StoredPlayerSnapshot> {
+        check(plugin.server.isPrimaryThread)
+        val fallbackWorld = if (forArena) player.world else null
+        return runCatching { CompletableFuture.supplyAsync({
+            require(forArena || escrow.serverId == serverId) { "Player escrow belongs to another server" }
+            require(escrow.formatVersion == CORE_ESCROW_FORMAT_VERSION) { "Unsupported player escrow format" }
+            coreCodec.prepareDecode(escrow.coreEnvelope()).also {
+                require(it.playerId == escrow.playerId.value) { "Player escrow identity does not match its authenticated payload" }
+            }
+        }, worker) }.getOrElse { CompletableFuture.failedFuture(it) }.thenCompose { prepared ->
+            val bind = { StoredPlayerSnapshot(PlayerSnapshot.fromCore(coreCodec.decode(prepared), fallbackWorld), escrow) }
+            nativeWork?.call({ plugin.isEnabled && player.isOnline }, bind)
+                ?: runCatching { CompletableFuture.completedFuture(bind()) }.getOrElse { CompletableFuture.failedFuture(it) }
+        }
+    }
+
+    /** Synchronous compatibility for isolated fixtures; production recovery uses [decodeAsync]. */
     fun decode(escrow: PlayerStateEscrow): StoredPlayerSnapshot {
         verifyChecksum(escrow)
         require(escrow.serverId == serverId) { "Player escrow belongs to ${escrow.serverId}, not $serverId" }
@@ -384,28 +402,25 @@ internal class DurablePlayerStateService(
         ).thenCompose { reconcileUnknownSave(expected, originalFailure, emptyConfirmations) }
     }
 
-    private fun capture(
-        matchId: MatchId,
-        player: Player,
-        inventoryReplaced: Boolean,
-    ): StoredPlayerSnapshot {
-        check(!isPending(player.uniqueId)) { "Player ${player.uniqueId} already has pending recovery state" }
-        val snapshot = PlayerSnapshot.capture(player, clock.millis().coerceAtLeast(1L))
-        val envelope = coreCodec.encode(snapshot.core)
-        val payload = Base64.getDecoder().decode(envelope.payloadBase64)
-        val escrow =
-            PlayerStateEscrow(
-                playerId = PlayerId(player.uniqueId),
-                matchId = matchId,
-                serverId = serverId,
-                formatVersion = CORE_ESCROW_FORMAT_VERSION,
-                inventoryReplaced = inventoryReplaced,
-                payload = payload,
-                checksum = sha256(payload),
-                createdAt = clock.instant(),
-            )
-        return StoredPlayerSnapshot(snapshot, escrow)
+    private fun captureAsync(matchId: MatchId, player: Player, inventoryReplaced: Boolean): CompletableFuture<StoredPlayerSnapshot> {
+        val playerId = player.uniqueId
+        val capture = {
+            check(!isPending(playerId)) { "Player $playerId already has pending recovery state" }
+            check(player.isOnline) { "Player left before escrow capture" }
+            val snapshot = PlayerSnapshot.capture(player, clock.millis().coerceAtLeast(1L))
+            snapshot to coreCodec.encodePayload(snapshot.core)
+        }
+        val native = nativeWork?.call({ plugin.isEnabled }, capture)
+            ?: runCatching { CompletableFuture.completedFuture(capture()) }.getOrElse { CompletableFuture.failedFuture(it) }
+        return native.thenApplyAsync({ (snapshot, payload) ->
+            val escrow = PlayerStateEscrow(PlayerId(playerId), matchId, serverId, CORE_ESCROW_FORMAT_VERSION,
+                inventoryReplaced, payload, sha256(payload), clock.instant())
+            StoredPlayerSnapshot(snapshot, escrow)
+        }, worker)
     }
+
+    fun drainRetentions(): CompletableFuture<Unit> =
+        CompletableFuture.allOf(*retentions.values.toTypedArray()).thenApply { Unit }
 
     private fun verifyChecksum(escrow: PlayerStateEscrow) {
         require(MessageDigest.isEqual(sha256(escrow.payload), escrow.checksum)) {

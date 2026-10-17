@@ -9,7 +9,6 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Location
 import org.mockbukkit.mockbukkit.ServerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
-import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.ArenaId
 import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
@@ -28,14 +27,14 @@ class DuelAdminCommandTest : StringSpec({
     beforeSpec {
         paper = MockBukkitTestRuntime.open()
         server = paper.server
-        plugin = paper.loadPlugin<ArcDuelsPlugin>()
+        plugin = paper.loadReadyDuelsPlugin()
     }
 
     afterSpec { paper.close() }
 
     "admin arena editor persists both spawns normalizes corners and validates before enable" {
         val world = server.addSimpleWorld("admin-world")
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         player.isOp = true
         val catalog = mockk<PaperArenaCatalog>()
         val sessions = mockk<DuelSessionManager>()
@@ -84,7 +83,7 @@ class DuelAdminCommandTest : StringSpec({
     }
 
     "arena edits fail closed while a multiplayer or accepted-match flow is active" {
-        val player = server.addPlayer("BusyArenaAdmin")
+        val player = paper.addReadyDuelsPlayer(plugin, "BusyArenaAdmin")
         player.isOp = true
         val catalog = mockk<PaperArenaCatalog>(relaxed = true)
         val sessions = mockk<DuelSessionManager>()
@@ -104,7 +103,7 @@ class DuelAdminCommandTest : StringSpec({
 
     "admin debug commands expose stable read-only server player and arena state for QA bots" {
         val world = server.addSimpleWorld("debug-world")
-        val player = server.addPlayer("QaBot")
+        val player = paper.addReadyDuelsPlayer(plugin, "QaBot")
         player.isOp = true
         player.teleport(Location(world, 1.25, 70.0, -2.5))
         val catalog = mockk<PaperArenaCatalog>()

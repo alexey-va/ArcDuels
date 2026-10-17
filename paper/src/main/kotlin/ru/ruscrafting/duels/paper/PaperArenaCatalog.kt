@@ -1,5 +1,7 @@
 package ru.ruscrafting.duels.paper
 
+import ru.arc.core.BudgetedTaskQueue
+import ru.arc.core.BoundedAsyncExecutor
 import org.bukkit.Location
 import org.bukkit.configuration.Configuration
 import org.bukkit.configuration.ConfigurationSection
@@ -150,6 +152,7 @@ data class PaperArena(
     val multiplayerPlacement: MultiplayerSpawnPlacementSettings = MultiplayerSpawnPlacementSettings(),
 ) {
     internal var multiplayerNavigation: MultiplayerSpawnNavigation = MultiplayerSpawnNavigation.UNCHECKED
+    private var multiplayerPlans: Map<List<Int>, List<Location>>? = null
 
     init {
         require(displayName.isNotBlank() && displayName.length <= 64 && displayName.none(Char::isISOControl)) {
@@ -172,15 +175,26 @@ data class PaperArena(
     fun supports(roster: MultiplayerRoster): Boolean {
         if (DuelMode.KIT !in allowedLoadouts || roster.rules.objective !in allowedObjectives) return false
         if (roster.rules.objective == DuelObjectiveType.KING_OF_THE_HILL && hill == null) return false
-        return MultiplayerSpawnPlanner.plan(this, roster) != null
+        val prepared = multiplayerPlans
+        return if (prepared == null) MultiplayerSpawnPlanner.plan(this, roster) != null
+        else MultiplayerSpawnPlanner.shape(roster) in prepared
     }
 
     fun assignSpawns(roster: MultiplayerRoster): Map<PlayerId, Location> {
         require(supports(roster)) { "Arena $id cannot safely fit this multiplayer roster" }
-        return requireNotNull(MultiplayerSpawnPlanner.plan(this, roster)) {
+        val prepared = multiplayerPlans
+        val placements = if (prepared == null) MultiplayerSpawnPlanner.plan(this, roster)
+            else prepared[MultiplayerSpawnPlanner.shape(roster)]?.let { MultiplayerSpawnPlanner.bind(roster, it) }
+        return requireNotNull(placements) {
             "Arena $id cannot procedurally place this multiplayer roster"
         }
     }
+
+    internal fun prepareMultiplayer(queue: BudgetedTaskQueue): CompletableFuture<Unit> =
+        multiplayerNavigation.prepare(queue).thenCompose {
+            if (DuelMode.KIT !in allowedLoadouts) CompletableFuture.completedFuture<Map<List<Int>, List<Location>>>(emptyMap())
+            else MultiplayerSpawnPlanner.prepare(this, queue)
+        }.thenApply { prepared -> multiplayerPlans = prepared; Unit }
 }
 
 class MultiplayerArenaReservation internal constructor(
@@ -261,6 +275,12 @@ class PaperArenaCatalog private constructor(
     }
 
     fun get(id: ArenaId): PaperArena = arenas[id] ?: error("Arena $id disappeared from the catalog")
+
+    /** Native navigation capture shares the runtime queue and completes before catalog publication. */
+    fun prepareNavigation(queue: BudgetedTaskQueue): CompletableFuture<Unit> {
+        val prepared = arenas.values.map { it.prepareMultiplayer(queue) }
+        return CompletableFuture.allOf(*prepared.toTypedArray()).thenApply { Unit }
+    }
 
     fun reserveMultiplayer(roster: MultiplayerRoster): CompletableFuture<MultiplayerArenaReservation> =
         synchronized(lock) {
@@ -420,6 +440,25 @@ class PaperArenaCatalog private constructor(
     }
 
     companion object {
+        /** File parsing is complete; bind/inspect one arena per native step, then prepare navigation. */
+        internal fun loadAsync(plugin: JavaPlugin, configuration: Configuration, preference: ArenaSelection?,
+            queue: BudgetedTaskQueue, worker: BoundedAsyncExecutor): CompletableFuture<PaperArenaCatalog> {
+            val inspector = ArenaEnvironmentInspector.create(plugin)
+            val localServer = ServerId(configuration.getString("server-id", plugin.server.name)!!)
+            return worker.submit {
+                val ids = configuration.strictConfigurationSection("arenas")?.getKeys(false).orEmpty().toList()
+                require(ids.map { it.lowercase() }.distinct().size == ids.size) { "Arena ids must be unique after lowercase normalization" }
+                ids
+            }.thenCompose { ids ->
+                val iterator = ids.iterator()
+                val entries = linkedMapOf<ArenaId, PaperArena>()
+                queue.submit({ plugin.isEnabled }) {
+                    if (iterator.hasNext()) entries.putAll(parse(plugin, configuration, inspector, listOf(iterator.next())))
+                    !iterator.hasNext()
+                }.thenApply { PaperArenaCatalog(entries.toMap(), localServer, preference) }
+            }.thenCompose { catalog -> catalog.prepareNavigation(queue).thenApply { catalog } }
+        }
+
         fun load(plugin: JavaPlugin): PaperArenaCatalog =
             load(
                 plugin,
@@ -470,12 +509,13 @@ class PaperArenaCatalog private constructor(
             plugin: JavaPlugin,
             configuration: Configuration,
             inspector: ArenaEnvironmentInspector,
+            rawIds: List<String>? = null,
         ): Map<ArenaId, PaperArena> {
             val root = configuration.strictConfigurationSection("arenas")
                 ?: return emptyMap()
             val multiplayerPlacement = MultiplayerSpawnPlacementSettings.load(configuration)
             val entries =
-                root.getKeys(false).mapNotNull { rawId ->
+                (rawIds ?: root.getKeys(false).toList()).mapNotNull { rawId ->
                     val section = requireNotNull(root.strictConfigurationSection(rawId))
                     if (!section.strictBoolean("enabled", false)) return@mapNotNull null
                     val id = ArenaId(rawId.lowercase())

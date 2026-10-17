@@ -4,11 +4,11 @@ plugins {
 
 dependencies {
     implementation(project(":domain"))
-    implementation("ru.ruscrafting.arc:arc-core:2.7.33")
-    implementation("ru.ruscrafting.arc:arc-core-redis:2.7.33")
+    implementation("ru.ruscrafting.arc:arc-core:2.7.38")
+    implementation("ru.ruscrafting.arc:arc-core-redis:2.7.38")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.slf4j:slf4j-api:2.0.16")
-    testImplementation("ru.ruscrafting.arc:arc-core-testing:2.7.33")
+    testImplementation("ru.ruscrafting.arc:arc-core-testing:2.7.38")
 }
 
 val integrationTest by sourceSets.creating {
@@ -20,7 +20,7 @@ configurations[integrationTest.implementationConfigurationName].extendsFrom(conf
 configurations[integrationTest.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
 
 dependencies {
-    add(integrationTest.implementationConfigurationName, "ru.ruscrafting.arc:arc-core-integration-testing:2.7.33")
+    add(integrationTest.implementationConfigurationName, "ru.ruscrafting.arc:arc-core-integration-testing:2.7.38")
 }
 
 tasks.register<Test>("integrationTest") {

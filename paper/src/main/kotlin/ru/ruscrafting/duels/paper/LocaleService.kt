@@ -132,6 +132,10 @@ class LocaleService private constructor(
     companion object {
         fun load(plugin: JavaPlugin): LocaleService = load(plugin, plugin.config, prepareFiles = true)
 
+        /** Blocking worker preparation over a detached configuration, never a live Bukkit getter. */
+        internal fun prepare(plugin: JavaPlugin, configuration: Configuration): LocaleService =
+            load(plugin, configuration, prepareFiles = true)
+
         internal fun loadCandidate(
             plugin: JavaPlugin,
             configuration: Configuration,

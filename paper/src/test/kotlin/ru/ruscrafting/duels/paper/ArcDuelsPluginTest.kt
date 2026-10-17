@@ -66,7 +66,6 @@ import java.util.logging.LogRecord
 import ru.arc.logging.ArcLogging
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
-import ru.arc.paper.testing.loadPlugin
 
 @Suppress("DEPRECATION")
 class ArcDuelsPluginTest : StringSpec({
@@ -84,7 +83,7 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "default plugin configuration enables without MySQL or Redis" {
-        plugin = paper.loadPlugin<ArcDuelsPlugin>()
+        plugin = paper.loadReadyDuelsPlugin()
 
         plugin.isEnabled shouldBe true
         ArcLogging.disableStructuredEmit shouldBe true
@@ -165,7 +164,7 @@ class ArcDuelsPluginTest : StringSpec({
 
     "chat notices use one calm identity real blank lines and indented continuation rows" {
         val locales = LocaleService.load(plugin)
-        val player = server.addPlayer("NoticeTester")
+        val player = paper.addReadyDuelsPlayer(plugin, "NoticeTester")
         player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         val action = Component.text("Вернуться").clickEvent(ClickEvent.runCommand("/duel return"))
         val body = Component.text("Первая строка").append(Component.newline()).append(action)
@@ -179,7 +178,7 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "blank optional feedback stays silent and a nonblank locale override enables it" {
-        val player = server.addPlayer("OptNotice")
+        val player = paper.addReadyDuelsPlayer(plugin, "OptNotice")
         player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         val defaults = LocaleService.load(plugin)
 
@@ -215,8 +214,8 @@ class ArcDuelsPluginTest : StringSpec({
         val sessions = mockk<DuelSessionManager>(relaxed = true)
         every { sessions.onCompleted(any()) } returns AutoCloseable { }
         val targets = DuelTargetDirectory(plugin, ServerId("test"), null)
-        val challenger = server.addPlayer("KitOnlySender")
-        val target = server.addPlayer("KitOnlyTarget")
+        val challenger = paper.addReadyDuelsPlayer(plugin, "KitOnlySender")
+        val target = paper.addReadyDuelsPlayer(plugin, "KitOnlyTarget")
         var settings = ArcDuelsRuntimeSettings.parse(org.bukkit.configuration.MemoryConfiguration()).settings
         val registry = ChallengeRegistry(Clock.systemUTC(), Duration.ofSeconds(45))
         DuelController(
@@ -230,7 +229,7 @@ class ArcDuelsPluginTest : StringSpec({
             verify(exactly = 0) { sessions.start(any()) }
             controller.isLoadoutAllowed(DuelMode.OWN_INVENTORY) shouldBe false
             controller.isLoadoutAllowed(DuelMode.KIT) shouldBe true
-            val other = server.addPlayer("KitOnlyOther")
+            val other = paper.addReadyDuelsPlayer(plugin, "KitOnlyOther")
             controller.challenge(challenger, targets.local(other), DuelRules(DuelMode.OWN_INVENTORY))
             other.nextComponentMessage() shouldBe null
             other.disconnect()
@@ -247,7 +246,7 @@ class ArcDuelsPluginTest : StringSpec({
         every { bus.subscribe(capture(listener)) } returns AutoCloseable { }
         val local = ServerId("slimefun")
         val remote = ServerId("survival")
-        val target = server.addPlayer("IsolatedTarget")
+        val target = paper.addReadyDuelsPlayer(plugin, "IsolatedTarget")
         val senderId = PlayerId(java.util.UUID.randomUUID())
         val now = Instant.now()
         val challenge = DuelChallenge.create(senderId, PlayerId(target.uniqueId), DuelRules(DuelMode.OWN_INVENTORY), now, Duration.ofSeconds(45))
@@ -285,8 +284,8 @@ class ArcDuelsPluginTest : StringSpec({
         val locales = LocaleService.load(plugin)
         val localServer = ServerId("test")
         val targets = DuelTargetDirectory(plugin, localServer, null)
-        val challenger = server.addPlayer("Challenger")
-        val target = server.addPlayer("Target")
+        val challenger = paper.addReadyDuelsPlayer(plugin, "Challenger")
+        val target = paper.addReadyDuelsPlayer(plugin, "Target")
         challenger.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         target.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         val controller =
@@ -339,8 +338,8 @@ class ArcDuelsPluginTest : StringSpec({
         val clock = Clock.fixed(Instant.parse("2026-08-15T00:00:00Z"), ZoneOffset.UTC)
         val challenges = ChallengeRegistry(clock)
         val targets = DuelTargetDirectory(plugin, ServerId("test"), null)
-        val challenger = server.addPlayer("CancelCharacterization")
-        val target = server.addPlayer("DenyCharacterization")
+        val challenger = paper.addReadyDuelsPlayer(plugin, "CancelCharacterization")
+        val target = paper.addReadyDuelsPlayer(plugin, "DenyCharacterization")
         val controller = DuelController(plugin, challenges, sessions, InMemoryStatisticsRepository(), locales, targets, ServerId("test"), clock = clock)
 
         try {
@@ -382,7 +381,7 @@ class ArcDuelsPluginTest : StringSpec({
         val target = DuelTarget(targetId, "RemoteTarget", ServerId("survival"), local = false)
         val targets = mockk<DuelTargetDirectory>()
         every { targets.find(any<UUID>()) } returns target
-        val challenger = server.addPlayer("RemoteCancel").apply { setLocale(java.util.Locale.forLanguageTag("ru-RU")) }
+        val challenger = paper.addReadyDuelsPlayer(plugin, "RemoteCancel").apply { setLocale(java.util.Locale.forLanguageTag("ru-RU")) }
         val challenges = ChallengeRegistry(Clock.systemUTC())
         val controller =
             DuelController(
@@ -422,7 +421,7 @@ class ArcDuelsPluginTest : StringSpec({
         val arenas = mockk<NetworkArenaDirectory>(relaxed = true)
         val transfer = mockk<PlayerTransfer>(relaxed = true)
         val targets = mockk<DuelTargetDirectory>()
-        val challenger = server.addPlayer("RedisFailure")
+        val challenger = paper.addReadyDuelsPlayer(plugin, "RedisFailure")
         challenger.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         val remoteId = UUID.randomUUID()
         val remote = DuelTarget(remoteId, "RemotePlayer", ServerId("survival"), local = false)
@@ -460,7 +459,7 @@ class ArcDuelsPluginTest : StringSpec({
         every { bus.publish(capture(published)) } returns Unit
         val arenas = mockk<NetworkArenaDirectory>(relaxed = true)
         val targets = mockk<DuelTargetDirectory>()
-        val challenger = server.addPlayer("KitOrigin")
+        val challenger = paper.addReadyDuelsPlayer(plugin, "KitOrigin")
         val remote = DuelTarget(UUID.randomUUID(), "KitRemote", ServerId("parkour"), local = false)
         every { targets.find(remote.uniqueId) } returns remote
         val fingerprint = "a".repeat(64)
@@ -493,8 +492,8 @@ class ArcDuelsPluginTest : StringSpec({
         val bus = mockk<CrossServerChallengeBus>()
         every { bus.subscribe(capture(listener)) } returns AutoCloseable { }
         val host = ServerId("duels-host")
-        val first = server.addPlayer("HostFirst")
-        val second = server.addPlayer("HostSecond")
+        val first = paper.addReadyDuelsPlayer(plugin, "HostFirst")
+        val second = paper.addReadyDuelsPlayer(plugin, "HostSecond")
         val now = Instant.parse("2026-08-31T12:00:00Z")
         val challenge =
             DuelChallenge.create(
@@ -550,8 +549,8 @@ class ArcDuelsPluginTest : StringSpec({
         val bus = mockk<CrossServerChallengeBus>()
         every { bus.subscribe(capture(listener)) } returns AutoCloseable { }
         val host = ServerId("duels-host")
-        val first = server.addPlayer("AutoFirst")
-        val second = server.addPlayer("AutoSecond")
+        val first = paper.addReadyDuelsPlayer(plugin, "AutoFirst")
+        val second = paper.addReadyDuelsPlayer(plugin, "AutoSecond")
         val clock = MutableControllerClock(Instant.parse("2026-08-31T13:00:00Z"))
         val rules = DuelRules(DuelMode.KIT, KitId("classic"))
         val challenge =
@@ -639,8 +638,8 @@ class ArcDuelsPluginTest : StringSpec({
         val sessions = mockk<DuelSessionManager>(relaxed = true)
         val completion = slot<(DuelMatch) -> Unit>()
         every { sessions.onCompleted(capture(completion)) } returns AutoCloseable { }
-        val winner = server.addPlayer("SummaryWinner")
-        val loser = server.addPlayer("SummaryLoser")
+        val winner = paper.addReadyDuelsPlayer(plugin, "SummaryWinner")
+        val loser = paper.addReadyDuelsPlayer(plugin, "SummaryLoser")
         winner.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         loser.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
         val controller =
@@ -708,7 +707,7 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "player snapshot restores cursor slot experience and movement state" {
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val world = server.addSimpleWorld("snapshot-world")
         val savedLocation = Location(world, 12.5, 70.0, -8.5, 45f, 10f)
         player.teleport(savedLocation)
@@ -761,7 +760,7 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "own-inventory restoration preserves every item acquired during a duel" {
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val world = server.addSimpleWorld("own-inventory-world")
         val savedLocation = Location(world, 10.5, 70.0, 10.5)
         player.teleport(savedLocation)
@@ -786,7 +785,7 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "kit restoration still replaces temporary combat items with the protected inventory" {
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val snapshot = PlayerSnapshot.capture(player)
         player.inventory.setItem(0, ItemStack(Material.NETHERITE_SWORD))
         player.setItemOnCursor(ItemStack(Material.GOLDEN_APPLE))
@@ -827,7 +826,7 @@ class ArcDuelsPluginTest : StringSpec({
         val gui = mockk<DuelGuiService>(relaxed = true)
         val admin = mockk<DuelAdminCommand>(relaxed = true)
         val executor = DuelCommand(controller, gui, admin)
-        val player = server.addPlayer()
+        val player = paper.addReadyDuelsPlayer(plugin)
         val command = requireNotNull(plugin.getCommand("duel"))
 
         executor.onCommand(player, command, "duel", arrayOf("accept", "not-a-uuid"))
@@ -848,7 +847,7 @@ class ArcDuelsPluginTest : StringSpec({
         val admin = mockk<DuelAdminCommand>(relaxed = true)
         val invitations = mockk<MultiplayerInvitationActions>(relaxed = true)
         val executor = DuelCommand(controller, gui, admin, multiplayerInvitations = invitations)
-        val player = server.addPlayer("GroupInvite")
+        val player = paper.addReadyDuelsPlayer(plugin, "GroupInvite")
         val command = requireNotNull(plugin.getCommand("duel"))
         val lobbyId = UUID.randomUUID()
 
@@ -867,8 +866,8 @@ class ArcDuelsPluginTest : StringSpec({
         val statistics = InMemoryStatisticsRepository()
         val sessions = mockk<DuelSessionManager>(relaxed = true)
         every { sessions.onCompleted(any()) } returns AutoCloseable { }
-        val first = server.addPlayer("RematchFirst")
-        val second = server.addPlayer("RematchSecond")
+        val first = paper.addReadyDuelsPlayer(plugin, "RematchFirst")
+        val second = paper.addReadyDuelsPlayer(plugin, "RematchSecond")
         val rules = DuelRules(DuelMode.KIT, KitId("classic"), ranked = true, bestOf = 3, objective = DuelObjectiveType.ELIMINATION)
         val outcome =
             MatchOutcome(
@@ -972,8 +971,8 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "main hub follows the challenge submenu path and stays Russian for an English client" {
-        val player = server.addPlayer("MenuTester")
-        server.addPlayer("Opponent")
+        val player = paper.addReadyDuelsPlayer(plugin, "MenuTester")
+        paper.addReadyDuelsPlayer(plugin, "Opponent")
         player.setLocale(java.util.Locale.ENGLISH)
 
         player.performCommand("duel") shouldBe true
@@ -1044,35 +1043,37 @@ class ArcDuelsPluginTest : StringSpec({
     }
 
     "kit catalog and multiplayer setup derive detailed contents from runtime stacks" {
-        val player = server.addPlayer("KitReader")
-        server.addPlayer("GroupMateOne")
-        server.addPlayer("GroupMateTwo")
-        player.setLocale(java.util.Locale.ENGLISH)
+        failOnUnsupportedMockBukkitOperation {
+            val player = paper.addReadyDuelsPlayer(plugin, "KitReader")
+            paper.addReadyDuelsPlayer(plugin, "GroupMateOne")
+            paper.addReadyDuelsPlayer(plugin, "GroupMateTwo")
+            player.setLocale(java.util.Locale.ENGLISH)
 
-        player.performCommand("duel") shouldBe true
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
-        val crossbow = requireNotNull(
-            player.openInventory.topInventory.contents.filterNotNull().firstOrNull { it.type == Material.CROSSBOW },
-        )
-        val catalogLore = crossbow.plainLore()
-        val catalogTranslations = crossbow.itemMeta.lore().orEmpty().flatMap(Component::translationKeys)
-        catalogLore.contains("Состав набора") shouldBe true
-        catalogTranslations.contains("item.minecraft.crossbow") shouldBe true
-        catalogTranslations.contains("enchantment.minecraft.quick_charge") shouldBe true
-        catalogLore.contains("неразрушимый") shouldBe true
-        catalogTranslations.contains("item.minecraft.arrow") shouldBe true
-        catalogLore.contains("×32") shouldBe true
+            player.performCommand("duel") shouldBe true
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
+            val crossbow = requireNotNull(
+                player.openInventory.topInventory.contents.filterNotNull().firstOrNull { it.type == Material.CROSSBOW },
+            )
+            val catalogLore = crossbow.plainLore()
+            val catalogTranslations = crossbow.itemMeta.lore().orEmpty().flatMap(Component::translationKeys)
+            catalogLore.contains("Состав набора") shouldBe true
+            catalogTranslations.contains("item.minecraft.crossbow") shouldBe true
+            catalogTranslations.contains("enchantment.minecraft.quick_charge") shouldBe true
+            catalogLore.contains("неразрушимый") shouldBe true
+            catalogTranslations.contains("item.minecraft.arrow") shouldBe true
+            catalogLore.contains("×32") shouldBe true
 
-        player.performCommand("duel") shouldBe true
-        player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 15)
-        player.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
-        requireNotNull(player.openInventory.topInventory.getItem(32)).plainLore().contains("Состав набора") shouldBe true
-        player.closeInventory()
+            player.performCommand("duel") shouldBe true
+            player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 15)
+            player.openInventory.topInventory.getItem(36)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
+            requireNotNull(player.openInventory.topInventory.getItem(32)).plainLore().contains("Состав набора") shouldBe true
+            player.closeInventory()
+        }
     }
 
     "admin command opens a real arena editor and its actions use the current position" {
         failOnUnsupportedMockBukkitOperation {
-            val player = server.addPlayer("ArenaAdmin")
+            val player = paper.addReadyDuelsPlayer(plugin, "ArenaAdmin")
             player.isOp = true
             player.setLocale(java.util.Locale.ENGLISH)
             val world = requireNotNull(server.getWorld("world"))
@@ -1090,6 +1091,7 @@ class ArcDuelsPluginTest : StringSpec({
             player.openInventory.topInventory.getItem(29)?.type shouldBe Material.LEATHER_BOOTS
             player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
             plugin.config.getStringList("arenas.example.allowed-objectives").contains("BOXING") shouldBe false
+            paper.awaitDuelsAdminIdle(plugin)
             player.simulateInventoryClick(player.openInventory, ClickType.LEFT, 36)
 
             player.teleport(Location(world, 7.5, 82.0, -4.5, 45f, 5f))
@@ -1100,6 +1102,7 @@ class ArcDuelsPluginTest : StringSpec({
 
             plugin.config.getDouble("arenas.example.first-spawn.x") shouldBe 7.5
             plugin.config.getDouble("arenas.example.first-spawn.y") shouldBe 82.0
+            paper.awaitDuelsAdminIdle(plugin)
             player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
 
             player.performCommand("duels admin") shouldBe true
@@ -1117,13 +1120,14 @@ class ArcDuelsPluginTest : StringSpec({
             server.scheduler.executeAsyncEvent(event).get(5, TimeUnit.SECONDS)
             server.scheduler.performTicks(2)
             plugin.config.isConfigurationSection("arenas.gui_arena") shouldBe true
+            paper.awaitDuelsAdminIdle(plugin)
             player.openInventory.topInventory.getItem(12)?.type shouldBe Material.COMPASS
             plugin.config.set("arenas.gui_arena", null)
         }
     }
 
     "admin status is a readable health card with the configured server name and pending recoveries" {
-        val player = server.addPlayer("StatusAdmin")
+        val player = paper.addReadyDuelsPlayer(plugin, "StatusAdmin")
         player.isOp = true
         player.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
 
@@ -1145,8 +1149,8 @@ class ArcDuelsPluginTest : StringSpec({
         val arenas = PaperArenaCatalog.load(plugin, ArenaEnvironmentInspector {})
         val localServer = ServerId("disposable-network")
         val remoteServer = ServerId("remote-origin")
-        val local = server.addPlayer("DispNetLocal")
-        val remote = server.addPlayer("DispNetRemote")
+        val local = paper.addReadyDuelsPlayer(plugin, "DispNetLocal")
+        val remote = paper.addReadyDuelsPlayer(plugin, "DispNetRemote")
         val localOrigin = Location(world, 28.0, 80.0, 28.0)
         local.teleport(localOrigin)
         remote.teleport(Location(world, 34.0, 80.0, 28.0))
@@ -1224,8 +1228,8 @@ class ArcDuelsPluginTest : StringSpec({
         plugin.config.set("arenas.example.post-match-action", "RETURN_TO_ORIGIN")
         val arenas = PaperArenaCatalog.load(plugin, ArenaEnvironmentInspector { })
         val serverId = ServerId("disposable-test")
-        val first = server.addPlayer("DispStateOne")
-        val second = server.addPlayer("DispStateTwo")
+        val first = paper.addReadyDuelsPlayer(plugin, "DispStateOne")
+        val second = paper.addReadyDuelsPlayer(plugin, "DispStateTwo")
         val firstOrigin = Location(world, 30.0, 80.0, 30.0)
         val secondOrigin = Location(world, 35.0, 80.0, 30.0)
         first.teleport(firstOrigin)

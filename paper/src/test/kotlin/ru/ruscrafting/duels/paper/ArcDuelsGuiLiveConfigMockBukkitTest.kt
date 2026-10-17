@@ -17,7 +17,6 @@ import org.bukkit.event.inventory.ClickType
 import org.mockbukkit.mockbukkit.entity.PlayerMock
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
-import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.duels.domain.DuelPresetRepository
 import ru.ruscrafting.duels.domain.ServerId
 import ru.ruscrafting.duels.domain.StatisticsRepository
@@ -175,7 +174,7 @@ private fun editGuiConfig(
 private fun withGuiPlugin(block: (MockBukkitTestRuntime, ArcDuelsPlugin) -> Unit) {
     MockBukkitTestRuntime.open().use { paper ->
         failOnUnsupportedMockBukkitOperation {
-            block(paper, paper.loadPlugin<ArcDuelsPlugin>())
+            block(paper, paper.loadReadyDuelsPlugin())
         }
     }
 }

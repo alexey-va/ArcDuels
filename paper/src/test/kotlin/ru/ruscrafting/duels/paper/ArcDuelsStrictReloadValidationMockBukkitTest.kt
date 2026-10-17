@@ -10,7 +10,6 @@ import org.bukkit.event.inventory.ClickType
 import org.mockbukkit.mockbukkit.simulate.entity.PlayerSimulation
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
-import ru.arc.paper.testing.loadPlugin
 import java.io.File
 
 class ArcDuelsStrictReloadValidationMockBukkitTest : StringSpec({
@@ -122,7 +121,7 @@ class ArcDuelsStrictReloadValidationMockBukkitTest : StringSpec({
 
             assertConfigCandidatesRejected(plugin, cases)
 
-            val player = paper.server.addPlayer("GoodGuiViewer")
+            val player = paper.addReadyDuelsPlayer(plugin, "GoodGuiViewer")
             player.performCommand("duel") shouldBe true
             player.openInventory.topInventory.getItem(0)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
         }
@@ -138,7 +137,7 @@ class ArcDuelsStrictReloadValidationMockBukkitTest : StringSpec({
 
             assertLastGoodRetained(plugin, "kits")
 
-            val player = paper.server.addPlayer("GoodKitViewer")
+            val player = paper.addReadyDuelsPlayer(plugin, "GoodKitViewer")
             player.performCommand("duel") shouldBe true
             PlayerSimulation(player).simulateInventoryClick(player.openInventory, ClickType.LEFT, 29)
             player.openInventory.topInventory.getItem(10)?.type shouldBe Material.BLAZE_ROD
@@ -214,7 +213,7 @@ class ArcDuelsStrictReloadValidationMockBukkitTest : StringSpec({
             }
             locale.writeText(lastGood)
 
-            val player = paper.server.addPlayer("LocaleGood")
+            val player = paper.addReadyDuelsPlayer(plugin, "LocaleGood")
             player.performCommand("duel") shouldBe true
             PlainTextComponentSerializer.plainText().serialize(
                 requireNotNull(player.openInventory.topInventory.getItem(11)?.itemMeta?.displayName()),
@@ -235,7 +234,7 @@ class ArcDuelsStrictReloadValidationMockBukkitTest : StringSpec({
 
             plugin.reloadConfiguration().getOrThrow().generation shouldBe 2L
 
-            val player = paper.server.addPlayer("LocaleValues")
+            val player = paper.addReadyDuelsPlayer(plugin, "LocaleValues")
             player.performCommand("duel") shouldBe true
             val queueLore = requireNotNull(player.openInventory.topInventory.getItem(31)?.itemMeta?.lore())
             queueLore.map(PlainTextComponentSerializer.plainText()::serialize) shouldBe listOf("0/0")
@@ -321,7 +320,7 @@ private fun assertLastGoodRetained(
 private fun withStrictReloadPlugin(block: (MockBukkitTestRuntime, ArcDuelsPlugin) -> Unit) {
     MockBukkitTestRuntime.open().use { paper ->
         failOnUnsupportedMockBukkitOperation {
-            block(paper, paper.loadPlugin<ArcDuelsPlugin>())
+            block(paper, paper.loadReadyDuelsPlugin())
         }
     }
 }

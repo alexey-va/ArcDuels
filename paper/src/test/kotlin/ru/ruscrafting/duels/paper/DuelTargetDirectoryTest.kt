@@ -4,7 +4,6 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import ru.arc.paper.testing.MockBukkitTestRuntime
-import ru.arc.paper.testing.loadPlugin
 import ru.arc.redis.InMemoryRedis
 import ru.arc.redis.ServerIdentity
 import ru.ruscrafting.duels.domain.ServerId
@@ -15,7 +14,7 @@ class DuelTargetDirectoryTest : StringSpec({
     "merges ProxyARC players with authoritative local Bukkit players" {
         MockBukkitTestRuntime.open().use { paper ->
             val server = paper.server
-            val plugin = paper.loadPlugin<ArcDuelsPlugin>()
+            val plugin = paper.loadReadyDuelsPlugin()
             val local = server.addPlayer("LocalPlayer")
             val remoteId = UUID.randomUUID()
             val ghostId = UUID.randomUUID()
