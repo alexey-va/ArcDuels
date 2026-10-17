@@ -58,7 +58,7 @@ class MultiplayerSpawnNavigationMockBukkitTest : StringSpec({
             val world = paper.server.addSimpleWorld("barrier-arena")
             prepareArena(world)
             configureArena(plugin, world.name)
-            val catalog = paper.loadReadyArenaCatalog(plugin)
+            val catalog = PaperArenaCatalog.load(plugin).also { it.prepareNavigationForMaintenance() }
             val roster =
                 MultiplayerRoster(
                     MultiplayerRules(MultiplayerLayout.FREE_FOR_ALL, MultiplayerKitPolicy.SHARED, KitId("classic")),

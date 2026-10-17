@@ -63,7 +63,18 @@ internal object MultiplayerSpawnPlanner {
 
     /** All legal team-size permutations are finite under the existing 3..12-player contract. */
     fun prepare(arena: PaperArena, queue: BudgetedTaskQueue): CompletableFuture<Map<List<Int>, List<Location>>> {
-        val shapes = buildSet {
+        val preparation = Preparation(arena)
+        return queue.submit({ true }, preparation::step).thenApply { preparation.result() }
+    }
+
+    /** Startup/manual reload runs the same planner to completion before catalog publication. */
+    fun prepareForMaintenance(arena: PaperArena): Map<List<Int>, List<Location>> = Preparation(arena).let { preparation ->
+        while (!preparation.step()) { /* Explicit maintenance may block. */ }
+        preparation.result()
+    }
+
+    private class Preparation(private val arena: PaperArena) {
+        private val shapes = buildSet {
             for (size in MIN_MULTIPLAYER_PARTICIPANTS..MAX_MULTIPLAYER_PARTICIPANTS) {
                 add(List(size) { 1 })
                 for (teams in 2..3) for (mask in 0 until (1 shl teams)) {
@@ -73,10 +84,11 @@ internal object MultiplayerSpawnPlanner {
                 }
             }
         }.iterator()
-        val prepared = linkedMapOf<List<Int>, List<Location>>()
-        var current: List<Int>? = null
-        var search: Search? = null
-        return queue.submit({ true }) {
+        private val prepared = linkedMapOf<List<Int>, List<Location>>()
+        private var current: List<Int>? = null
+        private var search: Search? = null
+
+        fun step(): Boolean {
             if (search == null && shapes.hasNext()) {
                 current = shapes.next()
                 search = Search(arena, requireNotNull(current))
@@ -86,8 +98,10 @@ internal object MultiplayerSpawnPlanner {
                 active.result?.let { prepared[requireNotNull(current)] = it }
                 search = null
             }
-            search == null && !shapes.hasNext()
-        }.thenApply { prepared.toMap() }
+            return search == null && !shapes.hasNext()
+        }
+
+        fun result(): Map<List<Int>, List<Location>> = prepared.toMap()
     }
 
     fun bind(roster: MultiplayerRoster, locations: List<Location>): Map<PlayerId, Location> =
@@ -218,6 +232,7 @@ internal object MultiplayerSpawnPlanner {
 internal fun interface MultiplayerSpawnNavigation {
     fun snap(candidate: Location): Location?
     fun prepare(queue: BudgetedTaskQueue): CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
+    fun prepareForMaintenance() = Unit
     fun isSafe(location: Location): Boolean = true
 
     companion object {
@@ -259,6 +274,17 @@ private class BukkitMultiplayerSpawnNavigation(
         }
     }
 
+    override fun prepareForMaintenance() {
+        preparation?.let { previous ->
+            check(previous.isDone && !previous.isCompletedExceptionally) { "Navigation preparation is unfinished or failed" }
+            return
+        }
+        val search = Search(maintenance = true)
+        while (!search.step()) { /* Explicit maintenance may load chunks and finish native capture inline. */ }
+        reachable = search.visited
+        preparation = CompletableFuture.completedFuture(Unit)
+    }
+
     override fun snap(candidate: Location): Location? {
         if (candidate.world?.uid != world.uid) return null
         val target = Cell(candidate.blockX, candidate.blockY, candidate.blockZ)
@@ -285,7 +311,7 @@ private class BukkitMultiplayerSpawnNavigation(
         location.world?.uid == world.uid && isStandable(Cell(location.blockX, location.blockY, location.blockZ))
 
     /** One fixed node expansion per shared budget step; cold chunks are acquired asynchronously. */
-    private inner class Search {
+    private inner class Search(private val maintenance: Boolean = false) {
         val visited = linkedSetOf<Cell>()
         private val pending = ArrayDeque<Cell>()
         private val enqueued = HashSet<Cell>()
@@ -302,8 +328,10 @@ private class BukkitMultiplayerSpawnNavigation(
             for (x in (current.x - 1 shr 4)..(current.x + 1 shr 4)) {
                 for (z in (current.z - 1 shr 4)..(current.z + 1 shr 4)) {
                     if (!world.isChunkLoaded(x, z)) {
-                        loading = world.getChunkAtAsync(x, z)
-                        return false
+                        if (maintenance) world.getChunkAt(x, z) else {
+                            loading = world.getChunkAtAsync(x, z)
+                            return false
+                        }
                     }
                 }
             }

@@ -56,16 +56,11 @@ import java.util.concurrent.TimeUnit
 open class ArcDuelsPlugin : JavaPlugin() {
     private lateinit var worker: BoundedAsyncExecutor
     private lateinit var nativeWork: BudgetedTaskQueue
-    private class Generation(val worker: BoundedAsyncExecutor, val predecessor: CompletableFuture<Unit>) {
-        val shutdownDrain = CompletableFuture<Unit>()
-        @Volatile var repository: MySqlStatisticsRepository? = null
-        @Volatile var redis: PaperRedisClient? = null
-        var rollback: DuelBlockRollback? = null
-        var retentions = CompletableFuture.completedFuture(Unit)
-    }
-    private var generation: Generation? = null
-    private var predecessor = CompletableFuture.completedFuture(Unit)
-    private var failedGeneration: Generation? = null
+    private var repository: MySqlStatisticsRepository? = null
+    private var redisClient: PaperRedisClient? = null
+    private var blockRollback: DuelBlockRollback? = null
+    private var retentions = CompletableFuture.completedFuture(Unit)
+    private var shutdownDrain = CompletableFuture.completedFuture(Unit)
     @Volatile private var preparedConfiguration: YamlConfiguration? = null
     private var pluginRuntime: PaperPluginRuntime? = null
     private var sessions: DuelSessionManager? = null
@@ -75,62 +70,51 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     private var readiness = CompletableFuture<Unit>()
     internal fun ready(): CompletableFuture<Unit> = readiness.copy()
-    internal fun drained(): CompletableFuture<Unit> = predecessor.copy()
+    internal fun drained(): CompletableFuture<Unit> = shutdownDrain.copy()
 
     override fun getConfig(): FileConfiguration = requireNotNull(preparedConfiguration) { "ArcDuels configuration is preparing" }
 
     override fun onEnable() {
+        if (shutdownDrain.isCompletedExceptionally) {
+            logger.severe("ArcDuels terminal recovery drain failed; restart after repairing durable recovery")
+            server.pluginManager.disablePlugin(this)
+            return
+        }
         PaperArcRuntime.installScheduling(this)
         readiness = CompletableFuture()
         preparedConfiguration = null
+        shutdownDrain = CompletableFuture()
+        retentions = CompletableFuture.completedFuture(Unit)
         val lifecycle = PaperPluginRuntime(this, "arc-duels").also { pluginRuntime = it; it.start("version" to pluginMeta.version) }
-        val owner = Generation(BoundedAsyncExecutor("ArcDuels-storage", 1, 256), predecessor).also { generation = it }
-        worker = owner.worker
+        worker = BoundedAsyncExecutor("ArcDuels-storage", 1, 256)
         nativeWork = BudgetedTaskQueue(lifecycle.tasks, 128, 2_000_000L, System::nanoTime, 4096)
-        lifecycle.own(PaperSqlServices.installConsumer(this, owner.shutdownDrain))
+        lifecycle.own(PaperSqlServices.installConsumer(this, shutdownDrain))
         val redisService = server.servicesManager.load(ArcRedisService::class.java)
         val dungeonHost = server.servicesManager.load(ArcDungeonConfiguration::class.java)
         val hostReady = try { dungeonHost?.ready() ?: CompletableFuture.completedFuture(null) }
             catch (failure: Throwable) { failStartup(lifecycle, failure); return }
-        val token = lifecycle.tasks.token()
-        owner.predecessor.whenCompleteSync(lifecycle.tasks, token) predecessor@ { _, previousFailure ->
-            if (previousFailure != null) { failStartup(lifecycle, previousFailure); return@predecessor }
-            hostReady.whenCompleteSync(lifecycle.tasks, token) hostReady@ { _, hostFailure ->
-                if (hostFailure != null) { failStartup(lifecycle, hostFailure); return@hostReady }
-                worker.submit { prepareBootstrap() }.whenCompleteSync(lifecycle.tasks, token) prepared@ { prepared, preparationFailure ->
-                    if (preparationFailure != null) { failStartup(lifecycle, preparationFailure); return@prepared }
-                    val candidate = requireNotNull(prepared)
-                    preparedConfiguration = candidate.configuration
-                    val environment = runCatching {
-                        ArcDuelsRestartOnlySettingsValidator.validateReloadEnvironment(this, candidate.configuration) { candidate.arcRedis }
-                    }.getOrElse { failStartup(lifecycle, it); return@prepared }
-                    worker.submit {
-                        val persistence = createPersistence(owner, candidate.configuration)
-                        val redis = if (!candidate.configuration.getBoolean("redis.enabled", false)) null else {
-                            val endpoint = requireNotNull(environment.effectiveRedis)
-                            PaperRedisClient.open(requireNotNull(redisService) { "ARC Redis service is unavailable" }, "ArcDuels",
-                                RedisConnection(endpoint.host, endpoint.port, endpoint.username, endpoint.password),
-                                candidate.configuration.getString("server-id", "duels-1")!!).also { it.retainDuringShutdown(); owner.redis = it }
-                        }
-                        persistence to redis
-                    }.whenCompleteSync(lifecycle.tasks, token) resources@ { resources, resourceFailure ->
-                        if (resourceFailure != null) { failStartup(lifecycle, resourceFailure); return@resources }
-                        val (persistence, redis) = requireNotNull(resources)
-                        val preference = ArcDuelsRuntimeSettingsParser.parsePreferredArenaSelection(candidate.configuration)
-                        val catalogs = runCatching {
-                            val kits = KitRegistry.loadCandidateAsync(this, candidate.configuration, candidate.loadouts,
-                                candidate.bundledLoadouts, nativeWork, worker)
-                            val arenas = PaperArenaCatalog.loadAsync(this, candidate.configuration, preference, nativeWork, worker)
-                            kits.thenCombine(arenas, ::Pair)
-                        }.getOrElse { failStartup(lifecycle, it); return@resources }
-                        catalogs.whenCompleteSync(lifecycle.tasks, token) { preparedCatalogs, catalogFailure ->
-                            if (catalogFailure != null) failStartup(lifecycle, catalogFailure)
-                            else runCatching { val (kits, arenas) = requireNotNull(preparedCatalogs)
-                                bootstrap(lifecycle, candidate, environment, persistence, redis, kits, arenas)
-                            }.onFailure { failStartup(lifecycle, it) }
-                        }
-                    }
+        // Host readiness may itself need Paper callbacks; maintenance must not join it on this thread.
+        hostReady.whenCompleteSync(lifecycle.tasks) { _, hostFailure ->
+            if (hostFailure != null) { failStartup(lifecycle, hostFailure); return@whenCompleteSync }
+            try {
+                val candidate = prepareBootstrap()
+                preparedConfiguration = candidate.configuration
+                val environment = ArcDuelsRestartOnlySettingsValidator.validateReloadEnvironment(this, candidate.configuration) { candidate.arcRedis }
+                val persistence = createPersistence(candidate.configuration)
+                val redis = if (!candidate.configuration.getBoolean("redis.enabled", false)) null else {
+                    val endpoint = requireNotNull(environment.effectiveRedis)
+                    PaperRedisClient.open(requireNotNull(redisService) { "ARC Redis service is unavailable" }, "ArcDuels",
+                        RedisConnection(endpoint.host, endpoint.port, endpoint.username, endpoint.password),
+                        candidate.configuration.getString("server-id", "duels-1")!!).also { it.retainDuringShutdown(); redisClient = it }
                 }
+                val kits = KitRegistry.loadCandidate(this, candidate.configuration, candidate.loadouts,
+                    bundledLoadouts = candidate.bundledLoadouts)
+                val arenas = PaperArenaCatalog.load(this, candidate.configuration,
+                    preferredArenaSelection = ArcDuelsRuntimeSettingsParser.parsePreferredArenaSelection(candidate.configuration))
+                arenas.prepareNavigationForMaintenance()
+                bootstrap(lifecycle, candidate, environment, persistence, redis, kits, arenas)
+            } catch (failure: Throwable) {
+                failStartup(lifecycle, failure)
             }
         }
     }
@@ -144,7 +128,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val arcRedis: YamlConfiguration?,
     )
 
-    /** Files/resources, repair and pure parsing stay on this runtime's bounded worker. */
+    /** Explicit startup maintenance may prepare files and parse configuration directly. */
     private fun prepareBootstrap(): PreparedBootstrap {
         val root = dataFolder.toPath()
         Files.createDirectories(root)
@@ -166,7 +150,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
     }
 
     private fun failStartup(lifecycle: PaperPluginRuntime, failure: Throwable) {
-        if (generation == null || pluginRuntime !== lifecycle) return
+        if (pluginRuntime !== lifecycle) return
         readiness.completeExceptionally(failure)
         logger.log(java.util.logging.Level.SEVERE, "ArcDuels could not start", failure)
         lifecycle.health.markDown()
@@ -191,15 +175,15 @@ open class ArcDuelsPlugin : JavaPlugin() {
 
     /** Only cached native profiles are read on Paper; exact missing UUIDs use bounded worker NBT IO. */
     internal fun loadPlayerNames(ids: Collection<UUID>): CompletableFuture<Map<UUID, String>> {
-        val owner = generation ?: return CompletableFuture.failedFuture(IllegalStateException("ArcDuels is stopping"))
         val lifecycle = pluginRuntime ?: return CompletableFuture.failedFuture(IllegalStateException("ArcDuels is stopping"))
+        val activeWorker = worker
         if (ids.isEmpty()) return CompletableFuture.completedFuture(emptyMap())
         val token = lifecycle.tasks.token()
         return lifecycle.tasks.callSync(token) {
             val cached = ids.associateWith { id -> server.getPlayer(id)?.name ?: server.getOfflinePlayer(id).playerProfile.name }
             val missing = cached.filterValues { it == null }.keys
             Triple(cached, missing, if (missing.isEmpty()) null else PaperOfflinePlayerData.capture(server))
-        }.thenCompose { (cached, missing, offline) -> owner.worker.submit {
+        }.thenCompose { (cached, missing, offline) -> activeWorker.submit {
             val saved = offline?.names(missing)
             if (saved?.failures?.isNotEmpty() == true) {
                 logger.warning("Could not read ${saved.failures.size} requested offline player names")
@@ -209,41 +193,52 @@ open class ArcDuelsPlugin : JavaPlugin() {
     }
 
     override fun onDisable() {
-        val owner = generation
-        generation = null
+        val lifecycle = pluginRuntime ?: return
+        pluginRuntime = null
         if (!readiness.isDone) readiness.cancel(false)
         DuelLog.info("plugin-disable", "shutting down runtime-owned sessions and resources")
-        if (::nativeWork.isInitialized) nativeWork.close()
-        runCatching { pluginRuntime?.close() }
-            .onFailure { failure -> logger.severe("ArcDuels runtime shutdown failed: ${failure.javaClass.simpleName}: ${failure.message}") }
-        pluginRuntime = null
+        var failure: Throwable? = null
+        fun attempt(operation: () -> Unit) {
+            try { operation() } catch (error: Throwable) {
+                val previous = failure
+                if (previous == null) failure = error else if (previous !== error) previous.addSuppressed(error)
+            }
+        }
+        attempt { lifecycle.tasks.close() }
+        attempt { nativeWork.close() }
+        attempt { lifecycle.close() }
         sessions = null
         challengeRegistry = null
         configReloader = null
         runtimeSettingsState = null
-        if (owner != null) {
-            val actualDrain = owner.worker.closeAsync {
+        // Scope cancellation precedes the FIFO drain. These final operations use detached data/JDBC only.
+        attempt {
+            worker.closeAsync {
                 var terminalFailure: Throwable? = null
-                fun attempt(operation: () -> Unit) {
-                    try { operation() } catch (failure: Throwable) {
+                fun finish(operation: () -> Unit) {
+                    try { operation() } catch (error: Throwable) {
                         val previous = terminalFailure
-                        if (previous == null) terminalFailure = failure else previous.addSuppressed(failure)
+                        if (previous == null) terminalFailure = error else if (previous !== error) previous.addSuppressed(error)
                     }
                 }
-                attempt { owner.rollback?.flushPending() }
-                attempt { owner.retentions.join() }
-                attempt { owner.redis?.close() }
-                attempt { owner.repository?.close() }
+                finish { blockRollback?.flushPending() }
+                finish { retentions.join() }
+                finish { redisClient?.close() }
+                finish { repository?.close() }
                 terminalFailure?.let { throw it }
-            }
-            predecessor = CompletableFuture.allOf(owner.predecessor, actualDrain).thenApply { Unit }
-            actualDrain.whenComplete { _, failure ->
-                if (failure == null) owner.shutdownDrain.complete(Unit) else {
-                    failedGeneration = owner // Preserve failed detached records for diagnostics/retry; next admission stays blocked.
-                    owner.shutdownDrain.completeExceptionally(failure)
-                    logger.log(java.util.logging.Level.SEVERE, "ArcDuels terminal recovery drain failed; next generation remains unavailable", failure)
-                }
-            }
+            }.join()
+        }
+        val terminalFailure = failure
+        if (terminalFailure == null) {
+            shutdownDrain.complete(Unit)
+            blockRollback = null
+            redisClient = null
+            repository = null
+        } else {
+            // Retain failed detached records in their existing owner; do not start a replacement runtime.
+            shutdownDrain.completeExceptionally(terminalFailure)
+            logger.log(java.util.logging.Level.SEVERE, "ArcDuels terminal recovery drain failed", terminalFailure)
+            throw terminalFailure
         }
     }
 
@@ -254,7 +249,6 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private fun bootstrap(lifecycle: PaperPluginRuntime, prepared: PreparedBootstrap,
         restartOnlyEnvironment: ArcDuelsRestartOnlyEnvironment, persistence: Persistence, redis: PaperRedisClient?,
         kits: KitRegistry, arenas: PaperArenaCatalog) {
-        val owner = requireNotNull(generation)
         val initialRuntime =
             ArcDuelsRuntimeSettingsParser.parse(
                 config,
@@ -312,7 +306,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             logger.info("Player data synchronization provider: NONE; this node will host cross-server kit arenas only")
         }
         val blockRollback = DuelBlockRollback(this, lifecycle.tasks, nativeWork, worker, server.structureManager)
-        owner.rollback = blockRollback
+        this.blockRollback = blockRollback
         val pendingLoad = if (persistence.durable && settings.playerStateMode == PlayerStateMode.PRESERVE)
             playerStates.loadPending(config.getLong("mysql.pool.connection-timeout-ms", 10_000L) + 30_000L)
         else CompletableFuture.completedFuture(0)
@@ -361,7 +355,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 blockRollback = blockRollback,
             )
         sessions = sessionManager
-        lifecycle.own(AutoCloseable { sessionManager.shutdown(); owner.retentions = playerStates.drainRetentions() })
+        lifecycle.own(AutoCloseable { try { sessionManager.shutdown() } finally { retentions = playerStates.drainRetentions() } })
         val multiplayerChunkTickets = lifecycle.own(PaperChunkTicketRegistry(this))
         val multiplayerSessions =
             MultiplayerSessionManager(
@@ -500,7 +494,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 locales,
                 serverNames,
                 controller::hasReturnOffer,
-                reloadAsync = { reloader.reloadAsync(worker, nativeWork, lifecycle.tasks) },
+                reloadAction = reloader::reload,
                 saveAsync = ::persistConfiguration,
                 configGeneration = { liveRuntime.snapshot().generation },
                 startupServerId = serverId,
@@ -624,7 +618,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         }
     }
 
-    private fun createPersistence(owner: Generation, config: FileConfiguration): Persistence {
+    private fun createPersistence(config: FileConfiguration): Persistence {
         if (!config.getBoolean("mysql.enabled", false)) {
             val repository = InMemoryStatisticsRepository()
             return Persistence(repository, repository, UnavailablePlayerStateEscrowRepository, repository, durable = false)
@@ -656,7 +650,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             repository.close()
             throw IllegalStateException("MySQL is enabled but its schema could not be prepared", failure)
         }
-        owner.repository = repository
+        this.repository = repository
         return Persistence(repository, repository, repository, repository, durable = true)
     }
 

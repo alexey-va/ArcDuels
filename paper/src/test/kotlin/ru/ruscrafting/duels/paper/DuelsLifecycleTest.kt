@@ -2,63 +2,86 @@ package ru.ruscrafting.duels.paper
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.assertions.throwables.shouldThrow
 import io.mockk.every
 import io.mockk.mockk
 import org.bukkit.Bukkit
 import org.bukkit.OfflinePlayer
-import org.bukkit.plugin.ServicePriority
 import ru.arc.core.BoundedAsyncExecutor
-import ru.arc.dungeons.api.ArcDungeonConfiguration
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.failOnUnsupportedMockBukkitOperation
 import java.io.DataOutputStream
 import java.nio.file.Files
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.Collections
+import ru.arc.paper.redis.PaperRedisClient
+import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.ruscrafting.duels.mysql.MySqlStatisticsRepository
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
-class DuelsGenerationLifecycleTest : StringSpec({
-    "reenable waits actual old worker drain and host readiness without opening new configuration" {
+class DuelsLifecycleTest : StringSpec({
+    "shutdown cancels native callbacks then waits accepted IO and retention before closing resources" {
         failOnUnsupportedMockBukkitOperation {
             MockBukkitTestRuntime.open().use { paper ->
                 val plugin = paper.loadReadyDuelsPlugin()
-                val field = ArcDuelsPlugin::class.java.getDeclaredField("worker").apply { isAccessible = true }
-                val oldWorker = field.get(plugin) as BoundedAsyncExecutor
-                val entered = CountDownLatch(1)
-                val release = CountDownLatch(1)
-                val hostReady = CompletableFuture<Void>()
-                val providerPlugin = paper.createSimplePlugin("DungeonsHost")
-                val host = mockk<ArcDungeonConfiguration> {
-                    every { ready() } answers { check(Bukkit.isPrimaryThread()); hostReady }
-                    every { serverName() } throws AssertionError("No eager host configuration access")
-                }
-                paper.server.servicesManager.register(ArcDungeonConfiguration::class.java, host, providerPlugin, ServicePriority.Normal)
-                oldWorker.submit { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+                fun field(name: String) = ArcDuelsPlugin::class.java.getDeclaredField(name).apply { isAccessible = true }
+                val worker = field("worker").get(plugin) as BoundedAsyncExecutor
+                val lifecycle = field("pluginRuntime").get(plugin) as PaperPluginRuntime
+                val token = lifecycle.tasks.token()
+                val order = Collections.synchronizedList(mutableListOf<String>())
+                val accepted = worker.submit { order += "accepted-io" }
+                val retained = CompletableFuture<Unit>()
+                val session = field("sessions").get(plugin) as DuelSessionManager
+                val states = DuelSessionManager::class.java.getDeclaredField("playerStates").apply { isAccessible = true }
+                    .get(session) as DurablePlayerStateService
+                @Suppress("UNCHECKED_CAST")
+                val pendingRetentions = DurablePlayerStateService::class.java.getDeclaredField("retentions").apply { isAccessible = true }
+                    .get(states) as MutableMap<UUID, CompletableFuture<Unit>>
+                pendingRetentions[UUID.randomUUID()] = retained
+                val terminalFailure = IllegalStateException("injected repository close failure")
+                field("blockRollback").set(plugin, mockk<DuelBlockRollback> {
+                    every { flushPending() } answers {
+                        check(!Bukkit.isPrimaryThread())
+                        lifecycle.tasks.isCurrent(token) shouldBe false
+                        accepted.isDone shouldBe true
+                        order += "flush"
+                        CompletableFuture.delayedExecutor(50, TimeUnit.MILLISECONDS).execute {
+                            order += "retention"
+                            retained.complete(Unit)
+                        }
+                    }
+                })
+                field("redisClient").set(plugin, mockk<PaperRedisClient> {
+                    every { close() } answers {
+                        check(!Bukkit.isPrimaryThread())
+                        retained.isDone shouldBe true
+                        order += "redis-close"
+                        Unit
+                    }
+                })
+                field("repository").set(plugin, mockk<MySqlStatisticsRepository> {
+                    every { close() } answers {
+                        check(!Bukkit.isPrimaryThread())
+                        retained.isDone shouldBe true
+                        order += "repository-close"
+                        throw terminalFailure
+                    }
+                })
                 try {
-                    entered.await(5, TimeUnit.SECONDS) shouldBe true
-                    paper.server.pluginManager.disablePlugin(plugin)
-                    plugin.drained().isDone shouldBe false
+                    shouldThrow<CompletionException> { plugin.onDisable() }.cause shouldBe terminalFailure
+                    accepted.get(0, TimeUnit.SECONDS)
+                    retained.isDone shouldBe true
+                    order.toList() shouldBe listOf("accepted-io", "flush", "retention", "redis-close", "repository-close")
+                    plugin.drained().isCompletedExceptionally shouldBe true
+                    worker.submit { Unit }.isCompletedExceptionally shouldBe true
                     plugin.onDisable()
-                    plugin.drained().isDone shouldBe false
-                    paper.server.pluginManager.enablePlugin(plugin)
-                    paper.performTicks(2)
-                    plugin.ready().isDone shouldBe false
-                    runCatching { plugin.config }.isFailure shouldBe true
-                    release.countDown()
-                    plugin.drained().get(5, TimeUnit.SECONDS)
-                    paper.performTicks(2)
-                    plugin.ready().isDone shouldBe false
-                    runCatching { plugin.config }.isFailure shouldBe true
-                    hostReady.complete(null)
-                    awaitDuels(paper, plugin.ready())
-                    plugin.isEnabled shouldBe true
                 } finally {
-                    release.countDown()
-                    hostReady.complete(null)
+                    retained.complete(Unit)
                     paper.server.pluginManager.disablePlugin(plugin)
-                    plugin.drained().get(5, TimeUnit.SECONDS)
                 }
             }
         }

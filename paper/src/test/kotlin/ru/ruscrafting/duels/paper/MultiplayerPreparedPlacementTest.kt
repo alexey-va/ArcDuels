@@ -51,6 +51,13 @@ class MultiplayerPreparedPlacementTest : StringSpec({
                     arena.assignSpawns(roster) shouldBe expected[index]
                 }
                 nativeCalls shouldBe preparedCalls
+                arena.prepareMultiplayerForMaintenance()
+                val maintenanceCalls = nativeCalls
+                rosters.forEachIndexed { index, roster ->
+                    arena.supports(roster) shouldBe true
+                    arena.assignSpawns(roster) shouldBe expected[index]
+                }
+                nativeCalls shouldBe maintenanceCalls
             } finally { queue.close(); scope.close() }
         }
     }

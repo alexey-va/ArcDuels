@@ -195,6 +195,12 @@ data class PaperArena(
             if (DuelMode.KIT !in allowedLoadouts) CompletableFuture.completedFuture<Map<List<Int>, List<Location>>>(emptyMap())
             else MultiplayerSpawnPlanner.prepare(this, queue)
         }.thenApply { prepared -> multiplayerPlans = prepared; Unit }
+
+    internal fun prepareMultiplayerForMaintenance() {
+        multiplayerNavigation.prepareForMaintenance()
+        multiplayerPlans = if (DuelMode.KIT !in allowedLoadouts) emptyMap()
+            else MultiplayerSpawnPlanner.prepareForMaintenance(this)
+    }
 }
 
 class MultiplayerArenaReservation internal constructor(
@@ -280,6 +286,11 @@ class PaperArenaCatalog private constructor(
     fun prepareNavigation(queue: BudgetedTaskQueue): CompletableFuture<Unit> {
         val prepared = arenas.values.map { it.prepareMultiplayer(queue) }
         return CompletableFuture.allOf(*prepared.toTypedArray()).thenApply { Unit }
+    }
+
+    /** Only startup and explicit manual reload may perform the complete native capture inline. */
+    internal fun prepareNavigationForMaintenance() {
+        arenas.values.forEach(PaperArena::prepareMultiplayerForMaintenance)
     }
 
     fun reserveMultiplayer(roster: MultiplayerRoster): CompletableFuture<MultiplayerArenaReservation> =

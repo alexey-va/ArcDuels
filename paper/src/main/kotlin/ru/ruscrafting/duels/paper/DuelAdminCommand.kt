@@ -26,7 +26,6 @@ internal class DuelAdminCommand(
     private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
     private val configurationBusy: () -> Boolean = { false },
     private val multiplayerSessions: MultiplayerSessionManager? = null,
-    private val reloadAsync: (() -> CompletableFuture<ArcDuelsReloadReport>)? = null,
     private val saveAsync: (() -> CompletableFuture<Unit>)? = null,
 ) {
     private val miniMessage = MiniMessage.miniMessage()
@@ -276,15 +275,6 @@ internal class DuelAdminCommand(
     }
 
     private fun reload(sender: CommandSender) {
-        val asynchronous = reloadAsync
-        if (asynchronous != null) {
-            saving = true
-            asynchronous().whenComplete { report, failure -> runSync {
-                saving = false
-                if (failure != null) reportFailure(sender, failure) else reportReload(sender, requireNotNull(report))
-            } }
-            return
-        }
         val action = reloadAction
         if (action == null) {
             if (!requireIdle(sender)) return
@@ -352,13 +342,8 @@ internal class DuelAdminCommand(
     private fun refreshCatalog(sender: CommandSender, enabled: Boolean,
         onFailure: (Throwable) -> Unit = { reportFailure(sender, it) }, done: (Int) -> Unit) {
         if (!enabled) { done(arenas.size()); return }
-        saving = true
-        val refreshed = runCatching { reloadAsync?.invoke()?.thenApply { it.arenaCount }
-            ?: CompletableFuture.completedFuture(arenas.reload(plugin)) }.getOrElse { CompletableFuture.failedFuture(it) }
-        refreshed.whenComplete { count, failure -> runSync {
-            saving = false
-            if (failure != null) onFailure(failure) else done(requireNotNull(count))
-        } }
+        runCatching { reloadAction?.invoke()?.getOrThrow()?.arenaCount ?: arenas.reload(plugin) }
+            .onSuccess(done).onFailure(onFailure)
     }
 
     private fun list(sender: CommandSender) {

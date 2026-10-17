@@ -91,7 +91,7 @@ internal class ArcDuelsConfigReloader(
                         plugin,
                         configuration,
                         preferredArenaSelection = settings.settings.preferredArenaSelection,
-                    ),
+                    ).also { it.prepareNavigationForMaintenance() },
                     kits =
                         KitRegistry.loadCandidate(
                             plugin,

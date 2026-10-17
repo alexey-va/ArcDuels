@@ -20,12 +20,10 @@ class ArcDuelsReloadCommandMockBukkitTest : StringSpec({
             admin.setLocale(java.util.Locale.forLanguageTag("ru-RU"))
 
             admin.performCommand("duel admin reload") shouldBe true
-            paper.awaitDuelsAdminIdle(plugin)
             plugin.currentConfigGeneration() shouldBe 2L
             admin.drainPlainMessages().single().contains("Конфигурация v2 применена") shouldBe true
 
             admin.performCommand("duel admin arena reload") shouldBe true
-            paper.awaitDuelsAdminIdle(plugin)
             plugin.currentConfigGeneration() shouldBe 3L
             admin.drainPlainMessages().single().contains("Конфигурация v3 применена") shouldBe true
 
