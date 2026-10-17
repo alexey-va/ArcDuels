@@ -16,8 +16,20 @@ export async function isolateCombatWorld(player, server) {
 export async function invite(player, opponent, loadout = 'Own inventory') {
   const sent = player.messageBuffer.length;
   const received = opponent.messageBuffer.length;
-  player.chat(`/duel ${opponent.username}`);
-  const objectives = await player.gui({ title: /Objective/ });
+  // Paper can accept connections while the asynchronous plugin bootstrap is still preparing.
+  // Opening this first menu is read-only; no challenge exists until the final Rules click below.
+  let objectives;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    player.chat(`/duel ${opponent.username}`);
+    try {
+      objectives = await player.gui({ title: /Objective/, timeout: 1000 });
+      break;
+    } catch (error) {
+      if (!String(error?.message).includes('Timeout waiting for GUI with title matching pattern') || attempt === 14) {
+        throw error;
+      }
+    }
+  }
   await objectives.locator(i => i.getDisplayName().includes('Elimination')).click();
   const loadouts = await player.gui({ title: /Loadout/ });
   await loadouts.locator(i => i.getDisplayName().includes(loadout)).click();
