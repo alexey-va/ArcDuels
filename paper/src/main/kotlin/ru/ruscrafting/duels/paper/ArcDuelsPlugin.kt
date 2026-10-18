@@ -87,7 +87,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         retentions = CompletableFuture.completedFuture(Unit)
         val lifecycle = PaperPluginRuntime(this, "arc-duels").also { pluginRuntime = it; it.start("version" to pluginMeta.version) }
         worker = BoundedAsyncExecutor("ArcDuels-storage", 1, 256)
-        nativeWork = BudgetedTaskQueue(lifecycle.tasks, 128, 2_000_000L, System::nanoTime, 4096)
+        nativeWork = BudgetedTaskQueue(lifecycle.tasks, 512, 4_000_000L, System::nanoTime, 4096)
         lifecycle.own(PaperSqlServices.installConsumer(this, shutdownDrain))
         val redisService = server.servicesManager.load(ArcRedisService::class.java)
         val dungeonHost = server.servicesManager.load(ArcDungeonConfiguration::class.java)
