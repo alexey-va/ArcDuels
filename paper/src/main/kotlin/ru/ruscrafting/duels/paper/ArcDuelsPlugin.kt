@@ -6,7 +6,6 @@ import ru.arc.core.BoundedAsyncExecutor
 import ru.arc.core.BudgetedTaskQueue
 import ru.arc.core.whenCompleteSync
 import ru.arc.paper.api.ArcRedisService
-import ru.arc.dungeons.api.ArcDungeonConfiguration
 import org.bukkit.configuration.file.FileConfiguration
 import org.bukkit.configuration.file.YamlConfiguration
 import java.nio.file.Files
@@ -90,8 +89,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         nativeWork = BudgetedTaskQueue(lifecycle.tasks, 512, 4_000_000L, System::nanoTime, 4096)
         lifecycle.own(PaperSqlServices.installConsumer(this, shutdownDrain))
         val redisService = server.servicesManager.load(ArcRedisService::class.java)
-        val dungeonHost = server.servicesManager.load(ArcDungeonConfiguration::class.java)
-        val hostReady = try { dungeonHost?.ready() ?: CompletableFuture.completedFuture(null) }
+        val hostReady = try { ArcDungeonsHostReadiness.ready(server) }
             catch (failure: Throwable) { failStartup(lifecycle, failure); return }
         // Host readiness may itself need Paper callbacks; maintenance must not join it on this thread.
         hostReady.whenCompleteSync(lifecycle.tasks) { _, hostFailure ->

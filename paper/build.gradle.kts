@@ -85,6 +85,20 @@ tasks.assemble {
     dependsOn(tasks.shadowJar)
 }
 
+val dungeonsApiAbsentTest = tasks.register<Test>("dungeonsApiAbsentTest") {
+    description = "Bootstraps ArcDuels with the optional ArcDungeons API absent from the JVM classpath."
+    group = "verification"
+    dependsOn(tasks.testClasses)
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath.filter {
+        !it.name.startsWith("arc-dungeons-api-") && it.canonicalFile != dungeonsApiJar?.canonicalFile
+    }
+    filter { includeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutDungeonsApiTest") }
+}
+tasks.test {
+    filter { excludeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutDungeonsApiTest") }
+}
+
 // Isolated real-Paper tests run separately from the fast JVM suite.
 plugwright {
     minecraftVersion.set("1.21.11")
