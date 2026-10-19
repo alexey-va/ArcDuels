@@ -404,7 +404,7 @@ class ArcDuelsPluginTest : StringSpec({
             controller.cancel(challenger)
 
             challenges.find(challenge.id)?.status shouldBe ChallengeStatus.CANCELLED
-            challenger.nextComponentMessage() shouldBe LocaleService.load(plugin).notice(challenger, "controller.network-unavailable")
+            challenger.nextComponentMessage() shouldBe LocaleService.load(plugin).component(challenger, "controller.network-unavailable")
             verify(exactly = 1) { bus.publish(match { it.type == ChallengeMessageType.RESOLUTION }) }
         } finally {
             controller.close()

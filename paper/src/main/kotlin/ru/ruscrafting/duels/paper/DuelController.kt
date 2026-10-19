@@ -194,7 +194,7 @@ class DuelController(
                 } else {
                     val bus = challengeBus ?: run {
                         challenges.registerResolution(challenge.resolve(ChallengeStatus.CANCELLED, clock.instant()))
-                        challenger.sendMessage(locales.notice(challenger, "controller.network-unavailable"))
+                        challenger.sendMessage(locales.component(challenger, "controller.network-unavailable"))
                         return@onSuccess
                     }
                     val published = publishMessage(
@@ -220,7 +220,7 @@ class DuelController(
                             challenges.resolve(challenge.id, challenge.challenger, ChallengeStatus.CANCELLED)
                         }
                         contexts.remove(challenge.id)
-                        challenger.sendMessage(locales.notice(challenger, "controller.network-unavailable"))
+                        challenger.sendMessage(locales.component(challenger, "controller.network-unavailable"))
                         return@onSuccess
                     }
                 }
@@ -249,7 +249,7 @@ class DuelController(
         }
         val bothLocal = participants(challenge).size == 2
         if (!bothLocal && challengeBus == null) {
-            player.sendMessage(locales.notice(player, "controller.network-unavailable"))
+            player.sendMessage(locales.component(player, "controller.network-unavailable"))
             return
         }
         val requiredKitFingerprint = contexts[challenge.id]?.kitFingerprint
@@ -294,7 +294,7 @@ class DuelController(
             scheduleAcceptedMatch(accepted, localServer)
         } else {
             if (!publishResolution(accepted, requireNotNull(matchServer))) {
-                participants(accepted).forEach { it.sendMessage(locales.notice(it, "controller.network-unavailable")) }
+                participants(accepted).forEach { it.sendMessage(locales.component(it, "controller.network-unavailable")) }
             }
         }
     }
@@ -323,7 +323,7 @@ class DuelController(
                     participants(resolved).size == 2 || challengeBus == null ->
                         participants(resolved).forEach { it.sendMessage(locales.notice(it, noticeKey)) }
                     !publishResolution(resolved, null) ->
-                        player.sendMessage(locales.notice(player, "controller.network-unavailable"))
+                        player.sendMessage(locales.component(player, "controller.network-unavailable"))
                 }
             }
             .onFailure { player.sendMessage(locales.notice(player, "controller.failed")) }
@@ -574,7 +574,7 @@ class DuelController(
         )
         if (!isLoadoutAllowed(message.challenge.rules.mode) || sessions.isEngaged(target) || sessions.isStateLocked(target) || PlayerId(target.uniqueId) in networkPendingPlayers) {
             if (!publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)) {
-                target.sendMessage(locales.notice(target, "controller.network-unavailable"))
+                target.sendMessage(locales.component(target, "controller.network-unavailable"))
             }
             return
         }
@@ -586,7 +586,7 @@ class DuelController(
             .onFailure {
                 plugin.logger.warning("Rejected network challenge ${message.challenge.id}: ${it.message}")
                 if (!publishResolution(message.challenge.resolve(ChallengeStatus.DENIED, clock.instant()), null)) {
-                    target.sendMessage(locales.notice(target, "controller.network-unavailable"))
+                    target.sendMessage(locales.component(target, "controller.network-unavailable"))
                 }
             }
     }
@@ -782,7 +782,7 @@ class DuelController(
                     "${it.name}:locked=${sessions.isStateLocked(it)},ready=${playerDataReady(it)},engaged=${sessions.isEngaged(it)}"
                 },
             )
-            participants(challenge).forEach { it.sendMessage(locales.notice(it, "controller.network-timeout")) }
+            participants(challenge).forEach { it.sendMessage(locales.component(it, "controller.network-timeout")) }
             returnAcceptedPlayers(accepted)
             stopAcceptedMatch(challengeId)
             return
@@ -817,7 +817,7 @@ class DuelController(
                             accepted.host.value,
                         )
                         player.sendMessage(
-                            locales.notice(
+                            locales.component(
                                 player,
                                 "controller.network-transfer",
                                 LocaleService.component("server", serverNames.display(accepted.host)),
@@ -1062,7 +1062,7 @@ class DuelController(
                 destination.value,
                 result?.name ?: "UNAVAILABLE",
             )
-            player.sendMessage(locales.notice(player, "controller.network-unavailable"))
+            player.sendMessage(locales.component(player, "controller.network-unavailable"))
         }
         return result
     }
