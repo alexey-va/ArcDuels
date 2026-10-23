@@ -4,6 +4,9 @@ import chat from 'prismarine-chat';
 import { test, expect, waitUntil } from '@drownek/plugwright';
 import { invite, isolateCombatWorld } from './support.js';
 
+// The 4s finale plus one 3s durable archival retry exceeds Plugwright's 5s default.
+const RESULT_TIMEOUT = 15000;
+
 function count(player, name) {
   return player.bot.inventory.items().filter(item => item.name === name).reduce((n, item) => n + item.count, 0);
 }
@@ -93,7 +96,7 @@ test('classic kit melee victory restores both exact inventories and releases the
     player.bot.clearControlStates();
   }
   assert.ok(sawDamage, 'The opponent must take real combat damage');
-  await waitUntil(() => outcome.secondTitles.includes('Defeat'), { signal });
+  await waitUntil(() => outcome.secondTitles.includes('Defeat'), { timeout: RESULT_TIMEOUT, signal });
   await restored(player, first, signal);
   await restored(opponent, second, signal);
   await expect(player).toHaveReceivedMessage(`Victory over ${opponent.username}`);
@@ -116,7 +119,7 @@ test('own-inventory forfeit preserves consumed items and returns both players sa
   const afterConsumption = inventory(player);
   player.chat('/duel leave');
   await expect(player).toHaveReceivedMessage('You forfeited. Saving the result');
-  await waitUntil(() => outcome.secondTitles.includes('Victory'), { signal });
+  await waitUntil(() => outcome.secondTitles.includes('Victory'), { timeout: RESULT_TIMEOUT, signal });
   await restored(player, first, signal, false);
   await restored(opponent, second, signal);
   assert.equal(inventory(player), afterConsumption, 'Recovery must not refund the consumed apple');
@@ -133,7 +136,7 @@ test('disconnect during a kit fight restores the player on reconnect without kee
   assert.equal(count(opponent, 'emerald'), 0);
   assert.equal(count(opponent, 'diamond_sword'), 1);
   await opponent.rejoin();
-  await waitUntil(() => outcome.firstTitles.includes('Victory'), { signal });
+  await waitUntil(() => outcome.firstTitles.includes('Victory'), { timeout: RESULT_TIMEOUT, signal });
   await restored(player, first, signal);
   await restored(opponent, second, signal);
   await expect(player).toHaveReceivedMessage(`Victory over ${opponent.username}`);

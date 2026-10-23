@@ -3,9 +3,9 @@ name: build
 on:
   push:
     branches: [main]
-    paths-ignore: ['**/*.md', 'docs/**', '.agents/**', '.codex/**', 'paper/src/test/e2e/**']
+    paths-ignore: ['**/*.md', 'docs/**', '.agents/**', '.codex/**']
   pull_request:
-    paths-ignore: ['**/*.md', 'docs/**', '.agents/**', '.codex/**', 'paper/src/test/e2e/**']
+    paths-ignore: ['**/*.md', 'docs/**', '.agents/**', '.codex/**']
   workflow_dispatch:
 
 permissions:
