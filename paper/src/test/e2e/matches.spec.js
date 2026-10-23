@@ -17,6 +17,24 @@ function inventory(player) {
   }));
 }
 
+async function waitForState(player, marker, expectedInventory, predicate, options) {
+  try {
+    await waitUntil(predicate, options);
+  } catch (error) {
+    const actualInventory = inventory(player);
+    const position = player.bot.entity?.position;
+    const actual = {
+      position: position ? [position.x, position.y, position.z] : null,
+      health: player.bot.health,
+      xpLevel: player.bot.experience.level,
+      marker: { name: marker, count: count(player, marker) },
+      inventoryMatches: expectedInventory === undefined ? undefined : actualInventory === expectedInventory,
+      inventory: JSON.parse(actualInventory).flatMap((item, slot) => item ? [{ slot: slot + 5, ...item }] : []),
+    };
+    throw new Error(`${error.message}; actual=${JSON.stringify(actual)}`, { cause: error });
+  }
+}
+
 function titles(player) {
   const received = [];
   const ChatMessage = chat(player.bot.registry);
@@ -35,7 +53,9 @@ async function seed(player, server, x, marker, signal) {
   server.execute(`minecraft:experience set ${player.username} 7 levels`);
   server.execute(`minecraft:tellraw ${player.username} {"text":"${sync}"}`);
   await expect(player).toHaveReceivedMessage(sync);
-  await waitUntil(() => count(player, marker) === 3 && player.bot.experience.level === 7, { signal });
+  await waitForState(player, marker, undefined,
+    () => count(player, marker) === 3 && player.bot.experience.level === 7,
+    { signal, message: `${player.username}: seed requires ${marker}=3 and XP level=7` });
   return { inventory: inventory(player), x, marker };
 }
 
@@ -53,11 +73,13 @@ async function start(player, opponent, loadout, signal) {
 }
 
 async function restored(player, before, signal, exactInventory = true) {
-  await waitUntil(() => Math.abs(player.bot.entity.position.x - before.x) < 0.5 &&
+  await waitForState(player, before.marker, exactInventory ? before.inventory : undefined,
+    () => Math.abs(player.bot.entity.position.x - before.x) < 0.5 &&
     Math.abs(player.bot.entity.position.y + 60) < 0.2 &&
     player.bot.experience.level === 7 &&
     (!exactInventory || inventory(player) === before.inventory), {
-    timeout: 15000, signal, message: `${player.username}: original location, XP and inventory must be restored`,
+    timeout: 15000, signal,
+    message: `${player.username}: restore requires x=${before.x}, y=-60, XP level=7, exactInventory=${exactInventory}`,
   });
   assert.equal(count(player, before.marker), 3);
 }
