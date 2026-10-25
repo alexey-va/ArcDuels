@@ -47,6 +47,7 @@ dependencies {
     compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.41")
     compileOnly(staffSpellApiDependency)
     compileOnly(dungeonsApiDependency)
+    compileOnly("ru.ruscrafting.arc:arc-ranks-api:0.1.2")
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("net.william278.husksync:husksync-bukkit:3.8.7+1.21.8")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
@@ -54,6 +55,7 @@ dependencies {
     testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.41")
     testImplementation(staffSpellApiDependency)
     testImplementation(dungeonsApiDependency)
+    testImplementation("ru.ruscrafting.arc:arc-ranks-api:0.1.2")
     testImplementation("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
 }
 
@@ -95,8 +97,17 @@ val dungeonsApiAbsentTest = tasks.register<Test>("dungeonsApiAbsentTest") {
     }
     filter { includeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutDungeonsApiTest") }
 }
+tasks.register<Test>("ranksApiAbsentTest") {
+    description = "Bootstraps ArcDuels with the optional ArcRanks API absent from the JVM classpath."
+    group = "verification"
+    dependsOn(tasks.testClasses)
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath.filter { !it.name.startsWith("arc-ranks-api-") }
+    filter { includeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutRanksApiTest") }
+}
 tasks.test {
     filter { excludeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutDungeonsApiTest") }
+    filter { excludeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutRanksApiTest") }
 }
 
 // Isolated real-Paper tests run separately from the fast JVM suite.

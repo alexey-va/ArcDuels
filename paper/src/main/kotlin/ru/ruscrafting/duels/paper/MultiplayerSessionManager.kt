@@ -80,6 +80,8 @@ internal class MultiplayerSessionManager(
         val playerStateMode: PlayerStateMode,
         val countdownSeconds: Int,
         val finishDelayTicks: Long,
+        val arenaQuests: ArenaQuestSession? = null,
+        var arenaQuestFrozen: Boolean = false,
         var restoreInFlight: Boolean = false,
         var arrivals: CompletableFuture<Void>? = null,
         var waitingForArrivals: Boolean = false,
@@ -497,6 +499,7 @@ internal class MultiplayerSessionManager(
                     playerStateMode,
                     countdownSeconds = policy.countdownSeconds,
                     finishDelayTicks = policy.finishDelayTicks,
+                    arenaQuests = captureArenaQuestSession(roster.playerIds.mapTo(linkedSetOf()) { it.value }),
                 )
             session = created
             check(sessions.putIfAbsent(matchId, created) == null) { "Multiplayer match id collision" }
@@ -680,6 +683,16 @@ internal class MultiplayerSessionManager(
 
     private fun complete(session: Session) {
         if (sessions[session.match.id] !== session || session.match.state != MultiplayerMatchState.COMPLETING) return
+        if (!session.arenaQuestFrozen) {
+            val present = participants(session).mapTo(hashSetOf()) { PlayerId(it.uniqueId) }
+            val roster = session.match.roster
+            val groups = if (roster.rules.layout.teamCount == null) listOf(present.mapTo(linkedSetOf()) { it.value })
+                else roster.participants.filter { it.playerId in present }.groupBy { it.team }.values.map { side ->
+                    side.mapTo(linkedSetOf()) { it.playerId.value }
+                }
+            session.arenaQuests?.freeze(groups)
+            session.arenaQuestFrozen = true
+        }
         results.record(session.match.outcome()).whenCompleteSync(tasks) { _, failure ->
             if (sessions[session.match.id] !== session || session.match.state != MultiplayerMatchState.COMPLETING) {
                 return@whenCompleteSync
@@ -698,6 +711,8 @@ internal class MultiplayerSessionManager(
                 return@whenCompleteSync
             }
             session.match = session.match.markPersisted()
+            session.arenaQuests?.publish(session.match.id.value.toString(), session.match.endReason,
+                requireNotNull(session.match.completedAt))
             participants(session).forEach { player ->
                 val won = PlayerId(player.uniqueId) in session.match.winners
                 audience.sendMessage(

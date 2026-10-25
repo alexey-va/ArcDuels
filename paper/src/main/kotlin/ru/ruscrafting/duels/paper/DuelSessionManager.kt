@@ -893,6 +893,7 @@ class DuelSessionManager internal constructor(
             match.score.second,
             match.rules.objective,
         )
+        sessions[match.id]?.arenaQuests?.freeze(listOf(participants(match).mapTo(linkedSetOf()) { it.uniqueId }))
         coordinator.recordRoundWinner(match.id, winner).whenComplete { updated, failure ->
             runSync { handleRoundResult(match.id, winner, updated, failure) }
         }
@@ -1243,6 +1244,7 @@ class DuelSessionManager internal constructor(
                 returnLocations = returnLocations,
                 playerStateMode = playerStateMode,
                 policy = policy,
+                arenaQuests = captureArenaQuestSession(participantIds),
             )
         sessions[match.id] = session
         session.participantIds.forEach { sessionByPlayer[it] = match.id }
@@ -1840,6 +1842,7 @@ class DuelSessionManager internal constructor(
             return
         }
         if (!session.finishing.compareAndSet(false, true)) return
+        session.arenaQuests?.publish(match.id.value.toString(), match.endReason, requireNotNull(match.completedAt))
         if (match.rules.kitId?.let(kits::get)?.magic == true) resetMagicDuelPlayers(session.participantIds)
         DuelLog.info(
             "match-complete",
@@ -2421,6 +2424,7 @@ class DuelSessionManager internal constructor(
         val returnLocations: Map<UUID, org.bukkit.Location>,
         val playerStateMode: PlayerStateMode,
         val policy: SessionRuntimePolicy,
+        val arenaQuests: ArenaQuestSession? = null,
         val arenaAnchors: MutableMap<UUID, org.bukkit.Location> = ConcurrentHashMap(),
         val restoredPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet(),
         val hillCapture: HillCaptureTracker = HillCaptureTracker(),

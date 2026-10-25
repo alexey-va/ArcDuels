@@ -9,7 +9,7 @@ plugins {
 
 allprojects {
     group = "ru.ruscrafting.duels"
-    version = "0.11.21"
+    version = "0.11.22"
 }
 
 subprojects {
@@ -50,4 +50,5 @@ tasks.register("testAll") {
     group = "verification"
     dependsOn(subprojects.map { it.tasks.named("test") })
     dependsOn(":paper:dungeonsApiAbsentTest")
+    dependsOn(":paper:ranksApiAbsentTest")
 }
