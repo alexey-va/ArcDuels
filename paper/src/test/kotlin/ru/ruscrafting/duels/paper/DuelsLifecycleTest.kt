@@ -72,7 +72,8 @@ class DuelsLifecycleTest : StringSpec({
                     }
                 })
                 try {
-                    shouldThrow<CompletionException> { plugin.onDisable() }.cause shouldBe terminalFailure
+                    plugin.onDisable()
+                    shouldThrow<CompletionException> { plugin.drained().join() }.cause shouldBe terminalFailure
                     accepted.get(0, TimeUnit.SECONDS)
                     retained.isDone shouldBe true
                     order.toList() shouldBe listOf("accepted-io", "flush", "retention", "redis-close", "repository-close")
@@ -82,6 +83,35 @@ class DuelsLifecycleTest : StringSpec({
                 } finally {
                     retained.complete(Unit)
                     paper.server.pluginManager.disablePlugin(plugin)
+                }
+            }
+        }
+    }
+
+    "maintenance retires gameplay while status survives and two same-instance generations register once" {
+        failOnUnsupportedMockBukkitOperation {
+            MockBukkitTestRuntime.open().use { paper ->
+                val plugin = paper.loadReadyDuelsPlugin()
+                val listeners = org.bukkit.event.HandlerList.getRegisteredListeners(plugin).size
+                repeat(2) { cycle ->
+                    val gameplay = requireNotNull(plugin.getCommand("duel"))
+                    val previousExecutor = gameplay.executor
+                    repeat(2) {
+                        paper.server.dispatchCommand(paper.server.consoleSender, "arcduels:hotload prepare") shouldBe true
+                    }
+                    plugin.isEnabled shouldBe true
+                    plugin.drained().join()
+                    org.bukkit.event.HandlerList.getRegisteredListeners(plugin).isEmpty() shouldBe true
+                    (gameplay.executor === previousExecutor) shouldBe false
+                    paper.server.dispatchCommand(paper.server.consoleSender, "arcduels:hotload status") shouldBe true
+                    paper.server.pluginManager.disablePlugin(plugin)
+                    paper.server.commandMap.getCommand("arcduels:hotload") shouldBe null
+                    if (cycle == 0) {
+                        paper.server.pluginManager.enablePlugin(plugin)
+                        awaitDuels(paper, plugin.ready())
+                        org.bukkit.event.HandlerList.getRegisteredListeners(plugin).size shouldBe listeners
+                        (plugin.getCommand("duel")?.executor is DuelCommand) shouldBe true
+                    }
                 }
             }
         }

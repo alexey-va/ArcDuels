@@ -14,6 +14,8 @@ import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.network.BackendTransferResult
 import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.arc.paper.runtime.PaperPluginHotload
+import ru.arc.logging.ArcLogging
 import ru.arc.paper.chunk.PaperChunkTicketRegistry
 import ru.arc.redis.RedisConnection
 import ru.arc.paper.redis.PaperRedisClient
@@ -60,6 +62,17 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private var blockRollback: DuelBlockRollback? = null
     private var retentions = CompletableFuture.completedFuture(Unit)
     private var shutdownDrain = CompletableFuture.completedFuture(Unit)
+    private var storageDrain = CompletableFuture.completedFuture(Unit)
+    private var installedScheduler: ru.arc.core.TaskScheduler? = null
+    private val hotload = PaperPluginHotload(this) {
+        val failure = runCatching(::stopRuntime).exceptionOrNull()
+        linkedMapOf(
+            "storage" to storageDrain,
+            "recovery" to retentions,
+            "close" to (failure?.let { CompletableFuture.failedFuture<Unit>(it) }
+                ?: CompletableFuture.completedFuture(Unit)),
+        )
+    }
     @Volatile private var preparedConfiguration: YamlConfiguration? = null
     private var pluginRuntime: PaperPluginRuntime? = null
     private var sessions: DuelSessionManager? = null
@@ -74,15 +87,20 @@ open class ArcDuelsPlugin : JavaPlugin() {
     override fun getConfig(): FileConfiguration = requireNotNull(preparedConfiguration) { "ArcDuels configuration is preparing" }
 
     override fun onEnable() {
-        if (shutdownDrain.isCompletedExceptionally) {
-            logger.severe("ArcDuels terminal recovery drain failed; restart after repairing durable recovery")
+        try {
+            hotload.beginGeneration()
+            hotload.register()
+        } catch (failure: Throwable) {
+            logger.log(java.util.logging.Level.SEVERE, "ArcDuels startup refused: previous cleanup must finish successfully", failure)
             server.pluginManager.disablePlugin(this)
             return
         }
         PaperArcRuntime.installScheduling(this)
+        installedScheduler = ru.arc.core.Tasks.scheduler
         readiness = CompletableFuture()
         preparedConfiguration = null
         shutdownDrain = CompletableFuture()
+        storageDrain = CompletableFuture.completedFuture(Unit)
         retentions = CompletableFuture.completedFuture(Unit)
         val lifecycle = PaperPluginRuntime(this, "arc-duels").also { pluginRuntime = it; it.start("version" to pluginMeta.version) }
         worker = BoundedAsyncExecutor("ArcDuels-storage", 1, 256)
@@ -191,6 +209,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
     }
 
     override fun onDisable() {
+        try { hotload.prepare() } finally { hotload.close() }
+    }
+
+    private fun stopRuntime() {
         val lifecycle = pluginRuntime ?: return
         pluginRuntime = null
         if (!readiness.isDone) readiness.cancel(false)
@@ -211,7 +233,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         runtimeSettingsState = null
         // Scope cancellation precedes the FIFO drain. These final operations use detached data/JDBC only.
         attempt {
-            worker.closeAsync {
+            storageDrain = worker.closeAsync {
                 var terminalFailure: Throwable? = null
                 fun finish(operation: () -> Unit) {
                     try { operation() } catch (error: Throwable) {
@@ -224,8 +246,13 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 finish { redisClient?.close() }
                 finish { repository?.close() }
                 terminalFailure?.let { throw it }
-            }.join()
+            }
+            storageDrain.join()
         }
+        attempt { hotload.retireGameplayRegistrations() }
+        val scheduler = installedScheduler.also { installedScheduler = null }
+        attempt { if (scheduler != null && runCatching { ru.arc.core.Tasks.scheduler }.getOrNull() === scheduler) ru.arc.core.Tasks.reset() }
+        attempt { ArcLogging.close() }
         val terminalFailure = failure
         if (terminalFailure == null) {
             shutdownDrain.complete(Unit)
