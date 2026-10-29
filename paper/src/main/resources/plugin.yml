@@ -5,7 +5,7 @@ api-version: '1.21'
 description: Modern Kotlin duels for RusCrafting
 author: RusCrafting
 depend: [ARC]
-softdepend: [BattlePass, CMI, HuskSync, WorldGuard, ArcDungeons, ArcRanks]
+softdepend: [BattlePass, CMI, HuskSync, WorldGuard, ArcDungeons, ArcRanks, RedisEconomy]
 commands:
   duel:
     description: Open duels or manage a challenge

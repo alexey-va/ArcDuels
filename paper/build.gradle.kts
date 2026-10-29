@@ -49,10 +49,14 @@ dependencies {
     compileOnly(dungeonsApiDependency)
     compileOnly("ru.ruscrafting.arc:arc-ranks-api:0.1.2")
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    compileOnly("com.github.MilkBowl:VaultAPI:1.7") { isTransitive = false }
+    compileOnly("ru.ruscrafting.thirdparty:rediseconomy:4.5.12") { isTransitive = false }
     compileOnly("net.william278.husksync:husksync-bukkit:3.8.7+1.21.8")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.16")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.69")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.69")
+    testImplementation("com.github.MilkBowl:VaultAPI:1.7") { isTransitive = false }
+    testImplementation("ru.ruscrafting.thirdparty:rediseconomy:4.5.12") { isTransitive = false }
     testImplementation(staffSpellApiDependency)
     testImplementation(dungeonsApiDependency)
     testImplementation("ru.ruscrafting.arc:arc-ranks-api:0.1.2")
@@ -108,6 +112,18 @@ tasks.register<Test>("ranksApiAbsentTest") {
 tasks.test {
     filter { excludeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutDungeonsApiTest") }
     filter { excludeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutRanksApiTest") }
+    filter { excludeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutEconomyApiTest") }
+}
+
+tasks.register<Test>("economyApiAbsentTest") {
+    description = "Verifies free duels bootstrap without the optional economy provider API."
+    group = "verification"
+    dependsOn(tasks.testClasses)
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath.filter {
+        !it.name.startsWith("rediseconomy-") && !it.name.startsWith("VaultAPI-")
+    }
+    filter { includeTestsMatching("ru.ruscrafting.duels.paper.ArcDuelsWithoutEconomyApiTest") }
 }
 
 // Isolated real-Paper tests run separately from the fast JVM suite.

@@ -72,6 +72,63 @@ class MatchCoordinatorTest : StringSpec({
         statistics.record(outcome).get().newlyRecorded shouldBe false
     }
 
+    "terminal observer sees a committed series winner or a cancellation" {
+        val stored = InMemoryStatisticsRepository()
+        val observed = mutableListOf<DuelMatch>()
+        val engine = MatchCoordinator(
+            ServerId("spawn"),
+            ArenaAllocator { CompletableFuture.completedFuture(ArenaReservation(ArenaId("one")) {}) },
+            stored,
+            onTerminated = { match ->
+                if (match.winner != null) stored.findMatch(match.id).join()?.outcome?.winner shouldBe match.winner
+                observed += match
+            },
+        )
+        val rules = DuelRules(DuelMode.KIT, KitId("classic"), bestOf = 3, stakeMinor = 10000L)
+        val match = engine.reserve(first, second, rules).join()
+        engine.beginCountdown(match.id)
+        engine.activate(match.id)
+        engine.recordRoundWinner(match.id, first).join()
+        observed shouldHaveSize 0
+        engine.activate(match.id)
+        engine.recordRoundWinner(match.id, first).join()
+        observed shouldHaveSize 1
+        stored.findMatch(match.id).join()?.outcome?.rules?.stakeMinor shouldBe 10000L
+        engine.releaseCompleted(match.id)
+        val cancelled = engine.reserve(first, second, rules).join()
+        engine.cancel(cancelled.id, MatchEndReason.ADMIN_CANCEL)
+        observed shouldHaveSize 2
+        observed.last().winner shouldBe null
+    }
+
+    "shutdown completion drain waits until the durable winner observer has run" {
+        val stored = InMemoryStatisticsRepository()
+        val pending = CompletableFuture<PersistedMatchResult>()
+        lateinit var storedOutcome: MatchOutcome
+        var notified = false
+        val repository = object : StatisticsRepository by stored {
+            override fun record(outcome: MatchOutcome): CompletableFuture<PersistedMatchResult> {
+                storedOutcome = outcome
+                return pending
+            }
+        }
+        val engine = MatchCoordinator(
+            ServerId("spawn"),
+            ArenaAllocator { CompletableFuture.completedFuture(ArenaReservation(ArenaId("one")) {}) },
+            repository,
+            onTerminated = { notified = true },
+        )
+        val match = engine.reserve(first, second, DuelRules(DuelMode.KIT, KitId("classic"))).join()
+        engine.beginCountdown(match.id)
+        engine.activate(match.id)
+        engine.recordRoundWinner(match.id, first)
+        val drain = engine.drainCompletions()
+        drain.isDone shouldBe false
+        pending.complete(stored.record(storedOutcome).join())
+        drain.join()
+        notified shouldBe true
+    }
+
     "failed durable write keeps the match completing and arena reserved for retry" {
         val releasesOnFailure = AtomicInteger()
         val failingRepository =

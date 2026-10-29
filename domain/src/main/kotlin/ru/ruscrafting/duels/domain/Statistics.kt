@@ -48,17 +48,18 @@ data class MatchOutcome(
     val winnerScore: Int = bestOf / 2 + 1,
     val loserScore: Int = 0,
     val endReason: MatchEndReason = MatchEndReason.ELIMINATION,
+    val stakeMinor: Long = 0L,
 ) {
     init {
         require(winner != loser) { "Winner and loser must be different players" }
-        DuelRules(mode, kitId, ranked, bestOf, objective, modifiers)
+        DuelRules(mode, kitId, ranked, bestOf, objective, modifiers, stakeMinor)
         require(winnerScore >= bestOf / 2 + 1) { "Winner score must complete the selected series" }
         require(loserScore in 0 until winnerScore) { "Loser score must be non-negative and below the winner score" }
         require(endReason in COMPLETED_REASONS) { "Match history cannot contain a cancelled match" }
     }
 
     val rules: DuelRules
-        get() = DuelRules(mode, kitId, ranked, bestOf, objective, modifiers)
+        get() = DuelRules(mode, kitId, ranked, bestOf, objective, modifiers, stakeMinor)
 
     /** MySQL stores timestamps at millisecond precision; all adapters share that canonical form. */
     fun canonicalized(): MatchOutcome =

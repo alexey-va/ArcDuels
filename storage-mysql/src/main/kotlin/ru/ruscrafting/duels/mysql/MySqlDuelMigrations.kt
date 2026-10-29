@@ -3,7 +3,7 @@ package ru.ruscrafting.duels.mysql
 import ru.arc.sql.SqlMigration
 
 object MySqlDuelMigrations {
-    const val CURRENT_VERSION = 9
+    const val CURRENT_VERSION = 10
 
     val all: List<SqlMigration> =
         listOf(
@@ -281,6 +281,63 @@ object MySqlDuelMigrations {
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                         """.trimIndent(),
                     ),
+            ),
+            SqlMigration(
+                version = 10,
+                description = "create durable coin wager escrow and retain accepted stakes",
+                statements = listOf(
+                    """
+                    CREATE TABLE IF NOT EXISTS `arcduels_wagers` (
+                        `match_id` BINARY(16) NOT NULL,
+                        `server_id` VARCHAR(48) NOT NULL,
+                        `challenger_id` BINARY(16) NOT NULL,
+                        `target_id` BINARY(16) NOT NULL,
+                        `stake_minor` BIGINT NOT NULL,
+                        `phase` VARCHAR(24) NOT NULL,
+                        `winner_id` BINARY(16) NULL,
+                        `revision` BIGINT NOT NULL,
+                        `reason` VARCHAR(160) NULL,
+                        `updated_at` DATETIME(3) NOT NULL,
+                        PRIMARY KEY (`match_id`),
+                        KEY `idx_arcduels_wager_recovery` (`server_id`, `match_id`, `phase`),
+                        CONSTRAINT `chk_arcduels_wager_stake` CHECK (`stake_minor` BETWEEN 1 AND 100000000),
+                        CONSTRAINT `chk_arcduels_wager_players` CHECK (`challenger_id` <> `target_id`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """.trimIndent(),
+                    """
+                    CREATE TABLE IF NOT EXISTS `arcduels_wager_legs` (
+                        `match_id` BINARY(16) NOT NULL,
+                        `leg_kind` VARCHAR(32) NOT NULL,
+                        `player_id` BINARY(16) NOT NULL,
+                        `amount_minor` BIGINT NOT NULL,
+                        `status` VARCHAR(16) NOT NULL,
+                        `balance_before` VARCHAR(64) NULL,
+                        `balance_after` VARCHAR(64) NULL,
+                        `reason` VARCHAR(160) NULL,
+                        `updated_at` DATETIME(3) NOT NULL,
+                        PRIMARY KEY (`match_id`, `leg_kind`),
+                        CONSTRAINT `fk_arcduels_wager_leg` FOREIGN KEY (`match_id`) REFERENCES `arcduels_wagers` (`match_id`),
+                        CONSTRAINT `chk_arcduels_wager_amount` CHECK (`amount_minor` <> 0)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """.trimIndent(),
+                ) + listOf("arcduels_rule_presets", "arcduels_matches").flatMapIndexed { index, table ->
+                    val variable = "arcduels_migration_10_${index + 1}"
+                    listOf(
+                        """
+                        SET @$variable = (
+                            SELECT IF(
+                                EXISTS(SELECT 1 FROM `information_schema`.`COLUMNS`
+                                    WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = '$table' AND `COLUMN_NAME` = 'stake_minor'),
+                                'SELECT 1',
+                                'ALTER TABLE `$table` ADD COLUMN `stake_minor` BIGINT NOT NULL DEFAULT 0'
+                            )
+                        )
+                        """.trimIndent(),
+                        "PREPARE ${variable}_statement FROM @$variable",
+                        "EXECUTE ${variable}_statement",
+                        "DEALLOCATE PREPARE ${variable}_statement",
+                    )
+                },
             ),
         )
 

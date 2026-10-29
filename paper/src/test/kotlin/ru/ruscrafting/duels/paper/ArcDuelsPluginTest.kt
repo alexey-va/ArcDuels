@@ -945,6 +945,52 @@ class ArcDuelsPluginTest : StringSpec({
         removedKitController.close()
     }
 
+    "paid rematch shows immutable terms before a new challenge or mutual acceptance" {
+        val now = Instant.parse("2026-10-29T12:00:00Z")
+        val clock = Clock.fixed(now, ZoneOffset.UTC)
+        val registry = ChallengeRegistry(clock)
+        val statistics = InMemoryStatisticsRepository()
+        val sessions = mockk<DuelSessionManager>(relaxed = true)
+        every { sessions.onCompleted(any()) } returns AutoCloseable { }
+        val first = paper.addReadyDuelsPlayer(plugin, "PaidRematchOne")
+        val second = paper.addReadyDuelsPlayer(plugin, "PaidRematchTwo")
+        val outcome = MatchOutcome(
+            matchId = MatchId(UUID.randomUUID()), winner = PlayerId(first.uniqueId), loser = PlayerId(second.uniqueId),
+            mode = DuelMode.KIT, kitId = KitId("classic"), ranked = false, serverId = ServerId("spawn"),
+            completedAt = now.minusSeconds(30), arenaId = ArenaId("kit-test"), stakeMinor = 1234L,
+        )
+        statistics.record(outcome).join()
+        try {
+            DuelController(
+                plugin, registry, sessions, statistics, LocaleService.load(plugin),
+                DuelTargetDirectory(plugin, ServerId("spawn"), null), ServerId("spawn"),
+                clock = clock, wagers = mockk(relaxed = true),
+            ).use { controller ->
+                controller.rematch(first, outcome.matchId)
+                registry.pendingFor(PlayerId(first.uniqueId)) shouldBe emptyList()
+                val prompt = generateSequence { first.nextComponentMessage() }.last()
+                val plain = PlainTextComponentSerializer.plainText().serialize(prompt)
+                plain shouldContain "12.34 💰"
+                plain shouldContain "24.68 💰"
+                fun hasConfirmation(component: Component): Boolean =
+                    component.clickEvent()?.value() == "/duel rematch ${outcome.matchId} confirm" ||
+                        component.children().any(::hasConfirmation)
+                hasConfirmation(prompt) shouldBe true
+
+                controller.rematch(first, outcome.matchId, confirmedStake = true)
+                val challenge = registry.pendingFor(PlayerId(first.uniqueId)).single()
+                challenge.rules shouldBe outcome.rules
+                controller.rematch(second, outcome.matchId)
+                registry.find(challenge.id)!!.status shouldBe ChallengeStatus.PENDING
+                controller.rematch(second, outcome.matchId, confirmedStake = true)
+                registry.find(challenge.id)!!.status shouldBe ChallengeStatus.ACCEPTED
+            }
+        } finally {
+            first.disconnect()
+            second.disconnect()
+        }
+    }
+
     "participant routing keeps the current server distinct from the recovery origin" {
         val route = participantRoute(ServerId("spawn"), ServerId("survival"))
 

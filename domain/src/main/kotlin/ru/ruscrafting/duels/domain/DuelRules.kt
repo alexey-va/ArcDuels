@@ -50,8 +50,10 @@ data class DuelRules(
     val bestOf: Int = 1,
     val objective: DuelObjectiveType = DuelObjectiveType.ELIMINATION,
     val modifiers: CombatModifiers = CombatModifiers(),
+    val stakeMinor: Long = 0,
 ) {
     init {
+        require(stakeMinor in 0..MAX_DUEL_STAKE_MINOR) { "stakeMinor must be between 0 and $MAX_DUEL_STAKE_MINOR" }
         require(bestOf in 1..9 && bestOf % 2 == 1) { "bestOf must be an odd number between 1 and 9" }
         require((mode == DuelMode.KIT) == (kitId != null)) { "KIT mode requires a kit and OWN_INVENTORY forbids one" }
         require(!ranked || mode == DuelMode.KIT) { "Ranked own-inventory duels are not supported" }

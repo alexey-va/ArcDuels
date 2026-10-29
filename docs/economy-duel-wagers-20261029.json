@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "title": "ArcDuels: equal 1v1 Vault wagers, 2026-10-29",
+  "assumptions": [
+    "Before: ArcDuels has no monetary wager. After: each of two consenting players funds the same frozen Vault stake; zero remains a free duel.",
+    "Low/base/high are sensitivity assumptions, not measured duel traffic: 2/10/24 participants, 1/4/12 completed series per participant-day, stakes 100/1000/1000000 Vault.",
+    "Assumed eligible cohort is 200 accounts: participation 1%/5%/12%; active duel time 0.5/1/2 hours per day at 2/4/6 completed series per hour. Rank/level do not modify stakes or payouts.",
+    "The 50% win share is a symmetric accounting assumption across both seats, not a claim about skill or a guaranteed individual return. Network matches equal participant-events divided by two.",
+    "Each scenario is encoded in its own flow row with zeros in the other two positions so different stake sizes are not added together. Escrow inflow and payout transfer describe successive movements of the same coins.",
+    "The modeled settled path has a persisted winner and no cancellation. Full-refund cancellation is an alternative path, not extra income added to winning payouts.",
+    "Disposable income in this isolated feature model is zero new income, not an estimate of a player's other income. No saving-time or item-price assumption is derived from activity buckets or rich accounts.",
+    "No fee, house contribution, tokens, items, XP, boost multiplier, or new command reward is introduced. Existing external completion rewards and their eligibility are unchanged; a participation uplift is unmeasured.",
+    "No economic daily or weekly turnover cap is proposed. Twelve series is a high scenario, not an enforced cap; repeated matches and multiple accounts still have zero aggregate mint if all payment legs are exact.",
+    "Current EconomyShopGUI SELL and dependent AutoSell remain separate existing flows; the planned SELL-to-contract transition is unchanged and is not treated as completed."
+  ],
+  "participants": [2, 10, 24],
+  "wager_terms": {
+    "currency": "vault",
+    "minor_per_unit": 100,
+    "free_stake_minor": 0,
+    "minimum_positive_stake_minor": 1,
+    "maximum_stake_per_player_minor": 100000000,
+    "maximum_pot_minor": 200000000,
+    "fee_minor": 0,
+    "house_contribution_minor": 0,
+    "acceptance": "Both participants agree the same immutable amount before funding; deduct only for the accepted match, before combat starts.",
+    "winner": "The persisted full-series winner receives exactly twice the stake, including active-combat forfeit, quit, or boundary loss.",
+    "refund": "Cancellation, preparation failure, abort, or shutdown without a persisted winner returns only confirmed debits at their original amount.",
+    "recovery": "Consult the persisted match outcome for held funds. Unknown provider legs remain unresolved and are never repeated automatically; reconciliation must establish the exact effect."
+  },
+  "currencies": {
+    "vault": {
+      "minor_per_unit": 100,
+      "disposable_per_player_day": {"before": ["0", "0", "0"], "after": ["0", "0", "0"]},
+      "flows": [
+        {
+          "id": "low_stake_escrow",
+          "kind": "escrow",
+          "source": "ArcDuels agreed 1v1 wager contract; domain DuelChallenge and MatchCoordinator",
+          "basis": "Low only: 100 Vault per participant, one accepted completed series per day; an escrow liability, not a burn.",
+          "before": {"enabled": false, "amount_per_event": {"value": "100", "unit": "major"}, "events_per_player_day": ["1", "0", "0"]},
+          "after": {"enabled": true, "amount_per_event": {"value": "100", "unit": "major"}, "events_per_player_day": ["1", "0", "0"]}
+        },
+        {
+          "id": "base_stake_escrow",
+          "kind": "escrow",
+          "source": "ArcDuels agreed 1v1 wager contract; domain DuelChallenge and MatchCoordinator",
+          "basis": "Base only: 1000 Vault per participant, four accepted completed series per day; an escrow liability, not a burn.",
+          "before": {"enabled": false, "amount_per_event": {"value": "1000", "unit": "major"}, "events_per_player_day": ["0", "4", "0"]},
+          "after": {"enabled": true, "amount_per_event": {"value": "1000", "unit": "major"}, "events_per_player_day": ["0", "4", "0"]}
+        },
+        {
+          "id": "high_stake_escrow",
+          "kind": "escrow",
+          "source": "ArcDuels agreed 1v1 wager contract; domain DuelChallenge and MatchCoordinator",
+          "basis": "High stress only: maximum 1000000 Vault stake, twelve completed series per participant-day; turnover can recycle the same coins.",
+          "before": {"enabled": false, "amount_per_event": {"value": "1000000", "unit": "major"}, "events_per_player_day": ["0", "0", "12"]},
+          "after": {"enabled": true, "amount_per_event": {"value": "1000000", "unit": "major"}, "events_per_player_day": ["0", "0", "12"]}
+        },
+        {
+          "id": "low_winner_pot",
+          "kind": "transfer",
+          "source": "ArcDuels MatchCoordinator.persistCompletion; agreed full-series payout contract",
+          "basis": "Low only: 200 Vault pot, symmetric 0.5 wins per participant-day; the loser's stake funds the winner's net gain.",
+          "before": {"enabled": false, "amount_per_event": {"value": "200", "unit": "major"}, "events_per_player_day": ["0.5", "0", "0"]},
+          "after": {"enabled": true, "amount_per_event": {"value": "200", "unit": "major"}, "events_per_player_day": ["0.5", "0", "0"]}
+        },
+        {
+          "id": "base_winner_pot",
+          "kind": "transfer",
+          "source": "ArcDuels MatchCoordinator.persistCompletion; agreed full-series payout contract",
+          "basis": "Base only: 2000 Vault pot, symmetric two wins per participant-day; no house-funded reward.",
+          "before": {"enabled": false, "amount_per_event": {"value": "2000", "unit": "major"}, "events_per_player_day": ["0", "2", "0"]},
+          "after": {"enabled": true, "amount_per_event": {"value": "2000", "unit": "major"}, "events_per_player_day": ["0", "2", "0"]}
+        },
+        {
+          "id": "high_winner_pot",
+          "kind": "transfer",
+          "source": "ArcDuels MatchCoordinator.persistCompletion; agreed full-series payout contract",
+          "basis": "High stress only: 2000000 Vault pot, symmetric six wins per participant-day; gross turnover is not new supply.",
+          "before": {"enabled": false, "amount_per_event": {"value": "2000000", "unit": "major"}, "events_per_player_day": ["0", "0", "6"]},
+          "after": {"enabled": true, "amount_per_event": {"value": "2000000", "unit": "major"}, "events_per_player_day": ["0", "0", "6"]}
+        }
+      ]
+    },
+    "tokens": {
+      "minor_per_unit": 100,
+      "disposable_per_player_day": {"before": ["0", "0", "0"], "after": ["0", "0", "0"]},
+      "flows": []
+    }
+  },
+  "prices": [],
+  "alternative_refund_path": {
+    "basis": "Replace each modeled winner settlement with cancellation after both confirmed debits. These values must not be summed with winner payouts.",
+    "vault_refund_per_participant_day": ["100", "4000", "12000000"],
+    "vault_network_weekly_refunds": ["1400", "280000", "2016000000"],
+    "vault_net_supply_delta": ["0", "0", "0"],
+    "partial_funding": "If the second debit is rejected, refund only the first confirmed stake. Unknown debit or refund effects remain held rather than being assumed absent."
+  },
+  "observation": {
+    "method": "Read-only arc_ops_server(server=classic, economy_hours=168, economy_limit=20, economy_server=all), one spawn replica",
+    "ledger_schema_version": 2,
+    "since_epoch_ms": 1792701144298,
+    "generated_at_epoch_ms": 1793305944300,
+    "records": 3635,
+    "operations": 17713,
+    "players": 25,
+    "sql_pending_events": 0,
+    "window_boundary_exact": false,
+    "excluded_crossing_records": 1,
+    "excluded_crossing_operations": 4,
+    "excluded_crossing_absolute_amount_untyped": "26.56",
+    "currency_totals": {
+      "vault": {"minted": "31641189.959021993", "burned": "34749418.43", "net": "-3108228.4709780067", "records": 3564, "operations": 17642, "players": 25},
+      "tokens": {"minted": "135", "burned": "27", "net": "108", "records": 71, "operations": 71, "players": 15}
+    },
+    "vault_source_coverage": {"classified_operation_ratio": "0.891565582133545", "classified_amount_ratio": "0.2272782806210435", "unclassified_operations": 1913, "unclassified_absolute_amount": "61997363.48999995"},
+    "vault_unknown_origins": [
+      {"origin": "ru.ruscrafting.casino.RedisEconomyUuidPayments", "operations": 1912, "players": 8, "income": "31314148.49000001", "expense": "30678215", "top_mint_player_share": "0.8386251013143867"},
+      {"origin": "eu.kotori.justTeams.util.FeatureRestrictionManager", "operations": 1, "players": 1, "income": "0", "expense": "5000"}
+    ],
+    "tokens_unknown_origin": {"origin": "ru.ruscrafting.ecia.integration.CrateKeyShopService", "operations": 5, "players": 1, "expense": "27"},
+    "jobs_vault": {"income": "40360.444618999885", "players": 10, "top_mint_player_share": "0.5860842769027479"},
+    "shop_sell_vault": {"income": "58121.27999999999", "players": 2, "operations": 28},
+    "caveats": [
+      "Legacy totals mix currencies and are excluded. The untyped crossing amount is a coverage marker only and is not assigned to either currency.",
+      "SQL pending=0 describes the sampled collector, not proof of exhaustive provider-history coverage. Known mint/burn excludes separate bank-interest and transfer-fee reconciliation.",
+      "economy_limit=20 bounds detailed/ranked outputs: recentEvents returned 20 and recentFailures 9. They are examples, not exhaustive transaction proof.",
+      "Ranked adminShopSales returned 15 rows with complete=true and truncated=false for that selection, not a full live-price or whole-network catalog audit.",
+      "Unknown callers remain classified as unknown even where the origin class is visible. Dominant casino turnover and concentrated income cannot establish ordinary newcomer income.",
+      "Five-minute activity buckets are presence proxies, not measured session durations. No live wager or price range was tested by this read."
+    ]
+  },
+  "required_verification": [
+    "Exact amount parser: zero/free, 0.01, maximum 1000000; reject negatives, extra decimals, non-finite values and over-limit amounts before provider calls.",
+    "Frozen consent: amount bound to challenge equality, network codec and rematch terms; both players see the same stake and full pot before acceptance.",
+    "Funding: current balance/provider checks; no debit for expired/denied/cancelled offers; both equal confirmed debits before combat; second-debit rejection refunds only the first confirmed debit.",
+    "Settlement: exactly one pot for persisted full-series winner, no per-round reward; active quit/forfeit/boundary losses pay the opponent; pre-combat abort and cancellation refund.",
+    "Replay and recovery: duplicate accept/result/settlement cannot repeat money; persisted outcome wins over generic restart refund; same saved amount remains valid after new default changes.",
+    "Money uncertainty: durable intent precedes every provider call; exception/wrong receipt amount/unknown journal commit holds the exact leg; no automatic retry or fabricated refund of an unconfirmed debit.",
+    "Failure coverage: unavailable provider/storage, failed deposit/refund, journal write/readback failure before and after money calls, reload, shutdown and cross-server transfer failure preserve obligations."
+  ],
+  "decision": "Economically acceptable as an optional zero-sum transfer with an explicit per-player 0.01..1000000 Vault bound and no fee. Acceptance depends on durable exact funding/settlement safety; arithmetic alone does not prove implementation, delivery, activation or client behavior."
+}

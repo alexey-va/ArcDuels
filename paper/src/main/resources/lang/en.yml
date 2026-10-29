@@ -76,6 +76,45 @@ menu:
     presets-lore: ['<gray>Optional shortcuts for rules you use often.</gray>', '<gray>The normal setup flow stays unchanged.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Open saved setups</#e6fff3>']
     confirm: '<green>Send challenge</green>'
     confirm-lore: ['<#e6fff3>All match options are ready.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Confirm</#e6fff3>']
+    stake: '<gold>Stake: <stake></gold>'
+    stake-free: '<gold>No money stake</gold>'
+    stake-lore:
+      - ''
+      - '<#e6fff3>Both players contribute the same amount.</#e6fff3>'
+      - ''
+      - '<#b8b8b8>Each player pays:</#b8b8b8> <gold><stake></gold>'
+      - '<#b8b8b8>Series winner receives:</#b8b8b8> <gold><pot></gold>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Enter amount</#e6fff3>'
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Right click</#2bba43><#e6fff3> — Remove stake</#e6fff3>'
+    stake-free-lore:
+      - ''
+      - '<#e6fff3>A duel without charging any coins.</#e6fff3>'
+      - '<#e6fff3>You can set an equal stake for both players.</#e6fff3>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Enter amount</#e6fff3>'
+    stake-unavailable-lore:
+      - ''
+      - '<#e6fff3>Money stakes are currently unavailable.</#e6fff3>'
+      - '<#b8b8b8>Selected stake:</#b8b8b8> <gold><stake></gold>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Right click</#2bba43><#e6fff3> — Play without a stake</#e6fff3>'
+    confirm-wager: '<green>Send challenge · <stake></green>'
+    confirm-wager-lore:
+      - ''
+      - '<#e6fff3>If your opponent accepts,</#e6fff3>'
+      - '<#e6fff3>each player pays <gold><stake></gold> before combat.</#e6fff3>'
+      - ''
+      - '<#b8b8b8>Winner of the full series:</#b8b8b8> <gold><pot></gold>'
+      - '<#e6fff3>Cancellation before combat refunds stakes.</#e6fff3>'
+      - '<#e6fff3>Surrendering or quitting during combat loses.</#e6fff3>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Agree and send</#e6fff3>'
+    confirm-unavailable: '<#ffb347>Stake unavailable</#ffb347>'
+    confirm-unavailable-lore:
+      - ''
+      - '<#e6fff3>A staked challenge cannot be sent right now.</#e6fff3>'
+      - '<#e6fff3>Remove the stake to play for free.</#e6fff3>'
   arenas:
     title: '<dark_gray>Choose arena</dark_gray>'
     auto: '<gold>Automatic selection</gold>'
@@ -200,6 +239,40 @@ menu:
     title: '<dark_gray>Player recovery · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
     player-lore: ['<gray>Check this player for a pending snapshot.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>Left click</#2bba43><#e6fff3> — Start safe recovery</#e6fff3>']
+
+wager:
+  free: '<#e6fff3>no stake</#e6fff3>'
+  summary: '<#b8b8b8>Each player’s stake:</#b8b8b8> <gold><stake></gold>'
+  unavailable: '<#ffb347>Money stakes are currently unavailable.</#ffb347>'
+  insufficient: |-
+    <#ffb347>One player cannot afford the full stake.</#ffb347>
+    <#e6fff3>The duel has not started.</#e6fff3>
+  failed: |-
+    <#ffb347>The stake settlement has not completed.</#ffb347>
+    <#e6fff3>Funds may be awaiting verification.</#e6fff3>
+    <#e6fff3>Contact an administrator.</#e6fff3>
+  cancelled: |-
+    <#ffb347>The staked match was cancelled.</#ffb347>
+    <#e6fff3>Confirmed contributions</#e6fff3>
+    <#e6fff3>are being processed for refund.</#e6fff3>
+  offer: |-
+    <#e6fff3>Each player pays before combat:</#e6fff3> <gold><stake></gold>
+    <#e6fff3>Winner of the full series receives:</#e6fff3> <gold><pot></gold>
+    <#e6fff3>Cancellation before combat refunds stakes.</#e6fff3>
+    <#e6fff3>Surrendering or quitting during combat loses.</#e6fff3>
+  paid: '<#2bba43>Series prize received:</#2bba43> <gold><amount></gold>'
+  refunded: '<#2bba43>Stake refunded:</#2bba43> <gold><amount></gold>'
+  input-prompt: |-
+    <#e6fff3>Stake in chat: <white>0.01 💰</white> to <gold><maximum></gold>.</#e6fff3>
+    <#e6fff3>Up to two decimal places, dot or comma.</#e6fff3>
+    <#e6fff3><white>0 💰</white> means no stake.</#e6fff3>
+    <#e6fff3>Cancel: <white>cancel</white> or <white>/duel cancel</white>. Time: <white><seconds> s</white>.</#e6fff3>
+  input-invalid: |-
+    <#ffb347>Enter an amount from <white>0 💰</white> to <gold><maximum></gold>.</#ffb347>
+    <#e6fff3>Use up to two decimal places.</#e6fff3>
+    <#e6fff3>Try again or type <white>cancel</white>.</#e6fff3>
+  input-cancelled: '<#e6fff3>Input cancelled. Your previous stake is unchanged.</#e6fff3>'
+  input-timeout: '<#e6fff3>Input timed out. Your previous stake is unchanged.</#e6fff3>'
 
 objective:
   elimination:

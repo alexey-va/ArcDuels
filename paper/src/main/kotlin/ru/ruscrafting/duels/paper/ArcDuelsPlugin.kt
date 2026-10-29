@@ -53,6 +53,9 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import ru.ruscrafting.duels.domain.DuelWagerService
+import ru.ruscrafting.duels.domain.DuelWagerRepository
+import ru.ruscrafting.duels.domain.WagerSettlementResult
 
 open class ArcDuelsPlugin : JavaPlugin() {
     private lateinit var worker: BoundedAsyncExecutor
@@ -77,6 +80,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
     private var pluginRuntime: PaperPluginRuntime? = null
     private var sessions: DuelSessionManager? = null
     private var challengeRegistry: ChallengeRegistry? = null
+    private var wagers: DuelWagerService? = null
+    private var matchCoordinator: MatchCoordinator? = null
     private var runtimeSettingsState: ArcDuelsRuntimeSettingsState? = null
     private var configReloader: ArcDuelsConfigReloader? = null
 
@@ -227,6 +232,10 @@ open class ArcDuelsPlugin : JavaPlugin() {
         attempt { lifecycle.tasks.close() }
         attempt { nativeWork.close() }
         attempt { lifecycle.close() }
+        attempt { matchCoordinator?.drainCompletions()?.join() }
+        matchCoordinator = null
+        attempt { wagers?.closeAsync()?.join() }
+        wagers = null
         sessions = null
         challengeRegistry = null
         configReloader = null
@@ -290,6 +299,22 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val guiItems = GuiItemCatalog.load(config)
         val menuLayouts = prepared.menus
         val statistics = persistence.statistics
+        val money = persistence.wagers?.let { store ->
+            DuelWagerService(
+                store,
+                DuelWagerWallets.create(worker) { operation -> lifecycle.tasks.callSync(operation) },
+                serverId,
+                diagnostic = { id, reason, failure ->
+                    logger.log(java.util.logging.Level.SEVERE, "Duel wager $id: $reason", failure)
+                },
+                recordedWinner = { id -> statistics.findMatch(id).thenApply { it?.outcome?.winner } },
+            ).also { service ->
+                wagers = service
+                service.recover().whenComplete { _, failure ->
+                    if (failure != null) logger.log(java.util.logging.Level.SEVERE, "Duel wagers remain unavailable: recovery failed", failure)
+                }
+            }
+        }
         val network = createNetwork(serverId, statistics, locales, lifecycle, redis)
         val transfer = if (network.challenges != null || network.groups != null) ProxyPlayerTransfer(this) else null
         if (transfer != null) lifecycle.own(transfer)
@@ -301,7 +326,28 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 statistics,
                 battlePass.observing(network.publisher),
                 Clock.systemUTC(),
+                onTerminated = { match ->
+                    if (match.rules.stakeMinor > 0L) money?.settle(match.id, match.winner)?.thenAccept { result ->
+                        if (isEnabled && pluginRuntime === lifecycle) server.scheduler.runTask(this, Runnable {
+                            if (pluginRuntime !== lifecycle) return@Runnable
+                            val recipients = when (result) {
+                                WagerSettlementResult.Paid -> listOfNotNull(match.winner)
+                                WagerSettlementResult.Refunded -> listOf(match.firstPlayer, match.secondPlayer)
+                                else -> emptyList()
+                            }
+                            recipients.forEach { id -> server.getPlayer(id.value)?.let { player ->
+                                player.sendMessage(locales.notice(player,
+                                    if (result == WagerSettlementResult.Paid) "wager.paid" else "wager.refunded",
+                                    LocaleService.component("amount", wagerAmountComponent(
+                                        match.rules.stakeMinor * if (result == WagerSettlementResult.Paid) 2 else 1,
+                                    )),
+                                ))
+                            } }
+                        })
+                    }
+                },
             )
+        matchCoordinator = coordinator
         val retentionDays = config.getLong("mysql.inventory-snapshots.retention-days", 7L)
         require(retentionDays in 1L..3_650L) { "mysql.inventory-snapshots.retention-days must be between 1 and 3650" }
         val cleanupMinutes = config.getLong("mysql.inventory-snapshots.cleanup-interval-minutes", 60L)
@@ -453,6 +499,8 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 playerStateMode = settings.playerStateMode,
                 preferredArenaSelection = arenas::preferredSelection,
+                wagers = money,
+                wagersReady = { money?.available == true },
             )
         lifecycle.own(controller)
         lateinit var gui: DuelGuiService
@@ -552,6 +600,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
                 menuLayouts = menuLayouts,
                 runtimeSettings = { liveRuntime.snapshot().settings },
                 startupServerId = serverId,
+                wagersAvailable = { money?.available == true },
             )
         lifecycle.own(gui)
         val command = DuelCommand(controller, gui, admin, targets, locales, multiplayerGui)
@@ -676,7 +725,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
             throw IllegalStateException("MySQL is enabled but its schema could not be prepared", failure)
         }
         this.repository = repository
-        return Persistence(repository, repository, repository, repository, durable = true)
+        return Persistence(repository, repository, repository, repository, durable = true, wagers = repository.wagers())
     }
 
     private fun createNetwork(
@@ -801,6 +850,7 @@ open class ArcDuelsPlugin : JavaPlugin() {
         val playerStates: PlayerStateEscrowRepository,
         val multiplayerResults: MultiplayerMatchRepository,
         val durable: Boolean,
+        val wagers: DuelWagerRepository? = null,
     )
 
     private data class NetworkRuntime(

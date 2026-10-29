@@ -1,5 +1,48 @@
 # Configuration
 
+## Coin stakes
+
+In a 1v1 challenge, the stake control on the rules screen accepts an amount
+from 0.01 to 1,000,000 coins per participant; zero keeps the duel free. Both
+the sender's confirmation and the recipient's offer show the stake and the
+full-series pot. Presets and rematches preserve the accepted amount.
+
+Stakes require MySQL and the optional RedisEconomy provider's enabled `vault`
+currency with zero transaction tax. Premium tokens are never used. The arena
+backend confirms both withdrawals before starting the match. A persisted series
+winner receives both stakes, including a forfeit or disconnect result. A
+cancelled preparation or match without a recorded winner refunds confirmed
+withdrawals. Existing free challenges retain wire version 5; staked offers use
+version 6 and older backends reject them. Deliver the upgrade to every arena
+and origin backend before using network stakes.
+
+Schema migration 10 adds `arcduels_wagers` and `arcduels_wager_legs`, plus stake
+terms on history and presets. Every provider attempt has a committed `CALLING`
+record before it executes. On startup, incomplete holds resume a persisted
+payout/refund decision or use recorded match history to choose the winner;
+otherwise they refund. An interrupted or unconfirmed provider call enters
+`RECONCILIATION` and is never repeated automatically. Its receipt and bounded
+error log retain the match and leg identity for operator reconciliation. Do not
+delete or reset those records to retry a payment.
+
+The adapter checks the RedisEconomy cache and an actual Redis read before and
+after a mutation; a Vault success response alone does not confirm the write.
+Only the bounded cached recheck and native provider mutation run on Paper's
+owning thread. Network reads and persistence confirmation run on the worker.
+If shutdown cancels a queued call before it enters the provider, its known
+unattempted credit remains deferred in the journal for the next startup; an
+uncertain attempted call is quarantined instead. Shutdown never waits on a
+queued Paper callback.
+The used UUID API descriptors were verified against the exact deployed
+RedisEconomy 4.5.13 JAR (SHA-256
+`136017b02c9fbe316162445c548c60ab58ba1feaf92737de1d698ca08670bcaf`)
+and the compile-time 4.5.12 API. Provider transaction logging is asynchronous
+and is separate from the ArcDuels escrow receipt.
+RedisEconomy's native balance mutation has no atomic cross-backend primitive;
+owning-thread dispatch serializes ordinary local Vault callers only. The journal
+prevents ArcDuels from replaying uncertain payments; it cannot supply atomicity
+for unrelated concurrent provider/cloud writers.
+
 ## Runtime profiles
 
 The plugin boots with MySQL disabled by default so a fresh installation cannot

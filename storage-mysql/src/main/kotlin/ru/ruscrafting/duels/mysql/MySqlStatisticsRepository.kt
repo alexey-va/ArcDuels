@@ -40,6 +40,8 @@ import java.util.concurrent.CompletableFuture
 class MySqlStatisticsRepository(
     private val runtime: SqlRuntime,
 ) : StatisticsRepository, DuelPresetRepository, PlayerStateEscrowRepository, MultiplayerMatchRepository, AutoCloseable {
+    fun wagers(): ru.ruscrafting.duels.domain.DuelWagerRepository = MySqlDuelWagerRepository(runtime)
+
     fun migrate(): CompletableFuture<SqlMigrationReport> =
         runtime.executor.submit {
             MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(MySqlDuelMigrations.all)
@@ -280,8 +282,8 @@ class MySqlStatisticsRepository(
                 INSERT INTO `arcduels_rule_presets`
                     (`player_id`, `slot`, `mode`, `objective`, `kit_id`, `ranked`, `best_of`, `projectiles`, `consumables`,
                      `ender_pearls`, `natural_regeneration`, `sudden_death_seconds`, `koth_capture_seconds`,
-                     `boxing_hits_to_win`, `combo_hits_to_win`, `selected_arena_server`, `selected_arena_id`, `updated_at`)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     `boxing_hits_to_win`, `combo_hits_to_win`, `selected_arena_server`, `selected_arena_id`, `updated_at`, `stake_minor`)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     `mode` = VALUES(`mode`), `objective` = VALUES(`objective`), `kit_id` = VALUES(`kit_id`),
                     `ranked` = VALUES(`ranked`), `best_of` = VALUES(`best_of`), `projectiles` = VALUES(`projectiles`),
@@ -292,7 +294,8 @@ class MySqlStatisticsRepository(
                     `boxing_hits_to_win` = VALUES(`boxing_hits_to_win`),
                     `combo_hits_to_win` = VALUES(`combo_hits_to_win`),
                     `selected_arena_server` = VALUES(`selected_arena_server`),
-                    `selected_arena_id` = VALUES(`selected_arena_id`), `updated_at` = VALUES(`updated_at`)
+                    `selected_arena_id` = VALUES(`selected_arena_id`), `updated_at` = VALUES(`updated_at`),
+                    `stake_minor` = VALUES(`stake_minor`)
                 """.trimIndent(),
             ).use { statement ->
                 val modifiers = preset.rules.modifiers
@@ -314,6 +317,7 @@ class MySqlStatisticsRepository(
                 statement.setString(16, preset.arenaSelection?.serverId?.value)
                 statement.setString(17, preset.arenaSelection?.arenaId?.value)
                 statement.setTimestamp(18, Timestamp.from(preset.updatedAt))
+                statement.setLong(19, preset.rules.stakeMinor)
                 // MySQL reports 0 when an idempotent upsert leaves an existing
                 // row unchanged, 1 for insert, and 2 for a changed update.
                 check(statement.executeUpdate() in 0..2) { "Could not save duel rule preset" }
@@ -756,8 +760,8 @@ class MySqlStatisticsRepository(
                 (`match_id`, `winner_id`, `loser_id`, `mode`, `objective`, `kit_id`, `ranked`, `best_of`, `projectiles`,
                  `consumables`, `ender_pearls`, `natural_regeneration`, `sudden_death_seconds`, `koth_capture_seconds`,
                  `boxing_hits_to_win`, `combo_hits_to_win`, `server_id`, `arena_id`, `completed_at`,
-                 `winner_rating_after`, `loser_rating_after`, `winner_score`, `loser_score`, `end_reason`, `leaderboard_revision`)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 `winner_rating_after`, `loser_rating_after`, `winner_score`, `loser_score`, `end_reason`, `leaderboard_revision`, `stake_minor`)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
         ).use { statement ->
             val modifiers = outcome.modifiers
@@ -786,6 +790,7 @@ class MySqlStatisticsRepository(
             statement.setInt(23, outcome.loserScore)
             statement.setString(24, outcome.endReason.name)
             statement.setLong(25, leaderboardRevision)
+            statement.setLong(26, outcome.stakeMinor)
             check(statement.executeUpdate() == 1) { "Could not insert duel match result" }
         }
     }
@@ -889,6 +894,7 @@ class MySqlStatisticsRepository(
             winnerScore = getInt("winner_score"),
             loserScore = getInt("loser_score"),
             endReason = MatchEndReason.valueOf(getString("end_reason")),
+            stakeMinor = getLong("stake_minor"),
         )
 
     private fun ResultSet.toRecordedMatch(): RecordedMatch =
@@ -913,6 +919,7 @@ class MySqlStatisticsRepository(
                     kitId = getString("kit_id")?.let(::KitId),
                     ranked = getBoolean("ranked"),
                     bestOf = getInt("best_of"),
+                    stakeMinor = getLong("stake_minor"),
                     objective = DuelObjectiveType.valueOf(getString("objective")),
                     modifiers =
                         CombatModifiers(
@@ -987,10 +994,10 @@ class MySqlStatisticsRepository(
                 "m.`best_of`, m.`projectiles`, m.`consumables`, m.`ender_pearls`, m.`natural_regeneration`, " +
                 "m.`sudden_death_seconds`, m.`koth_capture_seconds`, m.`boxing_hits_to_win`, m.`combo_hits_to_win`, " +
                 "m.`server_id`, m.`arena_id`, m.`completed_at`, m.`winner_rating_after`, m.`loser_rating_after`, " +
-                "m.`winner_score`, m.`loser_score`, m.`end_reason`, m.`leaderboard_revision`"
+                "m.`winner_score`, m.`loser_score`, m.`end_reason`, m.`leaderboard_revision`, m.`stake_minor`"
         const val PRESET_COLUMNS =
             "`slot`, `mode`, `objective`, `kit_id`, `ranked`, `best_of`, `projectiles`, `consumables`, " +
                 "`ender_pearls`, `natural_regeneration`, `sudden_death_seconds`, `koth_capture_seconds`, " +
-                "`boxing_hits_to_win`, `combo_hits_to_win`, `selected_arena_server`, `selected_arena_id`, `updated_at`"
+                "`boxing_hits_to_win`, `combo_hits_to_win`, `selected_arena_server`, `selected_arena_id`, `updated_at`, `stake_minor`"
     }
 }

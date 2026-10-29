@@ -17,8 +17,9 @@ class MySqlDuelMigrationsTest : StringSpec({
         val history = migrations[6]
         val presets = migrations[7]
         val multiplayer = migrations[8]
+        val wagers = migrations[9]
 
-        migrations.map { it.version } shouldBe listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
+        migrations.map { it.version } shouldBe (1..10).toList()
         initial.statements shouldHaveSize 4
         initial.statements.first() shouldContain "CREATE TABLE IF NOT EXISTS"
         initial.statements[2] shouldContain "INSERT IGNORE"
@@ -54,5 +55,10 @@ class MySqlDuelMigrationsTest : StringSpec({
         multiplayer.statements[0] shouldContain "`outcome_sha256` BINARY(32) NOT NULL"
         multiplayer.statements[1] shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_multiplayer_participants`"
         multiplayer.statements[1] shouldContain "FOREIGN KEY (`match_id`)"
+        wagers.statements shouldHaveSize 10
+        wagers.statements[0] shouldContain "CREATE TABLE IF NOT EXISTS `arcduels_wagers`"
+        wagers.statements[1] shouldContain "PRIMARY KEY (`match_id`, `leg_kind`)"
+        wagers.statements[2] shouldContain "ALTER TABLE `arcduels_rule_presets` ADD COLUMN `stake_minor`"
+        wagers.statements[6] shouldContain "ALTER TABLE `arcduels_matches` ADD COLUMN `stake_minor`"
     }
 })

@@ -12,8 +12,12 @@ dependencyResolutionManagement {
         maven("https://repo.william278.net/releases")
         maven("https://maven.enginehub.org/repo/")
         maven("https://repo.rus-crafting.ru/grocermc/") {
-            content { includeGroup("ru.ruscrafting.arc") }
+            content {
+                includeGroup("ru.ruscrafting.arc")
+                includeModule("ru.ruscrafting.thirdparty", "rediseconomy")
+            }
         }
+        maven("https://jitpack.io") { content { includeModule("com.github.MilkBowl", "VaultAPI") } }
     }
 }
 

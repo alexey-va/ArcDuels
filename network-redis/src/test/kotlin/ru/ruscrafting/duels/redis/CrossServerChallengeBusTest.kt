@@ -98,6 +98,27 @@ class CrossServerChallengeBusTest : StringSpec({
         ChallengeMessageCodec().decode(ChallengeMessageCodec().encode(resolution)) shouldBe resolution
     }
 
+    "wagers bind the exact stake while free challenges retain the legacy wire" {
+        val codec = ChallengeMessageCodec()
+        val wager = offer.copy(challenge = offer.challenge.copy(rules = offer.challenge.rules.copy(stakeMinor = 12345L)))
+        val encoded = codec.encode(wager)
+        codec.decode(encoded) shouldBe wager
+        JsonParser.parseString(encoded).asJsonObject["version"].asInt shouldBe 6
+        val free = JsonParser.parseString(codec.encode(offer)).asJsonObject
+        free["version"].asInt shouldBe 5
+        free.has("stakeMinor") shouldBe false
+        val missing = JsonParser.parseString(encoded).asJsonObject.apply { remove("stakeMinor") }
+        shouldThrow<IllegalArgumentException> { codec.decode(missing.toString()) }
+        val downgraded = JsonParser.parseString(encoded).asJsonObject.apply { addProperty("version", 5) }
+        shouldThrow<IllegalArgumentException> { codec.decode(downgraded.toString()) }
+        listOf("-1", "100000001", "1.5", "1e30").forEach { value ->
+            val invalid = JsonParser.parseString(encoded).asJsonObject.apply {
+                add("stakeMinor", JsonParser.parseString(value))
+            }
+            shouldThrow<Exception> { codec.decode(invalid.toString()) }
+        }
+    }
+
     "codec rejects messages produced before current server routes were required" {
         val codec = ChallengeMessageCodec()
         val legacyPayload = JsonParser.parseString(codec.encode(offer)).asJsonObject

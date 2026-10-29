@@ -76,6 +76,45 @@ menu:
     presets-lore: ['<gray>Необязательные ярлыки для частых настроек.</gray>', '<gray>Обычный путь создания боя не меняется.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Открыть сохранённые настройки</#e6fff3>']
     confirm: '<green>Отправить вызов</green>'
     confirm-lore: ['<#e6fff3>Все параметры выбраны.</#e6fff3>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Подтвердить</#e6fff3>']
+    stake: '<gold>Ставка: <stake></gold>'
+    stake-free: '<gold>Без денежной ставки</gold>'
+    stake-lore:
+      - ''
+      - '<#e6fff3>Оба вносят одинаковую сумму.</#e6fff3>'
+      - ''
+      - '<#b8b8b8>Взнос каждого:</#b8b8b8> <gold><stake></gold>'
+      - '<#b8b8b8>Победителю серии:</#b8b8b8> <gold><pot></gold>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Ввести сумму</#e6fff3>'
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ПКМ</#2bba43><#e6fff3> — Убрать ставку</#e6fff3>'
+    stake-free-lore:
+      - ''
+      - '<#e6fff3>Дуэль без списания монет.</#e6fff3>'
+      - '<#e6fff3>Можно задать равный взнос для обоих.</#e6fff3>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Ввести сумму</#e6fff3>'
+    stake-unavailable-lore:
+      - ''
+      - '<#e6fff3>Денежные ставки сейчас недоступны.</#e6fff3>'
+      - '<#b8b8b8>Выбранный взнос:</#b8b8b8> <gold><stake></gold>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ПКМ</#2bba43><#e6fff3> — Играть без ставки</#e6fff3>'
+    confirm-wager: '<green>Отправить вызов · <stake></green>'
+    confirm-wager-lore:
+      - ''
+      - '<#e6fff3>Если соперник примет вызов,</#e6fff3>'
+      - '<#e6fff3>с каждого перед боем спишется <gold><stake></gold>.</#e6fff3>'
+      - ''
+      - '<#b8b8b8>Победителю всей серии:</#b8b8b8> <gold><pot></gold>'
+      - '<#e6fff3>Отмена до боя — возврат.</#e6fff3>'
+      - '<#e6fff3>Сдача или выход в бою — проигрыш.</#e6fff3>'
+      - ''
+      - '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Принять условия и отправить</#e6fff3>'
+    confirm-unavailable: '<#ffb347>Ставка недоступна</#ffb347>'
+    confirm-unavailable-lore:
+      - ''
+      - '<#e6fff3>Сейчас нельзя отправить вызов со ставкой.</#e6fff3>'
+      - '<#e6fff3>Убери ставку, чтобы играть бесплатно.</#e6fff3>'
   arenas:
     title: '<dark_gray>Выбор арены</dark_gray>'
     auto: '<gold>Автовыбор</gold>'
@@ -200,6 +239,40 @@ menu:
     title: '<dark_gray>Восстановление · <page>/<pages></dark_gray>'
     player: '<gold><player></gold>'
     player-lore: ['<gray>Проверить ожидающий снимок игрока.</gray>', '', '<#8c8c8c>[<#2bba43>▶</#2bba43>]</#8c8c8c> <#2bba43>ЛКМ</#2bba43><#e6fff3> — Начать безопасное восстановление</#e6fff3>']
+
+wager:
+  free: '<#e6fff3>без ставки</#e6fff3>'
+  summary: '<#b8b8b8>Ставка каждого:</#b8b8b8> <gold><stake></gold>'
+  unavailable: '<#ffb347>Денежные ставки сейчас недоступны.</#ffb347>'
+  insufficient: |-
+    <#ffb347>Одному из игроков не хватает монет на ставку.</#ffb347>
+    <#e6fff3>Дуэль не началась.</#e6fff3>
+  failed: |-
+    <#ffb347>Расчёт по ставке не завершён.</#ffb347>
+    <#e6fff3>Деньги могут ожидать проверки.</#e6fff3>
+    <#e6fff3>Обратись к администрации.</#e6fff3>
+  cancelled: |-
+    <#ffb347>Матч со ставкой отменён.</#ffb347>
+    <#e6fff3>Подтверждённые взносы</#e6fff3>
+    <#e6fff3>обрабатываются для возврата.</#e6fff3>
+  offer: |-
+    <#e6fff3>С каждого перед боем:</#e6fff3> <gold><stake></gold>
+    <#e6fff3>Победителю всей серии:</#e6fff3> <gold><pot></gold>
+    <#e6fff3>Отмена до боя — возврат.</#e6fff3>
+    <#e6fff3>Сдача или выход в бою — проигрыш.</#e6fff3>
+  paid: '<#2bba43>Приз за серию получен:</#2bba43> <gold><amount></gold>'
+  refunded: '<#2bba43>Ставка возвращена:</#2bba43> <gold><amount></gold>'
+  input-prompt: |-
+    <#e6fff3>Введи ставку в чат: от <white>0.01 💰</white> до <gold><maximum></gold>.</#e6fff3>
+    <#e6fff3>До двух цифр после точки или запятой.</#e6fff3>
+    <#e6fff3><white>0 💰</white> — без ставки.</#e6fff3>
+    <#e6fff3>Отмена: <white>отмена</white> или <white>/duel cancel</white>. Время: <white><seconds> с</white>.</#e6fff3>
+  input-invalid: |-
+    <#ffb347>Нужна сумма от <white>0 💰</white> до <gold><maximum></gold>.</#ffb347>
+    <#e6fff3>До двух цифр после точки или запятой.</#e6fff3>
+    <#e6fff3>Попробуй снова или напиши <white>отмена</white>.</#e6fff3>
+  input-cancelled: '<#e6fff3>Ввод отменён. Прежняя ставка сохранена.</#e6fff3>'
+  input-timeout: '<#e6fff3>Время ввода истекло. Прежняя ставка сохранена.</#e6fff3>'
 
 objective:
   elimination:

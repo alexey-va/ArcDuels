@@ -97,6 +97,7 @@ class DuelSessionManager internal constructor(
     private val celebrationEffects = CelebrationEffects(plugin)
     private val kitHealthIsolation = KitHealthIsolation(NamespacedKey(plugin, "kit_health_cap"))
     private val completionListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
+    private val cancellationListeners = CopyOnWriteArrayList<(DuelMatch) -> Unit>()
     private val recoveryListeners = CopyOnWriteArrayList<(Player, RecordedMatch) -> Unit>()
     @Volatile private var magicDuelStateReset: ((Collection<UUID>) -> Unit)? = null
 
@@ -114,6 +115,12 @@ class DuelSessionManager internal constructor(
     fun onCompleted(listener: (DuelMatch) -> Unit): AutoCloseable {
         completionListeners += listener
         return AutoCloseable { completionListeners -= listener }
+    }
+
+    /** Reports cancellations after native cleanup and release; completed listeners remain winner-only. */
+    fun onCancelled(listener: (DuelMatch) -> Unit): AutoCloseable {
+        cancellationListeners += listener
+        return AutoCloseable { cancellationListeners -= listener }
     }
 
     fun onRecovered(listener: (Player, RecordedMatch) -> Unit): AutoCloseable {
@@ -1052,7 +1059,7 @@ class DuelSessionManager internal constructor(
                 if (restoreAndRetain(player, stored)) markRestored(match.id, player.uniqueId)
             }
         if (match.state !in setOf(MatchState.COMPLETING, MatchState.COMPLETED, MatchState.CANCELLED)) {
-            coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.DISCONNECT)
+            resolveDeparture(match, PlayerId(player.uniqueId), MatchEndReason.DISCONNECT)
                 .whenComplete { completed, failure ->
                     runSync {
                         if (failure != null) announcePersistenceFailure(match.id, unwrap(failure)) else finish(completed)
@@ -1074,7 +1081,7 @@ class DuelSessionManager internal constructor(
         }
         if (match.state !in setOf(MatchState.RESERVED, MatchState.COUNTDOWN, MatchState.ACTIVE)) return false
         val completion =
-            runCatching { coordinator.forfeit(match.id, PlayerId(player.uniqueId), MatchEndReason.FORFEIT) }
+            runCatching { resolveDeparture(match, PlayerId(player.uniqueId), MatchEndReason.FORFEIT) }
                 .getOrElse { return false }
         completion.whenComplete { completed, failure ->
             runSync {
@@ -1083,6 +1090,17 @@ class DuelSessionManager internal constructor(
         }
         return true
     }
+
+    private fun resolveDeparture(
+        match: DuelMatch,
+        losingPlayer: PlayerId,
+        reason: MatchEndReason,
+    ): CompletableFuture<DuelMatch> =
+        if (match.rules.stakeMinor > 0L && match.startedAt == null) {
+            CompletableFuture.completedFuture(coordinator.cancelRetainingResources(match.id, MatchEndReason.ADMIN_CANCEL))
+        } else {
+            coordinator.forfeit(match.id, losingPlayer, reason)
+        }
 
     fun isInsideArena(
         player: Player,
@@ -1600,7 +1618,7 @@ class DuelSessionManager internal constructor(
         val player = plugin.server.getPlayer(absent.value)
         val reason = if (player == null || !player.isOnline) MatchEndReason.DISCONNECT else MatchEndReason.FORFEIT
         DuelLog.info("arena-participant-left", match.id, "player={} reason={}", currentName(absent), reason)
-        coordinator.forfeit(match.id, absent, reason).whenComplete { completed, failure ->
+        resolveDeparture(match, absent, reason).whenComplete { completed, failure ->
             runSync {
                 if (failure != null) announcePersistenceFailure(match.id, unwrap(failure)) else finish(completed)
             }
@@ -1828,11 +1846,11 @@ class DuelSessionManager internal constructor(
     }
 
     private fun finish(match: DuelMatch) {
-        if (match.state != MatchState.COMPLETED) return
+        if (match.state !in setOf(MatchState.COMPLETED, MatchState.CANCELLED)) return
         val session = sessions[match.id]
         if (session == null) {
-            runCatching { coordinator.releaseCompleted(match.id) }
-                .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
+            runCatching { releaseGameplayResources(match) }
+                .onFailure { plugin.logger.severe("Could not release terminated duel ${match.id}: ${it.message}") }
             return
         }
         if (session.modifiedBlocks.isNotEmpty() || session.arenaCleanup != null) {
@@ -1842,8 +1860,19 @@ class DuelSessionManager internal constructor(
             return
         }
         if (!session.finishing.compareAndSet(false, true)) return
-        session.arenaQuests?.publish(match.id.value.toString(), match.endReason, requireNotNull(match.completedAt))
         if (match.rules.kitId?.let(kits::get)?.magic == true) resetMagicDuelPlayers(session.participantIds)
+        countdownTasks.remove(match.id)?.cancel()
+        teleportStabilizationTasks.remove(match.id)?.cancel()
+        healthIsolationTasks.remove(match.id)?.cancel()
+        objectiveTasks.remove(match.id)?.cancel()
+        matchDisplayTasks.remove(match.id)?.cancel()
+        if (match.state == MatchState.CANCELLED) {
+            DuelLog.info("match-cancelled", match.id, "reason={}", match.endReason)
+            clearExternalCombatTags(match, "match-cancelled")
+            scheduleFinalization(match, session, 0L)
+            return
+        }
+        session.arenaQuests?.publish(match.id.value.toString(), match.endReason, requireNotNull(match.completedAt))
         DuelLog.info(
             "match-complete",
             match.id,
@@ -1855,11 +1884,6 @@ class DuelSessionManager internal constructor(
             session.policy.celebrationDurationTicks,
         )
         clearExternalCombatTags(match, "match-complete")
-        countdownTasks.remove(match.id)?.cancel()
-        teleportStabilizationTasks.remove(match.id)?.cancel()
-        healthIsolationTasks.remove(match.id)?.cancel()
-        objectiveTasks.remove(match.id)?.cancel()
-        matchDisplayTasks.remove(match.id)?.cancel()
         val winnerId = requireNotNull(match.winner)
         listOf(match.firstPlayer.value, match.secondPlayer.value).forEach { playerId ->
             ExternalArcDuelTelemetryBridge.completed(playerId, match.id.value.toString())
@@ -1904,7 +1928,10 @@ class DuelSessionManager internal constructor(
                 return
             }
             val arena = arenas.get(match.arenaId)
-            when (arena.postMatchAction?.asReturnPolicy() ?: session.policy.defaultPostMatchReturnPolicy) {
+            val returnPolicy =
+                if (match.state == MatchState.CANCELLED) PostMatchReturnPolicy.AUTOMATIC
+                else arena.postMatchAction?.asReturnPolicy() ?: session.policy.defaultPostMatchReturnPolicy
+            when (returnPolicy) {
                 PostMatchReturnPolicy.PROMPT -> {
                     if (!moveLocalPlayersToLobby(match, session, arena)) {
                         scheduleFinalization(match, session, 20L)
@@ -1936,18 +1963,22 @@ class DuelSessionManager internal constructor(
         hideMatchDisplay(session)
         sessions.remove(match.id, session)
         session.participantIds.forEach { sessionByPlayer.remove(it, match.id) }
-        runCatching { coordinator.releaseCompleted(match.id) }
+        runCatching { releaseGameplayResources(match) }
             .onSuccess { released ->
                 DuelLog.info("match-released", match.id, "released={}", released)
                 if (released) {
-                    completionListeners.forEach { listener ->
+                    val listeners = if (match.state == MatchState.CANCELLED) cancellationListeners else completionListeners
+                    listeners.forEach { listener ->
                         runCatching { listener(match) }
-                            .onFailure { plugin.logger.warning("Duel completion listener failed for ${match.id}: ${it.message}") }
+                            .onFailure { plugin.logger.warning("Duel terminal listener failed for ${match.id}: ${it.message}") }
                     }
                 }
             }
-            .onFailure { plugin.logger.severe("Could not release completed duel ${match.id}: ${it.message}") }
+            .onFailure { plugin.logger.severe("Could not release terminated duel ${match.id}: ${it.message}") }
     }
+
+    private fun releaseGameplayResources(match: DuelMatch): Boolean =
+        if (match.state == MatchState.CANCELLED) coordinator.releaseCancelled(match.id) else coordinator.releaseCompleted(match.id)
 
     private fun showFinaleDisplay(match: DuelMatch, session: PaperSession, winner: PlayerId) {
         participants(match).forEach { player ->
@@ -1990,7 +2021,7 @@ class DuelSessionManager internal constructor(
         session: PaperSession,
         playerIds: Set<UUID> = session.participantIds,
     ) {
-        if (!session.returnDestinationReady) return
+        if (match.state != MatchState.COMPLETED || !session.returnDestinationReady) return
         playerIds.forEach { playerId ->
             if (sessionByPlayer[playerId]?.let { it != match.id } == true || playerId in preparingPlayers) return@forEach
             if (session.playerStateMode != PlayerStateMode.DISPOSABLE && playerId !in session.retainedPlayers) return@forEach
@@ -2252,7 +2283,7 @@ class DuelSessionManager internal constructor(
     ) {
         val session = sessions[matchId] ?: return
         session.restoredPlayers += playerId
-        coordinator.find(matchId)?.takeIf { it.state == MatchState.COMPLETED }?.let(::finish)
+        coordinator.find(matchId)?.takeIf { it.state in setOf(MatchState.COMPLETED, MatchState.CANCELLED) }?.let(::finish)
     }
 
     private fun restoreAndRetain(

@@ -51,8 +51,8 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
                 ),
             )
             repository = openRepository("arcduels-it")
-            repository.migrate().get().appliedVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
+            repository.migrate().get().appliedVersions shouldContainExactly (1..10).toList()
+            repository.migrate().get().existingVersions shouldContainExactly (1..10).toList()
         }
 
         afterSpec {

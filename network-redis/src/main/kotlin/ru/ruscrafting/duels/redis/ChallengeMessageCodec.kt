@@ -19,6 +19,7 @@ import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.ServerId
 import java.time.Instant
+import java.math.BigDecimal
 import java.util.UUID
 
 internal class ChallengeMessageCodec(
@@ -34,7 +35,9 @@ internal class ChallengeMessageCodec(
             ),
             bounds = JsonResourceBounds(MAX_MESSAGE_CHARACTERS, maxStringCharacters = 160),
             validate = { wire ->
-                require(wire.version == WIRE_VERSION) { "Unsupported challenge wire version ${wire.version}" }
+                require(wire.version in 5..WIRE_VERSION) { "Unsupported challenge wire version ${wire.version}" }
+                require(wire.version != 5 || wire.stakeMinor == null) { "Legacy challenges cannot carry a stake" }
+                require(wire.version != 6 || wire.stakeMinor != null) { "Wager terms are required" }
                 require(wire.messageId.matches(MESSAGE_ID_PATTERN)) { "Unsafe challenge message id" }
                 ServerId(wire.sourceServer)
                 require(wire.type.length in 1..32) { "Unsafe challenge message type" }
@@ -45,6 +48,7 @@ internal class ChallengeMessageCodec(
     override fun encode(value: CrossServerChallengeMessage): String =
         wireCodec.encode(
             WireMessage(
+                version = if (value.challenge.rules.stakeMinor == 0L) 5 else WIRE_VERSION,
                 type = value.type.name,
                 messageId = value.messageId,
                 sourceServer = value.sourceServer.value,
@@ -69,6 +73,7 @@ internal class ChallengeMessageCodec(
                 kitId = value.challenge.rules.kitId?.value,
                 ranked = value.challenge.rules.ranked,
                 bestOf = value.challenge.rules.bestOf,
+                stakeMinor = value.challenge.rules.stakeMinor.takeIf { it > 0L }?.let(BigDecimal::valueOf),
                 objective = value.challenge.rules.objective.name,
                 projectiles = value.challenge.rules.modifiers.projectiles,
                 consumables = value.challenge.rules.modifiers.consumables,
@@ -89,6 +94,7 @@ internal class ChallengeMessageCodec(
                 kitId = wire.kitId?.let(::KitId),
                 ranked = wire.ranked,
                 bestOf = wire.bestOf,
+                stakeMinor = wire.stakeMinor?.longValueExact() ?: 0L,
                 objective = DuelObjectiveType.valueOf(wire.objective),
                 modifiers =
                     CombatModifiers(
@@ -157,6 +163,7 @@ internal class ChallengeMessageCodec(
         val kitId: String?,
         val ranked: Boolean,
         val bestOf: Int,
+        val stakeMinor: BigDecimal? = null,
         val objective: String,
         val projectiles: Boolean,
         val consumables: Boolean,
@@ -169,7 +176,7 @@ internal class ChallengeMessageCodec(
     )
 
     private companion object {
-        const val WIRE_VERSION = 5
+        const val WIRE_VERSION = 6
         const val MAX_MESSAGE_CHARACTERS = 16_384
         val MESSAGE_ID_PATTERN = Regex("[A-Za-z0-9:._-]{1,160}")
         val WIRE_FIELDS =
@@ -199,6 +206,7 @@ internal class ChallengeMessageCodec(
                 "kitId",
                 "ranked",
                 "bestOf",
+                "stakeMinor",
                 "objective",
                 "projectiles",
                 "consumables",
@@ -213,6 +221,7 @@ internal class ChallengeMessageCodec(
             WIRE_FIELDS -
                 setOf(
                     "recoveryMatchId",
+                    "stakeMinor",
                     "matchServer",
                     "selectedArenaServer",
                     "selectedArenaId",

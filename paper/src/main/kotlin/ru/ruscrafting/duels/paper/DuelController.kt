@@ -19,6 +19,8 @@ import ru.ruscrafting.duels.domain.DuelMatch
 import ru.ruscrafting.duels.domain.DuelMode
 import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
+import ru.ruscrafting.duels.domain.DuelWagerService
+import ru.ruscrafting.duels.domain.WagerPrepareResult
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MatchId
 import ru.ruscrafting.duels.domain.PlayerId
@@ -65,6 +67,8 @@ class DuelController(
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val playerStateMode: PlayerStateMode = PlayerStateMode.PRESERVE,
     private val preferredArenaSelection: () -> ArenaSelection? = { null },
+    private val wagers: DuelWagerService? = null,
+    private val wagersReady: () -> Boolean = { true },
 ) : AutoCloseable {
     @Volatile private var closed = false
     private val contexts = ConcurrentHashMap<ChallengeId, ChallengeContext>()
@@ -76,6 +80,9 @@ class DuelController(
     private val transferFailureNotifications = ConcurrentHashMap.newKeySet<Pair<ChallengeId, PlayerId>>()
     private val originSnapshots = ConcurrentHashMap<Pair<ChallengeId, PlayerId>, java.util.concurrent.CompletableFuture<Unit>>()
     private val networkPendingPlayers = ConcurrentHashMap.newKeySet<PlayerId>()
+    private val fundingChallenges = ConcurrentHashMap<ChallengeId, DuelChallenge>()
+    private val wagerStarts = ConcurrentHashMap.newKeySet<ChallengeId>()
+    private val cancelledFunding = ConcurrentHashMap.newKeySet<ChallengeId>()
     private val returnRoutes = ConcurrentHashMap<MatchId, ReturnRoutes>()
     private val returnTasks = ConcurrentHashMap<MatchId, BukkitTask>()
     private val returnRequests = ConcurrentHashMap.newKeySet<Pair<MatchId, PlayerId>>()
@@ -83,6 +90,7 @@ class DuelController(
     private val returnOffers = ConcurrentHashMap<PlayerId, ReturnOffer>()
     private val networkSubscription = challengeBus?.subscribe(::onNetworkMessage)
     private val completionSubscription = sessions.onCompleted(::onMatchCompleted)
+    private val cancellationSubscription = sessions.onCancelled(::onMatchCancelled)
     private val recoverySubscription = sessions.onRecovered(::onRecoveredMatch)
     private val playerComponents = DuelPlayerComponents(statistics, locales)
 
@@ -121,6 +129,10 @@ class DuelController(
         arenaSelection: ArenaSelection?,
         recoveryMatchId: MatchId?,
     ) {
+        if (rules.stakeMinor > 0L && (wagers == null || !wagersReady())) {
+            challenger.sendMessage(locales.notice(challenger, "wager.unavailable"))
+            return
+        }
         DuelLog.debug(
             "challenge-request",
             challenger,
@@ -330,9 +342,14 @@ class DuelController(
     }
 
     fun leave(player: Player) {
+        if (cancelWagerPreparation(player)) {
+            player.sendMessage(locales.notice(player, "wager.cancelled"))
+            return
+        }
         DuelLog.info("leave-request", sessions.matchFor(player)?.id, player, "player={}", player.name)
+        val beforeStakedCombat = sessions.matchFor(player)?.let { it.rules.stakeMinor > 0L && it.startedAt == null } == true
         if (sessions.handleForfeit(player)) {
-            player.sendMessage(locales.notice(player, "controller.forfeit"))
+            player.sendMessage(locales.notice(player, if (beforeStakedCombat) "wager.cancelled" else "controller.forfeit"))
         } else {
             player.sendMessage(locales.notice(player, "controller.not-fighting"))
         }
@@ -370,7 +387,15 @@ class DuelController(
     }
 
     fun handleQuit(player: Player) {
+        cancelWagerPreparation(player)
         returnOffers.remove(PlayerId(player.uniqueId))
+    }
+
+    private fun cancelWagerPreparation(player: Player): Boolean {
+        val id = PlayerId(player.uniqueId)
+        val challenge = fundingChallenges.values.firstOrNull { it.challenger == id || it.target == id } ?: return false
+        cancelledFunding += challenge.id
+        return true
     }
 
     fun showStatistics(
@@ -406,6 +431,7 @@ class DuelController(
     fun rematch(
         player: Player,
         matchId: MatchId? = null,
+        confirmedStake: Boolean = false,
     ) {
         val playerId = PlayerId(player.uniqueId)
         val lookup =
@@ -467,6 +493,18 @@ class DuelController(
                     )
                     return@runSync
                 }
+                if (outcome.stakeMinor > 0L && !confirmedStake) {
+                    val terms = locales.component(
+                        player,
+                        "wager.offer",
+                        LocaleService.component("stake", wagerAmountComponent(outcome.stakeMinor)),
+                        LocaleService.component("pot", wagerAmountComponent(outcome.stakeMinor * 2)),
+                    )
+                    val confirm = locales.component(player, "controller.rematch-action")
+                        .clickEvent(ClickEvent.runCommand("/duel rematch ${outcome.matchId} confirm"))
+                    player.sendMessage(locales.frameNotice(player, terms.append(Component.newline()).append(confirm)))
+                    return@runSync
+                }
                 val pending =
                     challenges.pendingFor(playerId).firstOrNull { challenge ->
                         setOf(challenge.challenger, challenge.target) == setOf(playerId, opponentId) &&
@@ -519,6 +557,7 @@ class DuelController(
         closed = true
         networkSubscription?.close()
         completionSubscription.close()
+        cancellationSubscription.close()
         recoverySubscription.close()
         acceptedTasks.values.forEach(BukkitTask::cancel)
         challengeExpiryTasks.values.forEach(BukkitTask::cancel)
@@ -537,6 +576,9 @@ class DuelController(
         returnOffers.clear()
         returnRoutes.clear()
         contexts.clear()
+        fundingChallenges.clear()
+        cancelledFunding.clear()
+        wagerStarts.clear()
     }
 
     private fun onNetworkMessage(message: CrossServerChallengeMessage) {
@@ -881,6 +923,52 @@ class DuelController(
         challenge: DuelChallenge,
         networkMessage: CrossServerChallengeMessage? = null,
     ) {
+        if (challenge.rules.stakeMinor == 0L) {
+            startFundedLocal(challenge, networkMessage)
+            return
+        }
+        if (!wagerStarts.add(challenge.id)) return
+        val money = wagers
+        if (money == null || !wagersReady()) {
+            wagerStarts.remove(challenge.id)
+            rejectWagerStart(challenge, networkMessage, "wager.unavailable")
+            return
+        }
+        if (fundingChallenges.putIfAbsent(challenge.id, challenge) != null) return
+        networkPendingPlayers += challenge.challenger
+        networkPendingPlayers += challenge.target
+        money.prepare(challenge).whenComplete { prepared, failure ->
+            runSync {
+                fundingChallenges.remove(challenge.id)
+                networkPendingPlayers -= challenge.challenger
+                networkPendingPlayers -= challenge.target
+                val cancelled = cancelledFunding.remove(challenge.id) || participants(challenge).size != 2
+                if (failure != null || prepared !is WagerPrepareResult.Ready || cancelled) {
+                    money.settle(MatchId(challenge.id.value), null).whenComplete { _, _ -> wagerStarts.remove(challenge.id) }
+                    val key = when {
+                        cancelled -> "wager.cancelled"
+                        prepared is WagerPrepareResult.Rejected && prepared.reason == "insufficient_funds" -> "wager.insufficient"
+                        else -> "wager.failed"
+                    }
+                    rejectWagerStart(challenge, networkMessage, key)
+                    return@runSync
+                }
+                startFundedLocal(challenge, networkMessage)
+            }
+        }
+    }
+
+    private fun rejectWagerStart(challenge: DuelChallenge, networkMessage: CrossServerChallengeMessage?, key: String) {
+        participants(challenge).forEach { it.sendMessage(locales.notice(it, key)) }
+        networkMessage?.let {
+            returnAcceptedPlayers(AcceptedMatch(challenge, requireNotNull(it.matchServer), it, clock.millis()))
+        }
+    }
+
+    private fun startFundedLocal(
+        challenge: DuelChallenge,
+        networkMessage: CrossServerChallengeMessage?,
+    ) {
         // Capture alongside DuelSessionManager.start/startNetwork. Completion may wait on durable
         // storage, player transfer, or teleports while a newer config generation is published.
         val capturedSettings = runtimeSettings()
@@ -920,6 +1008,8 @@ class DuelController(
             .whenComplete { match, failure ->
                 runSync {
                     if (failure != null) {
+                        if (challenge.rules.stakeMinor > 0L) wagers?.settle(MatchId(challenge.id.value), null)
+                            ?.whenComplete { _, _ -> wagerStarts.remove(challenge.id) }
                         val cause = unwrap(failure)
                         DuelLog.warn(
                             "match-start-failed",
@@ -1078,6 +1168,7 @@ class DuelController(
         }
 
     private fun onMatchCompleted(match: DuelMatch) {
+        wagerStarts.remove(ChallengeId(match.id.value))
         val routes = returnRoutes.remove(match.id)
         val effectiveReturnPolicy =
             arenaReturnPolicy(match.arenaId) ?: routes?.returnPolicy
@@ -1097,6 +1188,16 @@ class DuelController(
         if (effectiveReturnPolicy == PostMatchReturnPolicy.PROMPT) {
             return
         }
+        startAutomaticReturn(match, routes)
+    }
+
+    private fun onMatchCancelled(match: DuelMatch) {
+        wagerStarts.remove(ChallengeId(match.id.value))
+        val routes = returnRoutes.remove(match.id) ?: return
+        startAutomaticReturn(match, routes)
+    }
+
+    private fun startAutomaticReturn(match: DuelMatch, routes: ReturnRoutes) {
         val deadline = clock.millis() + routes.automaticReturnTimeout.toMillis()
         val task =
             plugin.server.scheduler.runTaskTimer(
@@ -1524,7 +1625,15 @@ class DuelController(
             locales.component(recipient, "controller.deny")
                 .clickEvent(ClickEvent.runCommand("/duel deny ${challenge.id}"))
                 .hoverEvent(HoverEvent.showText(locales.component(recipient, "controller.deny-hover")))
-        return locales.frameNotice(recipient, prefix.append(accept).append(deny))
+        val stake = if (challenge.rules.stakeMinor > 0L) {
+            Component.newline().append(locales.component(
+                recipient,
+                "wager.offer",
+                LocaleService.component("stake", wagerAmountComponent(challenge.rules.stakeMinor)),
+                LocaleService.component("pot", wagerAmountComponent(challenge.rules.stakeMinor * 2)),
+            ))
+        } else Component.empty()
+        return locales.frameNotice(recipient, prefix.append(stake).append(accept).append(deny))
     }
 
     private fun resolveName(playerId: PlayerId): String =

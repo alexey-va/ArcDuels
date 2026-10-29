@@ -49,7 +49,7 @@ class DuelCommand internal constructor(
                 val id = parseOptionalChallengeId(args, player) ?: if (args.size > 1) return true else null
                 controller.deny(player, id)
             }
-            "cancel", "отмена" -> controller.cancel(player)
+            "cancel", "отмена" -> if (!gui.cancelStakeInput(player)) controller.cancel(player)
             "leave", "покинуть" -> controller.leave(player)
             "return", "вернуться" -> controller.returnToOrigin(player)
             "stats", "статы" -> {
@@ -74,7 +74,7 @@ class DuelCommand internal constructor(
                             .onFailure { player.sendMessage(message(player, "error.invalid-match-id", "<red>Invalid match identifier.</red>")) }
                             .getOrNull() ?: return true
                     }
-                controller.rematch(player, matchId)
+                controller.rematch(player, matchId, confirmedStake = args.getOrNull(2) == "confirm")
             }
             else -> {
                 val target = resolveTarget(player, args[0])

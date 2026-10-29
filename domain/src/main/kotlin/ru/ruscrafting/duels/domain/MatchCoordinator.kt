@@ -11,6 +11,8 @@ class MatchCoordinator(
     private val statistics: StatisticsRepository,
     private val eventPublisher: DuelEventPublisher = NoOpDuelEventPublisher,
     private val clock: Clock = Clock.systemUTC(),
+    /** Nonblocking observer; completed matches are reported only after their durable result commits. */
+    private val onTerminated: (DuelMatch) -> Unit = {},
 ) {
     private val lock = Any()
     private val matches = ConcurrentHashMap<MatchId, DuelMatch>()
@@ -18,6 +20,11 @@ class MatchCoordinator(
     private val pendingPlayers = ConcurrentHashMap<PlayerId, Any>()
     private val pendingMatchIds = ConcurrentHashMap<MatchId, Any>()
     private val reservations = ConcurrentHashMap<MatchId, ArenaReservation>()
+    private val completionWrites = ConcurrentHashMap.newKeySet<CompletableFuture<DuelMatch>>()
+
+    /** Call after gameplay admission stops; observes completion writes and their terminal callbacks. */
+    fun drainCompletions(): CompletableFuture<Unit> =
+        CompletableFuture.allOf(*completionWrites.toTypedArray()).handle { _, _ -> Unit }
 
     fun reserve(
         firstPlayer: PlayerId,
@@ -165,9 +172,22 @@ class MatchCoordinator(
     fun cancel(
         matchId: MatchId,
         reason: MatchEndReason,
+    ): DuelMatch = cancel(matchId, reason, releaseResources = true)
+
+    /** Cancels once while retaining player and arena ownership until platform cleanup finishes. */
+    fun cancelRetainingResources(
+        matchId: MatchId,
+        reason: MatchEndReason,
+    ): DuelMatch = cancel(matchId, reason, releaseResources = false)
+
+    private fun cancel(
+        matchId: MatchId,
+        reason: MatchEndReason,
+        releaseResources: Boolean,
     ): DuelMatch {
         val cancelled = update(matchId) { it.cancel(clock.instant(), reason) }
-        release(cancelled)
+        if (releaseResources) release(cancelled)
+        onTerminated(cancelled)
         return cancelled
     }
 
@@ -199,8 +219,9 @@ class MatchCoordinator(
                 winnerScore = if (winner == match.firstPlayer) match.score.first else match.score.second,
                 loserScore = if (winner == match.firstPlayer) match.score.second else match.score.first,
                 endReason = requireNotNull(match.endReason),
+                stakeMinor = match.rules.stakeMinor,
             )
-        return statistics.record(outcome).thenApply { persisted ->
+        val write = statistics.record(outcome).thenApply { persisted ->
             val (completed, firstCompletion) =
                 synchronized(lock) {
                     val current = getRequired(match.id)
@@ -210,9 +231,15 @@ class MatchCoordinator(
                         current.markPersisted().also { matches[it.id] = it } to true
                     }
                 }
-            if (firstCompletion) publishCompletion(completed, persisted)
+            if (firstCompletion) {
+                onTerminated(completed)
+                publishCompletion(completed, persisted)
+            }
             completed
         }
+        completionWrites += write
+        write.whenComplete { _, _ -> completionWrites -= write }
+        return write
     }
 
     /**
@@ -223,6 +250,14 @@ class MatchCoordinator(
         synchronized(lock) {
             val match = matches[matchId] ?: return@synchronized false
             check(match.state == MatchState.COMPLETED) { "Only a completed match can release gameplay resources" }
+            releaseLocked(match)
+        }
+
+    /** Releases a retained cancellation only after native player and arena cleanup. */
+    fun releaseCancelled(matchId: MatchId): Boolean =
+        synchronized(lock) {
+            val match = matches[matchId] ?: return@synchronized false
+            check(match.state == MatchState.CANCELLED) { "Only a cancelled match can release cancelled gameplay resources" }
             releaseLocked(match)
         }
 
@@ -289,6 +324,7 @@ class MatchCoordinator(
                 val cancelled = match.cancel(clock.instant(), MatchEndReason.ADMIN_CANCEL)
                 matches[match.id] = cancelled
                 releaseLocked(cancelled)
+                onTerminated(cancelled)
             }
         }
     }

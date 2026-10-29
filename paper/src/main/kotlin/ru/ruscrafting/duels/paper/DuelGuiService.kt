@@ -13,6 +13,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.inventory.InventoryCloseEvent
+import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.ItemFlag
 import org.bukkit.inventory.ItemStack
@@ -32,6 +33,7 @@ import ru.ruscrafting.duels.domain.DuelObjectiveType
 import ru.ruscrafting.duels.domain.DuelRules
 import ru.ruscrafting.duels.domain.KitId
 import ru.ruscrafting.duels.domain.MAX_DUEL_PRESETS
+import ru.ruscrafting.duels.domain.MAX_DUEL_STAKE_MINOR
 import ru.ruscrafting.duels.domain.PlayerId
 import ru.ruscrafting.duels.domain.RecordedMatch
 import ru.ruscrafting.duels.domain.ServerId
@@ -65,9 +67,11 @@ class DuelGuiService internal constructor(
     private val runtimeSettings: () -> ArcDuelsRuntimeSettings? = { null },
     private val clock: Clock = Clock.systemUTC(),
     private val startupServerId: ServerId = ServerId(plugin.config.getString("server-id", plugin.server.name)!!),
+    private val wagersAvailable: () -> Boolean = { true },
 ) : Listener, AutoCloseable {
     @Volatile private var closed = false
     private val pendingArenaNames = ConcurrentHashMap<UUID, PendingArenaName>()
+    private val pendingStakes = ConcurrentHashMap<UUID, PendingStake>()
     private val asyncMenuRequests = LatestRequestTracker()
     private val menuRuntimeDelegate = lazy { PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuLayouts.current()) }
     private val menuRuntime by menuRuntimeDelegate
@@ -77,7 +81,7 @@ class DuelGuiService internal constructor(
 
     /** Visible menus that retain kit or arena ids from one catalog generation. */
     internal fun activeConfigurationFlowCount(): Int =
-        plugin.server.onlinePlayers.count { player ->
+        pendingStakes.size + plugin.server.onlinePlayers.count { player ->
             val holder = activeFrames[player.uniqueId] ?: return@count false
             if (menuRuntime.session(player) == null) return@count false
             when (holder) {
@@ -577,8 +581,31 @@ class DuelGuiService internal constructor(
         if (draft.objective == DuelObjectiveType.KING_OF_THE_HILL) {
             inventory.setItem(31, item(player, Material.BEACON, "menu.rules.capture", "menu.rules.capture-lore", LocaleService.text("seconds", draft.modifiers.kingOfTheHillCaptureSeconds)))
         }
+        val stake = LocaleService.component("stake", wagerAmountComponent(draft.stakeMinor))
+        val pot = LocaleService.component("pot", wagerAmountComponent(draft.stakeMinor * 2))
+        val available = wagersAvailable()
+        inventory.setItem(
+            STAKE_SLOT,
+            item(
+                player,
+                Material.GOLD_NUGGET,
+                if (draft.stakeMinor > 0) "menu.rules.stake" else "menu.rules.stake-free",
+                when {
+                    !available -> "menu.rules.stake-unavailable-lore"
+                    draft.stakeMinor > 0 -> "menu.rules.stake-lore"
+                    else -> "menu.rules.stake-free-lore"
+                },
+                stake,
+                pot,
+            ),
+        )
         inventory.setItem(38, item(player, Material.ENCHANTED_BOOK, "menu.rules.presets", "menu.rules.presets-lore"))
-        inventory.setItem(40, roleItem(player, "confirm", Material.LIME_CONCRETE, "menu.rules.confirm", "menu.rules.confirm-lore"))
+        val confirmKey = when {
+            draft.stakeMinor == 0L -> "menu.rules.confirm"
+            available -> "menu.rules.confirm-wager"
+            else -> "menu.rules.confirm-unavailable"
+        }
+        inventory.setItem(40, roleItem(player, "confirm", Material.LIME_CONCRETE, confirmKey, "$confirmKey-lore", stake, pot))
         inventory.setItem(BACK_SLOT, roleItem(player, "back", Material.BLUE_STAINED_GLASS_PANE, "menu.common.back"))
         show(player, inventory)
     }
@@ -709,7 +736,7 @@ class DuelGuiService internal constructor(
                     }
                 openRules(player, DuelDraft(target, holder.objective, mode, kit, modifiers = modifiers))
             }
-            is RulesMenuHolder -> handleRulesClick(player, holder.draft, slot)
+            is RulesMenuHolder -> handleRulesClick(player, holder.draft, slot, rightClick)
             is ArenaMenuHolder -> when (slot) {
                 BACK_SLOT -> openRules(player, holder.draft)
                 PREVIOUS_SLOT -> if (holder.hasPrevious) openArenas(player, holder.draft, holder.page - 1)
@@ -816,8 +843,73 @@ class DuelGuiService internal constructor(
     }
 
     @EventHandler
+    fun onStakeInput(event: AsyncChatEvent) {
+        val player = event.player
+        val pending = pendingStakes[player.uniqueId] ?: return
+        event.isCancelled = true
+        val raw = PlainTextComponentSerializer.plainText().serialize(event.message()).trim()
+        runSync {
+            if (!player.isOnline || pendingStakes[player.uniqueId] !== pending) return@runSync
+            if (!clock.instant().isBefore(pending.expiresAt)) {
+                finishStakeInput(player, pending, "wager.input-timeout")
+                return@runSync
+            }
+            if (raw.equals("cancel", true) || raw.equals("отмена", true)) {
+                cancelStakeInput(player)
+                return@runSync
+            }
+            val stakeMinor = parseDuelStakeMinor(raw)
+            if (stakeMinor == null) {
+                player.sendMessage(locales.notice(player, "wager.input-invalid", LocaleService.component("maximum", wagerAmountComponent(MAX_DUEL_STAKE_MINOR))))
+                return@runSync
+            }
+            if (stakeMinor > 0 && !wagersAvailable()) {
+                finishStakeInput(player, pending, "wager.unavailable")
+                return@runSync
+            }
+            if (pendingStakes.remove(player.uniqueId, pending)) openRules(player, pending.draft.copy(stakeMinor = stakeMinor))
+        }
+    }
+
+    /** Cancels only a pending amount entry; ordinary challenge cancellation remains with the controller. */
+    fun cancelStakeInput(player: Player): Boolean {
+        val pending = pendingStakes[player.uniqueId] ?: return false
+        finishStakeInput(player, pending, "wager.input-cancelled")
+        return true
+    }
+
+    private fun finishStakeInput(player: Player, pending: PendingStake, noticeKey: String) {
+        if (!pendingStakes.remove(player.uniqueId, pending)) return
+        player.sendActionBar(locales.component(player, noticeKey))
+        openRules(player, pending.draft)
+    }
+
+    private fun promptStake(player: Player, draft: DuelDraft) {
+        if (!wagersAvailable()) {
+            player.sendActionBar(locales.component(player, "wager.unavailable"))
+            return
+        }
+        pendingArenaNames.remove(player.uniqueId)
+        player.closeInventory()
+        val pending = PendingStake(draft, clock.instant().plus(STAKE_INPUT_TIMEOUT))
+        pendingStakes[player.uniqueId] = pending
+        player.sendMessage(locales.notice(
+            player,
+            "wager.input-prompt",
+            LocaleService.component("maximum", wagerAmountComponent(MAX_DUEL_STAKE_MINOR)),
+            LocaleService.text("seconds", STAKE_INPUT_TIMEOUT.seconds),
+        ))
+        plugin.server.scheduler.runTaskLater(plugin, Runnable {
+            if (!closed && player.isOnline && !clock.instant().isBefore(pending.expiresAt)) {
+                finishStakeInput(player, pending, "wager.input-timeout")
+            }
+        }, STAKE_INPUT_TIMEOUT.toMillis() / MILLIS_PER_TICK)
+    }
+
+    @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         pendingArenaNames.remove(event.player.uniqueId)
+        pendingStakes.remove(event.player.uniqueId)
         asyncMenuRequests.invalidate(event.player.uniqueId)
         activeFrames.remove(event.player.uniqueId)
         activeContents.remove(event.player.uniqueId)
@@ -825,8 +917,14 @@ class DuelGuiService internal constructor(
 
     @EventHandler
     fun onClose(event: InventoryCloseEvent) {
+        pendingStakes.remove(event.player.uniqueId)
         if (activeFrames.remove(event.player.uniqueId) != null) asyncMenuRequests.invalidate(event.player.uniqueId)
         activeContents.remove(event.player.uniqueId)
+    }
+
+    @EventHandler
+    fun onOpen(event: InventoryOpenEvent) {
+        pendingStakes.remove(event.player.uniqueId)
     }
 
     private fun promptArenaName(player: Player) {
@@ -905,7 +1003,7 @@ class DuelGuiService internal constructor(
 
     private fun decimal(value: Double): String = "%.1f".format(java.util.Locale.ROOT, value)
 
-    private fun handleRulesClick(player: Player, draft: DuelDraft, slot: Int) {
+    private fun handleRulesClick(player: Player, draft: DuelDraft, slot: Int, rightClick: Boolean) {
         when (slot) {
             BACK_SLOT -> targets.find(draft.target.uniqueId)?.let { openLoadouts(player, it, draft.objective) }
                 ?: run { player.closeInventory(); player.sendMessage(locales.notice(player, "error.player-left")) }
@@ -921,9 +1019,15 @@ class DuelGuiService internal constructor(
             21 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(consumables = !draft.modifiers.consumables)))
             23 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(enderPearls = !draft.modifiers.enderPearls)))
             25 -> if (!draft.objective.isHitRace) openRules(player, draft.copy(modifiers = draft.modifiers.copy(naturalRegeneration = !draft.modifiers.naturalRegeneration)))
+            STAKE_SLOT -> if (rightClick) openRules(player, draft.copy(stakeMinor = 0)) else promptStake(player, draft)
             31 -> if (draft.objective == DuelObjectiveType.KING_OF_THE_HILL) openRules(player, draft.copy(modifiers = draft.modifiers.copy(kingOfTheHillCaptureSeconds = nextOf(draft.modifiers.kingOfTheHillCaptureSeconds, listOf(10, 15, 30, 45)))))
             38 -> openPresets(player, draft)
             40 -> {
+                if (draft.stakeMinor > 0 && !wagersAvailable()) {
+                    player.sendActionBar(locales.component(player, "wager.unavailable"))
+                    openRules(player, draft)
+                    return
+                }
                 val target = targets.find(draft.target.uniqueId)
                 player.closeInventory()
                 if (target == null) player.sendMessage(locales.notice(player, "error.player-left"))
@@ -967,7 +1071,9 @@ class DuelGuiService internal constructor(
                 LocaleService.text("time", HISTORY_TIME_FORMAT.format(match.outcome.completedAt.atZone(ZoneId.systemDefault()))),
                 LocaleService.component("reason", locales.component(player, "menu.history.reason.${match.outcome.endReason.name.lowercase()}")),
                 LocaleService.text("rating", match.ratingAfter(playerId)),
-            ),
+            ).toMutableList().apply {
+                add(minOf(3, size), locales.component(player, "wager.summary", LocaleService.component("stake", wagerAmountComponent(rules.stakeMinor))))
+            },
         )
     }
 
@@ -1004,7 +1110,9 @@ class DuelGuiService internal constructor(
                 LocaleService.text("bestof", preset.rules.bestOf),
                 LocaleService.text("arena", arena),
                 LocaleService.component("state", status),
-            ) + locales.lines(player, interactions)
+            ).toMutableList().apply {
+                add(minOf(3, size), locales.component(player, "wager.summary", LocaleService.component("stake", wagerAmountComponent(preset.rules.stakeMinor))))
+            } + locales.lines(player, interactions)
         val material =
             when (availability) {
                 PresetAvailability.READY -> Material.ENCHANTED_BOOK
@@ -1112,6 +1220,7 @@ class DuelGuiService internal constructor(
                 bestOf = preset.rules.bestOf,
                 modifiers = preset.rules.modifiers,
                 arenaSelection = preset.arenaSelection,
+                stakeMinor = preset.rules.stakeMinor,
             ),
         )
     }
@@ -1169,6 +1278,7 @@ class DuelGuiService internal constructor(
     }
 
     private fun show(player: Player, frame: PaperMenuFrame) {
+        pendingStakes.remove(player.uniqueId)
         val holder = requireNotNull(frameHolders.remove(frame)) { "Duel menu frame has no state holder" }
         val rendered = frame.content { slot, context ->
             handleClick(context.player, holder, slot, context.event.isShiftClick, context.event.isRightClick)
@@ -1191,6 +1301,7 @@ class DuelGuiService internal constructor(
     }
 
     fun replaceMenus(candidate: PaperMenuConfiguration) {
+        pendingStakes.clear()
         menuLayouts.replace(candidate)
         frameHolders.clear()
         activeFrames.clear()
@@ -1199,6 +1310,8 @@ class DuelGuiService internal constructor(
 
     override fun close() {
         closed = true
+        pendingArenaNames.clear()
+        pendingStakes.clear()
         frameHolders.clear()
         activeFrames.clear()
         activeContents.clear()
@@ -1313,6 +1426,7 @@ class DuelGuiService internal constructor(
     private class AdminArenaObjectivesHolder(val arenaId: String) : MenuHolder(ArcDuelsMenuScreen.ADMIN_OBJECTIVES) { val objectives = mutableMapOf<Int, DuelObjectiveType>() }
     private class RecoveryMenuHolder(val page: Int, val hasPrevious: Boolean, val hasNext: Boolean) : MenuHolder(ArcDuelsMenuScreen.RECOVERY) { val players = mutableMapOf<Int, UUID>() }
     private class PendingArenaName(val expiresAt: Instant)
+    private class PendingStake(val draft: DuelDraft, val expiresAt: Instant)
     private enum class CatalogType { MODES, KITS, QUEUE }
     private enum class MenuBack { MAIN }
     private enum class PresetAvailability { READY, ARENA_MISSING, KIT_MISSING }
@@ -1326,8 +1440,10 @@ class DuelGuiService internal constructor(
         const val NEXT_SLOT = 43
         const val ADMIN_PERMISSION = "arcduels.admin"
         const val ARENA_AUTO_SLOT = 10
+        const val STAKE_SLOT = 29
         const val MILLIS_PER_TICK = 50L
         val DEFAULT_ARENA_NAME_TIMEOUT: Duration = Duration.ofSeconds(60)
+        val STAKE_INPUT_TIMEOUT: Duration = Duration.ofSeconds(60)
         val COORDINATE_KEYS = listOf("x", "y", "z")
         val CONTENT_SLOTS = listOf(10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34)
         val PRESET_GUI_SLOTS = (11 until 11 + MAX_DUEL_PRESETS).toList()
@@ -1393,8 +1509,9 @@ private data class DuelDraft(
     val bestOf: Int = 1,
     val modifiers: CombatModifiers = CombatModifiers(),
     val arenaSelection: ArenaSelection? = null,
+    val stakeMinor: Long = 0,
 ) {
-    fun rules(): DuelRules = DuelRules(mode, kitId, ranked, bestOf, objective, modifiers)
+    fun rules(): DuelRules = DuelRules(mode, kitId, ranked, bestOf, objective, modifiers, stakeMinor)
 }
 
 private fun nextOf(current: Int, values: List<Int>): Int = values[(values.indexOf(current).takeIf { it >= 0 } ?: -1).let { (it + 1) % values.size }]
