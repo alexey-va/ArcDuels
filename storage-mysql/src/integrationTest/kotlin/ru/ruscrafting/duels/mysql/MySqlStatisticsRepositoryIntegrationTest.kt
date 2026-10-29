@@ -397,7 +397,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             }
 
             repository.migrate().get().appliedVersions shouldContainExactly listOf(4)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
+            repository.migrate().get().existingVersions shouldContainExactly (1..MySqlDuelMigrations.CURRENT_VERSION).toList()
         }
 
         "history and preset migrations converge after ddl committed before journal" {
@@ -417,7 +417,7 @@ class MySqlStatisticsRepositoryIntegrationTest : StringSpec() {
             }
 
             repository.migrate().get().appliedVersions shouldContainExactly listOf(7, 8)
-            repository.migrate().get().existingVersions shouldContainExactly listOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
+            repository.migrate().get().existingVersions shouldContainExactly (1..MySqlDuelMigrations.CURRENT_VERSION).toList()
             repository.findMatch(MatchId(UUID.fromString("00000000-0000-0000-0000-000000000010"))).get()?.outcome?.let {
                 it.modifiers.projectiles shouldBe false
                 it.modifiers.consumables shouldBe false
